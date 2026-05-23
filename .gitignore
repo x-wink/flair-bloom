@@ -1,0 +1,35 @@
+# Rust
+target/
+**/*.rs.bk
+Cargo.lock
+
+# Node
+node_modules/
+dist/
+.pnpm-store/
+
+# Tauri
+src-tauri/target/
+*.app
+*.dmg
+*.deb
+*.AppImage
+*.msi
+*.exe
+
+# Env & secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code local config
+.claude/

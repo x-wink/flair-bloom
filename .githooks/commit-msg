@@ -1,0 +1,22 @@
+#!/bin/sh
+msg=$(cat "$1")
+
+# 允许 Merge / Revert 自动生成的提交
+echo "$msg" | grep -qE "^(Merge|Revert)" && exit 0
+
+pattern="^(feat|fix|docs|style|refactor|test|chore|ci|build|perf|revert)(\(.+\))?: .+"
+
+if ! echo "$msg" | grep -qE "$pattern"; then
+  echo ""
+  echo "✗ 提交信息不符合 Conventional Commits 规范"
+  echo ""
+  echo "  格式：type(scope): description"
+  echo "  类型：feat | fix | docs | style | refactor | test | chore | ci | build | perf | revert"
+  echo ""
+  echo "  示例："
+  echo "    feat(engine): 添加按压连发状态机"
+  echo "    fix(crypto): 修复 nonce 重复生成问题"
+  echo "    docs: 更新路线图"
+  echo ""
+  exit 1
+fi

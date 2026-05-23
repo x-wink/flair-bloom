@@ -1,0 +1,32 @@
+#!/bin/sh
+
+# Rust fmt + clippy（仅当有暂存的 .rs 文件时运行）
+if command -v cargo >/dev/null 2>&1; then
+  rs_files=$(git diff --cached --name-only --diff-filter=ACM | grep '\.rs$')
+  if [ -n "$rs_files" ]; then
+    echo "→ cargo fmt --check"
+    cargo fmt --check || {
+      echo "✗ Rust 格式检查失败，请运行 cargo fmt"
+      exit 1
+    }
+    echo "→ cargo clippy"
+    cargo clippy --all-targets --all-features -- -D warnings || {
+      echo "✗ Clippy 检查失败"
+      exit 1
+    }
+  fi
+fi
+
+# 前端 lint（仅当有暂存的 TS/JS 文件且 package.json 存在时运行）
+if command -v pnpm >/dev/null 2>&1 && [ -f "package.json" ]; then
+  ts_files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$')
+  if [ -n "$ts_files" ]; then
+    echo "→ pnpm lint"
+    pnpm lint || {
+      echo "✗ 前端 lint 检查失败，请运行 pnpm lint:fix"
+      exit 1
+    }
+  fi
+fi
+
+exit 0
