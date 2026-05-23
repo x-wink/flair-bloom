@@ -34,7 +34,7 @@ pub struct BurstRule {
     pub interval_ms: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum BurstMode {
     /// Fire while key is held.
