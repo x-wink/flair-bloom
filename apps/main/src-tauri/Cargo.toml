@@ -1,0 +1,26 @@
+[package]
+name = "flair-bloom"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "flair_bloom_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-store = "2"
+tauri-plugin-autostart = "2"
+tauri-plugin-global-shortcut = "2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+crypto = { path = "../../../packages/crypto" }
+qzh-format = { path = "../../../packages/qzh-format" }

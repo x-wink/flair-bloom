@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**气质花（Qizhi Hua）** — 面向游戏辅助的按键助手。基础功能免费，高级功能通过 Ed25519 离线兑换码激活。
+**气质花（FlairBloom）** — 面向游戏辅助的按键助手。基础功能免费，高级功能通过 Ed25519 离线兑换码激活。
 
 详细规划见 `docs/ROADMAP.md`，资源清单见 `docs/ASSETS.md`。
 
@@ -23,6 +23,7 @@ docs/
 ```
 
 脚手架完成后常用命令预期为：
+
 ```
 pnpm dev           # 启动 Tauri 开发模式
 pnpm build         # 构建所有产物
@@ -45,11 +46,11 @@ cargo test -p <crate>  # 运行指定 crate 的测试
 
 ## 输入约束（schema 校验层执行）
 
-| 参数 | 范围 |
-|------|------|
-| 连发间隔 | 10ms – 10000ms |
-| 单配置规则数 | ≤ 64 |
-| 宏序列步骤数 | ≤ 256 |
+| 参数         | 范围           |
+| ------------ | -------------- |
+| 连发间隔     | 10ms – 10000ms |
+| 单配置规则数 | ≤ 64           |
+| 宏序列步骤数 | ≤ 256          |
 
 ## 功能分层
 

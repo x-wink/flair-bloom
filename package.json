@@ -1,0 +1,16 @@
+{
+  "name": "flair-bloom",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter main tauri dev",
+    "build": "pnpm --filter main tauri build",
+    "lint": "oxlint apps/main/src",
+    "lint:fix": "oxlint --fix apps/main/src",
+    "format": "oxfmt apps/main/src",
+    "format:check": "oxfmt --check apps/main/src"
+  },
+  "devDependencies": {
+    "oxlint": "latest",
+    "oxfmt": "latest"
+  }
+}

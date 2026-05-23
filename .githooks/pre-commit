@@ -17,13 +17,18 @@ if command -v cargo >/dev/null 2>&1; then
   fi
 fi
 
-# 前端 lint（仅当有暂存的 TS/JS 文件且 package.json 存在时运行）
+# 前端 lint + format（仅当有暂存的 TS/JS 文件且 package.json 存在时运行）
 if command -v pnpm >/dev/null 2>&1 && [ -f "package.json" ]; then
   ts_files=$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx|js|jsx)$')
   if [ -n "$ts_files" ]; then
-    echo "→ pnpm lint"
+    echo "→ oxlint"
     pnpm lint || {
-      echo "✗ 前端 lint 检查失败，请运行 pnpm lint:fix"
+      echo "✗ lint 检查失败，请运行 pnpm lint:fix"
+      exit 1
+    }
+    echo "→ oxfmt --check"
+    pnpm format:check || {
+      echo "✗ 格式检查失败，请运行 pnpm format"
       exit 1
     }
   fi

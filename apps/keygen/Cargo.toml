@@ -1,0 +1,12 @@
+[package]
+name = "keygen"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "keygen"
+path = "src/main.rs"
+
+[dependencies]
+crypto = { path = "../../packages/crypto" }
+serde_json = { workspace = true }
