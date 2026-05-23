@@ -628,15 +628,16 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 **目标：** 能用，能更新，能收到用户反馈。
 
 **基础设施（一次性）**
-- [ ] Monorepo 初始化：根 `Cargo.toml`、`pnpm-workspace.yaml`、`packages/` 骨架
-- [ ] `apps/main` create-tauri-app，Vite 单页（仅 panel），`tauri.conf.json` 单窗口配置
-- [ ] `packages/crypto` 骨架（AES-256-GCM + HKDF，供 qzh-format 使用）
-- [ ] `packages/migrate` 骨架（`VersionedData` trait + `migrate()` 泛型函数）
-- [ ] `packages/qzh-format` 骨架（Profile 数据结构 + 加密读写 + `schema_version` 字段 + `migrate.rs` 迁移框架，依赖 `packages/migrate`）
+- [x] Monorepo 初始化：根 `Cargo.toml`、`pnpm-workspace.yaml`、`packages/` 骨架
+- [x] `apps/main` Tauri v2 + Vite 多页（panel），`tauri.conf.json` 单窗口配置
+- [x] `packages/crypto` 骨架（AES-256-GCM + HKDF + Ed25519 校验）
+- [x] `packages/migrate` 骨架（`run_migrations()` 泛型函数）
+- [x] `packages/qzh-format` 骨架（`Profile` / `BurstRule` 数据结构 + `FileHeader` + `migrate.rs`）
 - [ ] GitHub Actions `release.yml`：推 tag 触发矩阵构建（`windows-latest` / `macos-latest`）→ 签名 → 发布 GitHub Release
 - [ ] GitHub Secrets：`TAURI_SIGNING_PRIVATE_KEY`
-- [ ] `tauri.conf.json` updater endpoint 指向 GitHub Releases `latest.json`
-- [ ] `tauri-plugin-single-instance`（防重复启动）
+- [x] `tauri.conf.json` updater endpoint 指向 GitHub Releases `latest.json`
+- [x] `tauri-plugin-single-instance`（防重复启动）
+- [x] oxlint + oxfmt 集成，git hooks（fmt / clippy / lint）
 
 **连发引擎**
 - [ ] `rdev` 全局键盘监听 + `enigo` 按键模拟
@@ -667,7 +668,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [ ] 托盘菜单：全局开关 / 打开面板 / 退出
 
 **自动更新**
-- [ ] `tauri-plugin-updater` 集成
+- [x] `tauri-plugin-updater` 集成（插件注册完成）
 - [ ] 启动时检查更新，有新版本弹提示（版本号 + 确认安装）
 
 **发布 v0.1**
