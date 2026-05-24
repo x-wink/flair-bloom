@@ -30,6 +30,9 @@ pub struct BurstRule {
     pub trigger_key: u32,
     pub target_key: u32,
     pub mode: BurstMode,
+    /// Toggle mode only: separate stop hotkey. Defaults to trigger_key when None.
+    #[serde(default)]
+    pub stop_key: Option<u32>,
     /// Milliseconds between simulated keypresses. Clamped to [10, 10000].
     pub interval_ms: u32,
 }

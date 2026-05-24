@@ -52,15 +52,15 @@ Monorepo 结构，Rust workspace + pnpm workspace 双层管理。
 
 **目标：** 单个功能出错不影响整体运行，关键操作失败后自动恢复。
 
-| 场景 | 容错策略 |
-|------|---------|
-| 连发引擎线程 panic | `catch_unwind` 捕获，记录日志，自动重启引擎线程，托盘图标短暂提示 |
-| 配置文件读取失败（损坏/篡改） | 提示用户，提供"恢复默认配置"选项，不阻塞启动 |
-| `notify` 文件监听失效 | 定时轮询兜底（每 30 秒检查一次配置变更） |
-| 自动升级下载失败 | 最多重试 3 次，失败后静默跳过，不影响正常使用 |
-| `rdev` 监听初始化失败 | 提示"全局监听启动失败，请以管理员权限运行"，其余功能保持可用 |
-| 规则热键冲突 | 检测到冲突时弹提示，保留旧绑定，新绑定不生效，不崩溃 |
-| Tauri Command 异常 | 所有 Command 返回 `Result`，前端统一错误处理，显示 toast 提示 |
+| 场景                          | 容错策略                                                          |
+| ----------------------------- | ----------------------------------------------------------------- |
+| 连发引擎线程 panic            | `catch_unwind` 捕获，记录日志，自动重启引擎线程，托盘图标短暂提示 |
+| 配置文件读取失败（损坏/篡改） | 提示用户，提供"恢复默认配置"选项，不阻塞启动                      |
+| `notify` 文件监听失效         | 定时轮询兜底（每 30 秒检查一次配置变更）                          |
+| 自动升级下载失败              | 最多重试 3 次，失败后静默跳过，不影响正常使用                     |
+| `rdev` 监听初始化失败         | 提示"全局监听启动失败，请以管理员权限运行"，其余功能保持可用      |
+| 规则热键冲突                  | 检测到冲突时弹提示，保留旧绑定，新绑定不生效，不崩溃              |
+| Tauri Command 异常            | 所有 Command 返回 `Result`，前端统一错误处理，显示 toast 提示     |
 
 **引擎线程隔离：** 连发引擎在独立线程运行，panic 不传播到主进程，`std::panic::catch_unwind` 包裹主循环。
 
@@ -103,25 +103,28 @@ std::panic::set_hook → 捕获 panic 信息
 
 #### 日志分级规范
 
-| 级别 | 使用场景 |
-|------|---------|
-| ERROR | 功能不可用的严重错误（引擎崩溃、文件损坏） |
-| WARN | 降级运行的异常（重试成功、配置回退） |
-| INFO | 关键状态变更（连发启动/停止、配置切换、许可证激活） |
-| DEBUG | 详细运行信息（每次按键事件、IPC 消息），默认关闭 |
+| 级别  | 使用场景                                            |
+| ----- | --------------------------------------------------- |
+| ERROR | 功能不可用的严重错误（引擎崩溃、文件损坏）          |
+| WARN  | 降级运行的异常（重试成功、配置回退）                |
+| INFO  | 关键状态变更（连发启动/停止、配置切换、许可证激活） |
+| DEBUG | 详细运行信息（每次按键事件、IPC 消息），默认关闭    |
 
 ---
 
 ## 应用模式
 
 ### 面板模式（Panel）
+
 全功能配置界面，适合初始设置和规则管理。常规窗口，可最小化到托盘。
 
 ### 托盘模式（Tray）
+
 关闭面板和桌宠窗口后，仅系统托盘图标常驻。极低资源占用，适合日常游戏中后台运行。
 托盘菜单提供开关、切换模式、退出等快捷操作。
 
 ### 桌宠模式（Pet）
+
 透明无边框窗口，始终置顶。角色浮在桌面或游戏画面角落，通过动画反映当前连发状态。
 默认点击穿透（游戏中不影响操作），鼠标悬停时临时关闭穿透以支持拖拽和右键菜单。
 
@@ -250,13 +253,13 @@ std::panic::set_hook → 捕获 panic 信息
 
 ### 发布基础设施
 
-| 职责 | 平台 | 说明 |
-|------|------|------|
-| 安装包托管 | GitHub Releases | `.exe` / `.nsis.zip` + `.sig` 签名文件 |
-| Tauri updater 端点 | GitHub Releases | 每次发布上传 `latest.json`（updater manifest） |
-| 私钥存储 | GitHub Actions Secrets | Tauri 签名私钥、Ed25519 许可证私钥 |
-| CI/CD 构建 | GitHub Actions | 推 tag 触发自动构建、签名、发布 |
-| 落地页 | release-server（自托管） | 仅渲染 HTML，下载链接指向 GitHub Releases |
+| 职责               | 平台                     | 说明                                           |
+| ------------------ | ------------------------ | ---------------------------------------------- |
+| 安装包托管         | GitHub Releases          | `.exe` / `.nsis.zip` + `.sig` 签名文件         |
+| Tauri updater 端点 | GitHub Releases          | 每次发布上传 `latest.json`（updater manifest） |
+| 私钥存储           | GitHub Actions Secrets   | Tauri 签名私钥、Ed25519 许可证私钥             |
+| CI/CD 构建         | GitHub Actions           | 推 tag 触发自动构建、签名、发布                |
+| 落地页             | release-server（自托管） | 仅渲染 HTML，下载链接指向 GitHub Releases      |
 
 ### Tauri updater 配置
 
@@ -299,12 +302,12 @@ std::panic::set_hook → 捕获 panic 信息
 
 ### release-server 路由（落地页服务）
 
-| 路由 | 用途 |
-|------|------|
-| `GET /` | 落地页（介绍 + 功能 + 截图 + 下载按钮 → GitHub Releases） |
-| `GET /download` | 下载页（最新版本信息，链接指向 GitHub Releases） |
-| `GET /changelog` | 更新日志页（读取 changelog.toml） |
-| `GET /health` | 健康检查 |
+| 路由             | 用途                                                      |
+| ---------------- | --------------------------------------------------------- |
+| `GET /`          | 落地页（介绍 + 功能 + 截图 + 下载按钮 → GitHub Releases） |
+| `GET /download`  | 下载页（最新版本信息，链接指向 GitHub Releases）          |
+| `GET /changelog` | 更新日志页（读取 changelog.toml）                         |
+| `GET /health`    | 健康检查                                                  |
 
 ### changelog.toml 数据格式
 
@@ -386,34 +389,34 @@ apps/release-server（仅依赖 axum / tokio / rust-embed）
 
 ### 数据存储路径约定
 
-| 数据类型 | 路径 | 说明 |
-|----------|------|------|
-| 配置文件（`.qzh`） | `{app_data_dir}/profiles/` | 用户导入/导出通过文件对话框，不暴露内部路径 |
-| 应用设置 | `{app_data_dir}/settings.json` | `tauri-plugin-store` 管理，`#[serde(default)]` + `packages/migrate` 迁移链 |
-| 日志 | `{app_log_dir}/` | `tracing-appender` 按天滚动，保留 7 天 |
-| 崩溃日志 | `{app_log_dir}/crash-YYYY-MM-DD-HHmmss.log` | panic hook 写入 |
+| 数据类型           | 路径                                        | 说明                                                                       |
+| ------------------ | ------------------------------------------- | -------------------------------------------------------------------------- |
+| 配置文件（`.qzh`） | `{app_data_dir}/profiles/`                  | 用户导入/导出通过文件对话框，不暴露内部路径                                |
+| 应用设置           | `{app_data_dir}/settings.json`              | `tauri-plugin-store` 管理，`#[serde(default)]` + `packages/migrate` 迁移链 |
+| 日志               | `{app_log_dir}/`                            | `tracing-appender` 按天滚动，保留 7 天                                     |
+| 崩溃日志           | `{app_log_dir}/crash-YYYY-MM-DD-HHmmss.log` | panic hook 写入                                                            |
 
 `app_data_dir` / `app_log_dir` 由 Tauri `PathResolver` 跨平台解析，Windows 对应 `%APPDATA%\qzhua`，macOS 对应 `~/Library/Application Support/qzhua`。
 
 ### 输入参数约束
 
-| 参数 | 有效范围 | 说明 |
-|------|----------|------|
-| 连发间隔 | 10ms – 10000ms | UI 做 clamp，低于 10ms 无实际意义且可能触发系统限流 |
-| 单配置规则数 | ≤ 64 条 | 线性匹配不成瓶颈，上限防止滥用 |
-| 宏序列步骤数 | ≤ 256 步 | 防止回放时间过长 |
+| 参数         | 有效范围       | 说明                                                |
+| ------------ | -------------- | --------------------------------------------------- |
+| 连发间隔     | 10ms – 10000ms | UI 做 clamp，低于 10ms 无实际意义且可能触发系统限流 |
+| 单配置规则数 | ≤ 64 条        | 线性匹配不成瓶颈，上限防止滥用                      |
+| 宏序列步骤数 | ≤ 256 步       | 防止回放时间过长                                    |
 
 约束在 `qzh-format` 的 schema 校验层执行（clamp 或 reject），不依赖前端验证。
 
 ### 卸载清理策略
 
-| 数据 | 策略 | 说明 |
-|------|------|------|
-| 用户配置（`.qzh`） | 保留 | 符合 Windows 惯例，重装后数据仍在 |
-| 应用设置（`settings.json`） | 保留 | 同上 |
-| 日志文件 | 保留 | 用户可手动清理 |
-| 注册表自启动项 | 由 installer 清除 | NSIS/MSI 卸载脚本负责移除 `tauri-plugin-autostart` 写入的注册表项 |
-| v1.0 可选 | 卸载时询问是否同时删除配置数据 | 不强制，给用户选择 |
+| 数据                        | 策略                           | 说明                                                              |
+| --------------------------- | ------------------------------ | ----------------------------------------------------------------- |
+| 用户配置（`.qzh`）          | 保留                           | 符合 Windows 惯例，重装后数据仍在                                 |
+| 应用设置（`settings.json`） | 保留                           | 同上                                                              |
+| 日志文件                    | 保留                           | 用户可手动清理                                                    |
+| 注册表自启动项              | 由 installer 清除              | NSIS/MSI 卸载脚本负责移除 `tauri-plugin-autostart` 写入的注册表项 |
+| v1.0 可选                   | 卸载时询问是否同时删除配置数据 | 不强制，给用户选择                                                |
 
 ---
 
@@ -424,18 +427,19 @@ apps/release-server（仅依赖 axum / tokio / rust-embed）
 使用 Tauri 内置 `Window::set_ignore_cursor_events(bool)`（跨平台，Windows / macOS 均支持）。
 
 rdev 全局鼠标监听计算光标是否进入桌宠窗口区域：
+
 - 进入 → `set_ignore_cursor_events(false)` 关闭穿透（支持拖拽和右键）
 - 离开 → `set_ignore_cursor_events(true)` 恢复穿透
 
 ### 动画状态机
 
-| 状态 | 动画描述 | 触发条件 |
-|------|---------|---------|
-| Idle | 缓慢呼吸，偶尔眨眼 | 默认 |
-| Burst | 快速抖动或奔跑循环 | 连发引擎激活 |
-| Hover | 抬头看向光标，尾巴摇动 | 鼠标进入窗口区域 |
-| Alert | 耳朵竖起，眼睛放大 | 切换配置文件 |
-| Sleep | 闭眼 ZZZ | 空闲超过 N 分钟（可配置） |
+| 状态  | 动画描述               | 触发条件                  |
+| ----- | ---------------------- | ------------------------- |
+| Idle  | 缓慢呼吸，偶尔眨眼     | 默认                      |
+| Burst | 快速抖动或奔跑循环     | 连发引擎激活              |
+| Hover | 抬头看向光标，尾巴摇动 | 鼠标进入窗口区域          |
+| Alert | 耳朵竖起，眼睛放大     | 切换配置文件              |
+| Sleep | 闭眼 ZZZ               | 空闲超过 N 分钟（可配置） |
 
 ### 交互行为
 
@@ -451,14 +455,14 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 
 参考 Dongocat，监听全局键盘、鼠标、手柄输入做出对应动画反馈，与连发引擎解耦。
 
-| 状态 | 触发条件 |
-|------|---------|
-| Typing | 连续键盘输入（>2次/秒） |
-| KeyPress | 单次按键 |
-| MouseMove | 鼠标移动（眼睛跟随） |
-| Click | 鼠标点击（眨眼） |
-| GamepadButton | 手柄按键 |
-| GamepadStick | 摇杆偏移（身体倾斜） |
+| 状态          | 触发条件                |
+| ------------- | ----------------------- |
+| Typing        | 连续键盘输入（>2次/秒） |
+| KeyPress      | 单次按键                |
+| MouseMove     | 鼠标移动（眼睛跟随）    |
+| Click         | 鼠标点击（眨眼）        |
+| GamepadButton | 手柄按键                |
+| GamepadStick  | 摇杆偏移（身体倾斜）    |
 
 手柄监听通过 `gilrs` crate 实现，阶段三末尾实现，需配套美术资源。
 
@@ -493,13 +497,13 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 
 ### 协议核心条款
 
-| 条款 | 内容 |
-|------|------|
+| 条款     | 内容                                                               |
+| -------- | ------------------------------------------------------------------ |
 | 使用风险 | 模拟输入可能触发游戏反作弊机制，导致账号封禁，用户自行承担全部风险 |
-| 适用范围 | 仅供个人娱乐与技术学习使用 |
-| 禁止商用 | 严禁用于任何商业目的 |
-| 免责声明 | 因使用本软件导致的任何损失，开发者不承担责任 |
-| 知识产权 | 未经授权不得反编译、修改或二次分发 |
+| 适用范围 | 仅供个人娱乐与技术学习使用                                         |
+| 禁止商用 | 严禁用于任何商业目的                                               |
+| 免责声明 | 因使用本软件导致的任何损失，开发者不承担责任                       |
+| 知识产权 | 未经授权不得反编译、修改或二次分发                                 |
 
 协议正文滚动到底部才激活同意按钮。`agreement_version` 与代码硬编码版本不一致时强制重新同意。
 
@@ -508,27 +512,29 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 ## 功能分层
 
 ### 免费功能
-| 功能 | 实现位置 |
-|------|---------|
-| 用户协议（首次启动） | apps/main — AgreementPage |
-| 按压连发 | apps/main/src-tauri — engine/burst.rs |
-| 一键连发（热键 Toggle） | apps/main/src-tauri — engine/burst.rs |
-| 配置文件 CRUD + 导入导出 | apps/main — commands/profile.rs |
-| `.qzh` 加密格式 | packages/qzh-format |
-| 快速切换配置文件 | 面板 UI + 托盘菜单 |
-| 系统托盘 & 开机自启 | apps/main/src-tauri — tray.rs |
-| 桌宠模式（基础动画） | apps/main — pet/PetApp.tsx |
-| 自动升级 | apps/main — commands/updater.rs |
+
+| 功能                     | 实现位置                              |
+| ------------------------ | ------------------------------------- |
+| 用户协议（首次启动）     | apps/main — AgreementPage             |
+| 按压连发                 | apps/main/src-tauri — engine/burst.rs |
+| 一键连发（热键 Toggle）  | apps/main/src-tauri — engine/burst.rs |
+| 配置文件 CRUD + 导入导出 | apps/main — commands/profile.rs       |
+| `.qzh` 加密格式          | packages/qzh-format                   |
+| 快速切换配置文件         | 面板 UI + 托盘菜单                    |
+| 系统托盘 & 开机自启      | apps/main/src-tauri — tray.rs         |
+| 桌宠模式（基础动画）     | apps/main — pet/PetApp.tsx            |
+| 自动升级                 | apps/main — commands/updater.rs       |
 
 ### 高级功能（兑换码激活，限时）
-| 功能 | 实现位置 |
-|------|---------|
-| 宏录制与回放 | apps/main/src-tauri — engine/macro_play.rs |
-| 鼠标连点 | apps/main/src-tauri — engine/burst.rs |
-| 随机抖动 | apps/main/src-tauri — engine/burst.rs |
-| 条件配置集 | apps/main/src-tauri — watcher.rs |
-| 回放速度调节 | apps/main/src-tauri — engine/macro_play.rs |
-| 桌宠扩展动画包 | apps/main — pet/（激活后解锁） |
+
+| 功能           | 实现位置                                   |
+| -------------- | ------------------------------------------ |
+| 宏录制与回放   | apps/main/src-tauri — engine/macro_play.rs |
+| 鼠标连点       | apps/main/src-tauri — engine/burst.rs      |
+| 随机抖动       | apps/main/src-tauri — engine/burst.rs      |
+| 条件配置集     | apps/main/src-tauri — watcher.rs           |
+| 回放速度调节   | apps/main/src-tauri — engine/macro_play.rs |
+| 桌宠扩展动画包 | apps/main — pet/（激活后解锁）             |
 
 ---
 
@@ -605,9 +611,9 @@ pub fn migrate(mut data: Value, from: u32, to: u32) -> Result<Value> {
 
 **版本历史（持续追加）：**
 
-| schema_version | 变更内容 | 引入版本 |
-|---------------|---------|---------|
-| 1 | 初始 schema | v0.1 |
+| schema_version | 变更内容    | 引入版本 |
+| -------------- | ----------- | -------- |
+| 1              | 初始 schema | v0.1     |
 
 ---
 
@@ -628,6 +634,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 **目标：** 能用，能更新，能收到用户反馈。
 
 **基础设施（一次性）**
+
 - [x] Monorepo 初始化：根 `Cargo.toml`、`pnpm-workspace.yaml`、`packages/` 骨架
 - [x] `apps/main` Tauri v2 + Vite 多页（panel），`tauri.conf.json` 单窗口配置
 - [x] `packages/crypto` 骨架（AES-256-GCM + HKDF + Ed25519 校验）
@@ -640,34 +647,40 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] oxlint + oxfmt 集成，git hooks（fmt / clippy / lint）
 
 **连发引擎**
-- [ ] `rdev` 全局键盘监听 + `enigo` 按键模拟
-- [ ] `AtomicUsize` sim_count 过滤事件循环
+
+- [x] `rdev` 全局键盘监听 + `enigo` 按键模拟
+- [x] `AtomicUsize` sim_count 过滤事件循环
 - [ ] `catch_unwind` 包裹引擎主循环，panic 后自动重启
-- [ ] 按压连发状态机（持键发送，抬键停止）
-- [ ] Toggle 连发状态机（热键开关，`tauri-plugin-global-shortcut`）
-- [ ] 多规则并行支持
+- [x] 按压连发状态机（持键发送，抬键停止）
+- [x] Toggle 连发状态机（热键开关，`tauri-plugin-global-shortcut`）
+- [x] 多规则并行支持
 
 **配置持久化**
+
 - [ ] Profile 数据结构读写 `.qzh` 文件（AES-256-GCM 加密）
-- [ ] `tauri-plugin-store` 存储当前激活的配置文件路径
+- [x] `tauri-plugin-store` 存储当前激活的配置文件路径
 - [ ] 启动时自动加载上次使用的配置
 
 **用户协议**
+
 - [ ] 首次启动检查协议状态（store 读取 `agreed` / `agreement_version`）
 - [ ] 未同意则面板展示协议页，屏蔽其他路由；同意后写入存储
 - [ ] 协议版本变更时强制重新展示
 
 **基础 UI**
-- [ ] 规则列表（触发键 → 目标键 + 模式 + 间隔）
-- [ ] 按键录入组件（监听实际按键输入）
-- [ ] 新增 / 删除规则
-- [ ] 全局开关
+
+- [x] 规则列表（触发键 → 目标键 + 模式 + 间隔）
+- [x] 按键录入组件（监听实际按键输入）
+- [x] 新增 / 删除规则
+- [x] 全局开关
 
 **系统托盘**
+
 - [ ] 托盘图标（启用/禁用双状态）
 - [ ] 托盘菜单：全局开关 / 打开面板 / 退出
 
 **自动更新**
+
 - [x] `tauri-plugin-updater` 集成（插件注册完成）
 - [ ] 启动时检查更新，有新版本弹提示（版本号 + 确认安装）
 
@@ -680,6 +693,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 **目标：** 补齐日常使用必需的体验细节，能放心推给第一批用户。
 
 **日志与崩溃**
+
 - [ ] `tracing` + `tracing-appender`，按天滚动日志（保留 7 天）
 - [ ] `std::panic::set_hook` 捕获崩溃，写独立崩溃日志
 - [ ] 崩溃提示窗口（打开日志文件夹 / 复制路径 / 关闭）
@@ -687,22 +701,27 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [ ] 设置页"查看日志文件夹"入口
 
 **设置面板**
+
 - [ ] 设置面板骨架：通用 / 配置文件 / 关于 分区，后续迭代按需填充内容
 
 **首次引导**
+
 - [ ] 协议同意后展示简短引导流程（步骤提示 + 创建第一条规则向导）
 
 **完整配置管理**
+
 - [ ] 多配置文件：新建 / 重命名 / 删除
 - [ ] 配置文件下拉快速切换
 - [ ] 导入 / 导出 `.qzh` 文件
 - [ ] `notify` 监听配置文件变更自动 reload；失效时定时轮询兜底
 
 **托盘完善**
+
 - [ ] 开机自启选项（`tauri-plugin-autostart`）
 - [ ] 托盘菜单：切换配置文件 / 打开面板 / 退出
 
 **面板完善**
+
 - [ ] 更新提示弹窗（含更新说明）
 - [ ] 热键冲突检测与提示
 - [ ] 规则启用/禁用开关（不删除规则）
@@ -738,6 +757,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 **目标：** 上线付费通道和高价值功能，开始商业化。
 
 **许可证**
+
 - [ ] `apps/keygen` CLI：生成 Ed25519 密钥对，签名输出兑换码
 - [ ] GitHub Secrets 存储 Ed25519 私钥（仅 keygen 使用，不进应用二进制）
 - [ ] 激活面板 UI：输入兑换码、显示到期时间和已激活功能
@@ -747,9 +767,11 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [ ] 许可证状态面板：剩余天数、激活时间、已授权功能列表
 
 **规则模板**
+
 - [ ] 内置常用规则模板（FPS 快速连发、MOBA 技能连按等），一键导入当前配置
 
 **高级功能**
+
 - [ ] 鼠标连点（按压 / Toggle）
 - [ ] 随机抖动（间隔 ± 可配置随机偏差）
 - [ ] 宏录制（事件流 + 时间戳，存为 `.qzh`）
@@ -793,39 +815,39 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 ## 技术选型
 
-| 用途 | 库 / 工具 |
-|------|----------|
-| 全局键盘/鼠标监听 | `rdev` |
-| 按键/鼠标模拟 | `enigo` |
-| 全局热键注册 | `tauri-plugin-global-shortcut` |
-| 点击穿透 | `Window::set_ignore_cursor_events()`（Tauri 内置，跨平台） |
-| 自动升级 | `tauri-plugin-updater` |
-| 配置文件加密 | `aes-gcm` |
-| 密钥派生 | `hkdf` + `sha2` |
-| 许可证签名校验 | `ed25519-dalek` |
-| 兑换码编解码 | `base32` |
-| 配置文件变更监听 | `notify` |
-| 手柄输入监听 | `gilrs`（阶段三） |
-| HTTP 更新服务 | `axum` + `tokio` |
-| 应用状态持久化 | `tauri-plugin-store` |
-| 开机自启 | `tauri-plugin-autostart` |
-| 前端动画 | CSS 关键帧 + SVG（MVP）/ Lottie（后期） |
-| 前端 UI | React + TypeScript + Tailwind CSS |
-| 多页构建 | Vite multi-page（panel.html + pet.html） |
-| Monorepo 管理 | Cargo workspace + pnpm workspaces |
+| 用途              | 库 / 工具                                                  |
+| ----------------- | ---------------------------------------------------------- |
+| 全局键盘/鼠标监听 | `rdev`                                                     |
+| 按键/鼠标模拟     | `enigo`                                                    |
+| 全局热键注册      | `tauri-plugin-global-shortcut`                             |
+| 点击穿透          | `Window::set_ignore_cursor_events()`（Tauri 内置，跨平台） |
+| 自动升级          | `tauri-plugin-updater`                                     |
+| 配置文件加密      | `aes-gcm`                                                  |
+| 密钥派生          | `hkdf` + `sha2`                                            |
+| 许可证签名校验    | `ed25519-dalek`                                            |
+| 兑换码编解码      | `base32`                                                   |
+| 配置文件变更监听  | `notify`                                                   |
+| 手柄输入监听      | `gilrs`（阶段三）                                          |
+| HTTP 更新服务     | `axum` + `tokio`                                           |
+| 应用状态持久化    | `tauri-plugin-store`                                       |
+| 开机自启          | `tauri-plugin-autostart`                                   |
+| 前端动画          | CSS 关键帧 + SVG（MVP）/ Lottie（后期）                    |
+| 前端 UI           | React + TypeScript + Tailwind CSS                          |
+| 多页构建          | Vite multi-page（panel.html + pet.html）                   |
+| Monorepo 管理     | Cargo workspace + pnpm workspaces                          |
 
 ---
 
 ## 风险与缓解（已确认）
 
-| # | 风险 | 缓解方案 | 状态 |
-|---|------|---------|------|
-| ① | rdev + enigo 事件循环 | `AtomicUsize` sim_count 过滤模拟事件 | 确认 |
-| ② | 反作弊软件拦截模拟输入 | 不做技术规避，EULA + 文档明确说明 | 确认 |
-| ③ | 桌宠被全屏游戏覆盖 | 文档 QA 告知，建议边框全屏 | 确认 |
-| ④ | 点击穿透时无法触发右键菜单 | rdev hover 检测，动态调用 `set_ignore_cursor_events()` | 确认 |
-| ⑤ | AES 密钥被逆向提取 | 接受"防普通用户"定位，不对抗专业逆向 | 确认 |
-| ⑥ | 系统时间回拨绕过许可证 | payload 含 issue_time 做下界校验；`last_verified_at` 列为扩展优化点 | 确认 |
-| ⑦ | Named Pipe 连接失败 | 架构改为单一 Tauri 多窗口，风险消除 | 消除 |
-| ⑧ | 更新包被中间人替换 | Tauri updater 强制 .sig 签名验证 + HTTPS | 确认 |
-| ⑨ | Mac 点击穿透 API 不同 | 改用 Tauri 内置 `set_ignore_cursor_events()`，跨平台，风险消除 | 消除 |
+| #   | 风险                       | 缓解方案                                                            | 状态 |
+| --- | -------------------------- | ------------------------------------------------------------------- | ---- |
+| ①   | rdev + enigo 事件循环      | `AtomicUsize` sim_count 过滤模拟事件                                | 确认 |
+| ②   | 反作弊软件拦截模拟输入     | 不做技术规避，EULA + 文档明确说明                                   | 确认 |
+| ③   | 桌宠被全屏游戏覆盖         | 文档 QA 告知，建议边框全屏                                          | 确认 |
+| ④   | 点击穿透时无法触发右键菜单 | rdev hover 检测，动态调用 `set_ignore_cursor_events()`              | 确认 |
+| ⑤   | AES 密钥被逆向提取         | 接受"防普通用户"定位，不对抗专业逆向                                | 确认 |
+| ⑥   | 系统时间回拨绕过许可证     | payload 含 issue_time 做下界校验；`last_verified_at` 列为扩展优化点 | 确认 |
+| ⑦   | Named Pipe 连接失败        | 架构改为单一 Tauri 多窗口，风险消除                                 | 消除 |
+| ⑧   | 更新包被中间人替换         | Tauri updater 强制 .sig 签名验证 + HTTPS                            | 确认 |
+| ⑨   | Mac 点击穿透 API 不同      | 改用 Tauri 内置 `set_ignore_cursor_events()`，跨平台，风险消除      | 消除 |

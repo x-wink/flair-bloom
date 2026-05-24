@@ -26,10 +26,15 @@
         "label": "panel",
         "title": "FlairBloom",
         "url": "/panel.html",
-        "width": 900,
-        "height": 600,
+        "width": 425,
+        "height": 740,
         "visible": false,
-        "resizable": true
+        "resizable": false,
+        "maximizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "center": true
       }
     ],
     "security": {

@@ -1,6 +1,17 @@
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+import { LazyStore } from '@tauri-apps/plugin-store';
 import { useEffect, useState } from 'react';
+import iconUrl from '../../assets/icon-32.png';
+import bgUrl from '../../assets/icon-bg.png';
+import { useConfirm } from './ConfirmDialog';
 import './PanelApp.css';
+import { useToast } from './Toast';
+
+type CloseBehavior = 'minimize' | 'exit';
+const settingsStore = new LazyStore('settings.json');
+const CLOSE_BEHAVIOR_KEY = 'closeBehavior';
+const ACTIVE_TAB_KEY = 'activeTab';
 
 type BurstMode = 'hold' | 'toggle';
 
@@ -10,6 +21,7 @@ interface BurstRule {
   trigger_key: number;
   target_key: number;
   mode: BurstMode;
+  stop_key: number | null;
   interval_ms: number;
 }
 
@@ -137,15 +149,22 @@ function keyLabel(vk: number): string {
   return KEY_NAMES[vk] ?? (vk ? `0x${vk.toString(16).toUpperCase()}` : '—');
 }
 
-function newRule(): BurstRule {
+function newRule(mode: BurstMode = 'hold'): BurstRule {
+  const isHold = mode === 'hold';
+  const vk = isHold ? 0x51 : 0x46;
   return {
     id: crypto.randomUUID(),
-    enabled: true,
-    trigger_key: 0,
-    target_key: 0,
-    mode: 'hold',
-    interval_ms: 50,
+    enabled: !isHold,
+    trigger_key: vk,
+    target_key: vk,
+    mode,
+    stop_key: null,
+    interval_ms: 10,
   };
+}
+
+function defaultRules(): BurstRule[] {
+  return [newRule('hold'), newRule('toggle')];
 }
 
 function KeyCapture({ value, onChange }: { value: number; onChange: (vk: number) => void }) {
@@ -173,106 +192,400 @@ function KeyCapture({ value, onChange }: { value: number; onChange: (vk: number)
 }
 
 export default function PanelApp() {
-  const [globalEnabled, setGlobalEnabled] = useState(true);
+  const [globalEnabled, setGlobalEnabled] = useState(false);
   const [rules, setRules] = useState<BurstRule[]>([]);
+  const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({});
+  const [activeTab, setActiveTab] = useState<BurstMode>('toggle');
+  const confirm = useConfirm();
+  const toast = useToast();
 
   useEffect(() => {
+    settingsStore
+      .get<BurstMode>(ACTIVE_TAB_KEY)
+      .then((v) => {
+        if (v === 'hold' || v === 'toggle') setActiveTab(v);
+      })
+      .catch(() => {});
+
     invoke<boolean>('get_global_enabled')
       .then(setGlobalEnabled)
-      .catch(() => {});
+      .catch(() => {
+        toast.error('读取全局开关状态失败');
+      });
     invoke<BurstRule[]>('get_rules')
-      .then(setRules)
-      .catch(() => {});
+      .then((loaded) => {
+        if (loaded.length === 0) {
+          pushRules(() => defaultRules());
+        } else {
+          setRules(loaded);
+        }
+      })
+      .catch(() => {
+        toast.error('读取规则失败，已加载默认配置');
+        pushRules(() => defaultRules());
+      });
   }, []);
+
+  function persistCloseBehavior(v: CloseBehavior) {
+    settingsStore
+      .set(CLOSE_BEHAVIOR_KEY, v)
+      .then(() => settingsStore.save())
+      .catch(() => {
+        toast.warning('保存关闭行为偏好失败');
+      });
+  }
 
   function toggleGlobal() {
     const next = !globalEnabled;
     setGlobalEnabled(next);
-    invoke('set_global_enabled', { enabled: next }).catch(() => {});
+    invoke('set_global_enabled', { enabled: next }).catch(() => {
+      toast.error('切换全局开关失败');
+      setGlobalEnabled(!next);
+    });
   }
 
-  function pushRules(next: BurstRule[]) {
-    setRules(next);
-    invoke('set_rules', { rules: next }).catch(() => {});
+  function pushRules(updater: (prev: BurstRule[]) => BurstRule[]) {
+    setRules((prev) => {
+      const next = updater(prev);
+      queueMicrotask(() => {
+        invoke('set_rules', { rules: next }).catch(() => {
+          toast.error('保存规则失败');
+        });
+      });
+      return next;
+    });
   }
 
-  function addRule() {
-    pushRules([...rules, newRule()]);
+  function addRule(mode: BurstMode = 'hold') {
+    pushRules((prev) => [...prev, newRule(mode)]);
   }
 
   function removeRule(id: string) {
-    pushRules(rules.filter((r) => r.id !== id));
+    pushRules((prev) => prev.filter((r) => r.id !== id));
   }
 
   function updateRule(id: string, patch: Partial<BurstRule>) {
-    pushRules(rules.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+    pushRules((prev) =>
+      prev.map((r) => {
+        if (r.id !== id) return r;
+        const merged = { ...r, ...patch };
+        if (patch.trigger_key !== undefined && r.mode === 'hold' && !advancedOpen[id]) {
+          merged.target_key = patch.trigger_key;
+        }
+        return merged;
+      }),
+    );
+  }
+
+  function toggleAdvanced(id: string) {
+    setAdvancedOpen((s) => ({ ...s, [id]: !s[id] }));
+  }
+
+  async function handleDelete(id: string) {
+    const ok = await confirm({
+      title: '删除规则',
+      description: '确认删除此规则？此操作不可撤销。',
+      confirmText: '删除',
+      tone: 'danger',
+    });
+    if (ok) removeRule(id);
+  }
+
+  async function handleRestoreDefaults() {
+    const ok = await confirm({
+      title: '恢复默认配置',
+      description: '将清空当前所有规则并重置为默认配置，确认继续？',
+      confirmText: '恢复默认',
+      tone: 'danger',
+    });
+    if (ok) {
+      pushRules(() => defaultRules());
+      setAdvancedOpen({});
+    }
+  }
+
+  function handleClose() {
+    settingsStore
+      .get<CloseBehavior>(CLOSE_BEHAVIOR_KEY)
+      .then((remembered) => {
+        if (remembered === 'exit') getCurrentWindow().destroy();
+        else if (remembered === 'minimize') getCurrentWindow().hide();
+        else void askCloseBehavior();
+      })
+      .catch(() => {
+        toast.error('读取关闭行为偏好失败');
+        void askCloseBehavior();
+      });
+  }
+
+  async function askCloseBehavior() {
+    const result: { choice: CloseBehavior; remember: boolean } = {
+      choice: 'minimize',
+      remember: false,
+    };
+    const ok = await confirm({
+      title: '关闭窗口',
+      description: '关闭按钮的行为：',
+      confirmText: '确定',
+      body: (
+        <CloseBehaviorForm
+          defaultChoice="minimize"
+          onChange={(c, r) => {
+            result.choice = c;
+            result.remember = r;
+          }}
+        />
+      ),
+    });
+    if (!ok) return;
+    if (result.remember) persistCloseBehavior(result.choice);
+    if (result.choice === 'exit') getCurrentWindow().destroy();
+    else getCurrentWindow().hide();
   }
 
   return (
-    <div className="panel">
-      <header className="panel-header">
-        <h1>FlairBloom</h1>
+    <div
+      className={`panel${globalEnabled ? ' on' : ' off'}`}
+      style={{ ['--panel-bg' as string]: `url(${bgUrl})` }}
+    >
+      <header className="panel-header" data-tauri-drag-region>
+        <img className="header-icon" src={iconUrl} alt="" data-tauri-drag-region />
+        <h1 data-tauri-drag-region>气质花按键助手 v0.1</h1>
+        <div className="window-controls">
+          <button
+            className="win-btn"
+            onClick={() => getCurrentWindow().minimize()}
+            aria-label="最小化"
+          >
+            ─
+          </button>
+          <button className="win-btn close" onClick={handleClose} aria-label="关闭">
+            ✕
+          </button>
+        </div>
+      </header>
+
+      <section className="rules-section">
+        <div className="tab-bar">
+          {(['hold', 'toggle'] as BurstMode[]).map((mode) => {
+            const groupRules = rules.filter((r) => r.mode === mode);
+            const active = groupRules.filter((r) => r.enabled).length;
+            const title = mode === 'hold' ? '按压连发' : '切换连发';
+            return (
+              <button
+                key={mode}
+                className={`tab${activeTab === mode ? ' active' : ''}`}
+                onClick={() => {
+                  setActiveTab(mode);
+                  settingsStore
+                    .set(ACTIVE_TAB_KEY, mode)
+                    .then(() => settingsStore.save())
+                    .catch(() => {
+                      toast.warning('保存当前标签页失败');
+                    });
+                }}
+              >
+                <span className="tab-title">{title}</span>
+                <span className="tab-count">
+                  {active}/{groupRules.length}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {(['hold', 'toggle'] as BurstMode[]).map((mode) => {
+          if (mode !== activeTab) return null;
+          const groupRules = rules.filter((r) => r.mode === mode);
+          const title = mode === 'hold' ? '按压连发' : '切换连发';
+          return (
+            <div className="rule-group" key={mode}>
+              <div className="rules-list">
+                {groupRules.length === 0 && <p className="empty">暂无{title}规则</p>}
+                {groupRules.map((rule) => (
+                  <div key={rule.id} className={`rule-row${rule.enabled ? '' : ' disabled'}`}>
+                    <button
+                      className="del-btn"
+                      onClick={() => handleDelete(rule.id)}
+                      aria-label="删除"
+                      title="删除"
+                    >
+                      ✕
+                    </button>
+                    <div className="rule-main">
+                      <input
+                        type="checkbox"
+                        checked={rule.enabled}
+                        onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
+                      />
+                      {mode === 'hold' ? (
+                        <>
+                          <div className="rule-field">
+                            <label>按压键</label>
+                            <KeyCapture
+                              value={rule.trigger_key}
+                              onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
+                            />
+                          </div>
+                          <span className="rule-arrow">→</span>
+                          <div className="rule-field">
+                            <label>连发按键</label>
+                            <KeyCapture
+                              value={rule.target_key}
+                              onChange={(vk) => updateRule(rule.id, { target_key: vk })}
+                            />
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <div className="rule-field">
+                            <label>启动热键</label>
+                            <KeyCapture
+                              value={rule.trigger_key}
+                              onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
+                            />
+                          </div>
+                          <span className="rule-arrow">→</span>
+                          <div className="rule-field">
+                            <label>连发按键</label>
+                            <KeyCapture
+                              value={rule.target_key}
+                              onChange={(vk) => updateRule(rule.id, { target_key: vk })}
+                            />
+                          </div>
+                        </>
+                      )}
+                      <div className="rule-field rule-interval">
+                        <label>间隔</label>
+                        <div className="interval-input">
+                          <input
+                            type="number"
+                            min={10}
+                            max={10000}
+                            value={rule.interval_ms}
+                            onChange={(e) =>
+                              updateRule(rule.id, {
+                                interval_ms: Math.max(10, Math.min(10000, Number(e.target.value))),
+                              })
+                            }
+                          />
+                          <span>ms</span>
+                        </div>
+                      </div>
+                    </div>
+                    {mode === 'toggle' && advancedOpen[rule.id] && (
+                      <div className="rule-advanced">
+                        <div className="rule-field">
+                          <label>停止热键</label>
+                          <KeyCapture
+                            value={rule.stop_key ?? rule.trigger_key}
+                            onChange={(vk) => updateRule(rule.id, { stop_key: vk })}
+                          />
+                        </div>
+                        <span className="adv-hint">默认与启动热键相同</span>
+                      </div>
+                    )}
+                    {mode === 'toggle' && (
+                      <button
+                        className={`expand-btn${advancedOpen[rule.id] ? ' open' : ''}`}
+                        onClick={() => toggleAdvanced(rule.id)}
+                        aria-label="高级设置"
+                      >
+                        <svg
+                          className="chevron"
+                          viewBox="0 0 12 12"
+                          width="10"
+                          height="10"
+                          aria-hidden="true"
+                        >
+                          <path
+                            d="M2 4 L6 8 L10 4"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                          />
+                        </svg>
+                        <span className="expand-label">
+                          {advancedOpen[rule.id] ? '收起高级设置' : '高级设置'}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button className="add-btn" onClick={() => addRule(mode)}>
+                + 添加{title}规则
+              </button>
+            </div>
+          );
+        })}
+      </section>
+
+      <footer className="panel-footer">
+        <button className="reset-btn" onClick={handleRestoreDefaults} title="恢复默认配置">
+          恢复默认
+        </button>
+        <span className="footer-label">全局开关</span>
         <button className={`toggle-btn${globalEnabled ? ' active' : ''}`} onClick={toggleGlobal}>
           {globalEnabled ? '已启用' : '已禁用'}
         </button>
-      </header>
-
-      <section className="rules">
-        <div className="rules-header">
-          <span>连击规则</span>
-          <button className="add-btn" onClick={addRule}>
-            + 添加
-          </button>
-        </div>
-
-        {rules.length === 0 && <p className="empty">暂无规则，点击"添加"创建第一条</p>}
-
-        {rules.map((rule) => (
-          <div key={rule.id} className={`rule-row${rule.enabled ? '' : ' disabled'}`}>
-            <input
-              type="checkbox"
-              checked={rule.enabled}
-              onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
-            />
-            <div className="rule-keys">
-              <label>触发键</label>
-              <KeyCapture
-                value={rule.trigger_key}
-                onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
-              />
-              <label>目标键</label>
-              <KeyCapture
-                value={rule.target_key}
-                onChange={(vk) => updateRule(rule.id, { target_key: vk })}
-              />
-            </div>
-            <select
-              value={rule.mode}
-              onChange={(e) => updateRule(rule.id, { mode: e.target.value as BurstMode })}
-            >
-              <option value="hold">按住</option>
-              <option value="toggle">切换</option>
-            </select>
-            <div className="rule-interval">
-              <input
-                type="number"
-                min={10}
-                max={10000}
-                value={rule.interval_ms}
-                onChange={(e) =>
-                  updateRule(rule.id, {
-                    interval_ms: Math.max(10, Math.min(10000, Number(e.target.value))),
-                  })
-                }
-              />
-              <span>ms</span>
-            </div>
-            <button className="del-btn" onClick={() => removeRule(rule.id)}>
-              删除
-            </button>
-          </div>
-        ))}
-      </section>
+      </footer>
     </div>
+  );
+}
+
+function CloseBehaviorForm({
+  defaultChoice,
+  onChange,
+}: {
+  defaultChoice: CloseBehavior;
+  onChange: (choice: CloseBehavior, remember: boolean) => void;
+}) {
+  const [choice, setChoice] = useState<CloseBehavior>(defaultChoice);
+  const [remember, setRemember] = useState(false);
+
+  function update(c: CloseBehavior, r: boolean) {
+    setChoice(c);
+    setRemember(r);
+    onChange(c, r);
+  }
+
+  return (
+    <>
+      <label className="radio-row">
+        <input
+          type="radio"
+          name="close-choice"
+          checked={choice === 'minimize'}
+          onChange={() => update('minimize', remember)}
+        />
+        <span>
+          <strong>最小化到托盘</strong>
+          <small>程序继续在后台运行（推荐）</small>
+        </span>
+      </label>
+      <label className="radio-row">
+        <input
+          type="radio"
+          name="close-choice"
+          checked={choice === 'exit'}
+          onChange={() => update('exit', remember)}
+        />
+        <span>
+          <strong>直接退出</strong>
+          <small>关闭程序与所有连发功能</small>
+        </span>
+      </label>
+      <label className="check-row">
+        <input
+          type="checkbox"
+          checked={remember}
+          onChange={(e) => update(choice, e.target.checked)}
+        />
+        <span>记住我的选择</span>
+      </label>
+    </>
   );
 }

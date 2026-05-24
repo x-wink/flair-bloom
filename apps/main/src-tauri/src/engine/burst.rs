@@ -23,7 +23,7 @@ pub struct BurstEngine {
 impl BurstEngine {
     pub fn new() -> Self {
         Self {
-            global_enabled: Arc::new(AtomicBool::new(true)),
+            global_enabled: Arc::new(AtomicBool::new(false)),
             rules: Arc::new(Mutex::new(Vec::new())),
             active_loops: Arc::new(Mutex::new(HashMap::new())),
             toggle_states: Arc::new(Mutex::new(HashMap::new())),
@@ -43,10 +43,32 @@ impl BurstEngine {
             return;
         }
         let rules = self.rules.lock().unwrap().clone();
-        for rule in rules.iter().filter(|r| r.enabled && r.trigger_key == vk) {
+        for rule in rules.iter().filter(|r| r.enabled) {
             match rule.mode {
-                BurstMode::Hold => self.start_hold_burst(rule),
-                BurstMode::Toggle => self.handle_toggle_press(rule),
+                BurstMode::Hold => {
+                    if rule.trigger_key == vk {
+                        self.start_hold_burst(rule);
+                    }
+                }
+                BurstMode::Toggle => {
+                    let stop = rule.stop_key.unwrap_or(rule.trigger_key);
+                    if rule.trigger_key == vk || stop == vk {
+                        let started = self
+                            .toggle_states
+                            .lock()
+                            .unwrap()
+                            .get(&rule.id)
+                            .copied()
+                            .unwrap_or(false);
+                        if started {
+                            if stop == vk {
+                                self.handle_toggle_press(rule);
+                            }
+                        } else if rule.trigger_key == vk {
+                            self.handle_toggle_press(rule);
+                        }
+                    }
+                }
             }
         }
     }
