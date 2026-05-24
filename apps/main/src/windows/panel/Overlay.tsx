@@ -160,8 +160,9 @@ export function OverlayRoot({ children }: { children: ReactNode }) {
       if (e.key !== 'Escape') return;
       const items = itemsRef.current;
       for (let i = items.length - 1; i >= 0; i--) {
-        if (items[i].closeOnBackdrop !== false && items[i].onClose) {
-          items[i].onClose();
+        const { closeOnBackdrop, onClose } = items[i];
+        if (closeOnBackdrop !== false && onClose) {
+          onClose();
           return;
         }
       }
@@ -378,7 +379,7 @@ function Overlay({
           !childRef.current.contains(e.target as Node) &&
           (!targetEl || !targetEl.contains(e.target as Node))
         ) {
-          onClose();
+          onClose?.();
         }
       }
       document.addEventListener('mousedown', handleMouseDown);
