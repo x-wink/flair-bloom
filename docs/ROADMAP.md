@@ -640,8 +640,8 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] `packages/crypto` 骨架（AES-256-GCM + HKDF + Ed25519 校验）
 - [x] `packages/migrate` 骨架（`run_migrations()` 泛型函数）
 - [x] `packages/qzh-format` 骨架（`Profile` / `BurstRule` 数据结构 + `FileHeader` + `migrate.rs`）
-- [ ] GitHub Actions `release.yml`：推 tag 触发矩阵构建（`windows-latest` / `macos-latest`）→ 签名 → 发布 GitHub Release
-- [ ] GitHub Secrets：`TAURI_SIGNING_PRIVATE_KEY`
+- [x] GitHub Actions `release.yml`：推 tag 触发矩阵构建（`windows-latest` / `macos-latest`）→ 签名 → 发布 GitHub Release
+- [ ] GitHub Secrets：`TAURI_SIGNING_PRIVATE_KEY`（需在仓库 Settings 手动配置，见 `.env.example`）
 - [x] `tauri.conf.json` updater endpoint 指向 GitHub Releases `latest.json`
 - [x] `tauri-plugin-single-instance`（防重复启动）
 - [x] oxlint + oxfmt 集成，git hooks（fmt / clippy / lint）
