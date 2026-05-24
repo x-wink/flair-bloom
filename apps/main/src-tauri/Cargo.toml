@@ -21,8 +21,11 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-rdev = "0.5"
-enigo = "0.3"
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
 
 crypto = { path = "../../../packages/crypto" }
 qzh-format = { path = "../../../packages/qzh-format" }
