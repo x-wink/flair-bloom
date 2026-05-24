@@ -232,9 +232,14 @@ export default function PanelApp() {
     const unlistenUpdate = listen<string>('update-available', (e) => {
       toast.info(`发现新版本 v${e.payload}，请重启应用完成更新`);
     });
+    const unlistenClose = getCurrentWindow().onCloseRequested((event) => {
+      event.preventDefault();
+      void handleClose();
+    });
     return () => {
       unlistenGlobal.then((fn) => fn());
       unlistenUpdate.then((fn) => fn());
+      unlistenClose.then((fn) => fn());
     };
   }, []);
 
