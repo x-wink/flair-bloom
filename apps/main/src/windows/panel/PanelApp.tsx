@@ -467,8 +467,8 @@ export default function PanelApp() {
 
   function handleCheckUpdate() {
     setMenuOpen(false);
-    invoke('check_update').catch((e) => {
-      toast.error(String(e));
+    invoke('check_update').catch(() => {
+      toast.warning('检查更新失败，请检查网络连接后重试');
     });
   }
 

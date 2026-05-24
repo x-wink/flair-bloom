@@ -113,15 +113,21 @@ const ToastItemView = memo(function ToastItemView({
   dismissId: number;
 }) {
   const dismiss = useCallback(() => onDismiss(dismissId), [onDismiss, dismissId]);
+  const [paused, setPaused] = useState(false);
 
+  // hover 时暂停倒计时，鼠标离开后以原始 duration 重新计时
   useEffect(() => {
-    if (item.duration <= 0) return;
+    if (item.duration <= 0 || paused) return;
     const timer = window.setTimeout(dismiss, item.duration);
     return () => window.clearTimeout(timer);
-  }, [item.duration, dismiss]);
+  }, [item.duration, dismiss, paused]);
 
   return (
-    <div className={`toast toast-${item.tone}`}>
+    <div
+      className={`toast toast-${item.tone}`}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
       <span className="toast-icon" aria-hidden="true">
         {item.tone === 'success'
           ? '✓'

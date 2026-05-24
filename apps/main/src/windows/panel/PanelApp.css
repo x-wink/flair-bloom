@@ -890,6 +890,8 @@ select {
 .toast-message {
   flex: 1;
   line-height: 1.4;
+  user-select: text;
+  cursor: text;
 }
 
 .toast-close {
