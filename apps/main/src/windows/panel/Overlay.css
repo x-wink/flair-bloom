@@ -1,0 +1,41 @@
+.overlay-mask {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  border-radius: 14px;
+  z-index: 99990;
+  animation: overlay-enter 0.15s ease;
+}
+
+.overlay-mask--static {
+}
+
+.overlay-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14px;
+  z-index: 99999;
+  pointer-events: none;
+}
+
+.overlay-center > * {
+  pointer-events: auto;
+}
+
+.overlay-anchored {
+  position: absolute;
+  z-index: 99999;
+  will-change: transform;
+}
+
+@keyframes overlay-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

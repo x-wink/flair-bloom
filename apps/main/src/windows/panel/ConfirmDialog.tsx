@@ -1,4 +1,5 @@
-import { ReactNode, createContext, useCallback, useContext, useState } from 'react';
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef } from 'react';
+import { useOverlay } from './Overlay';
 
 export type ConfirmTone = 'default' | 'danger';
 
@@ -15,55 +16,67 @@ type ConfirmFn = (opts: ConfirmOptions) => Promise<boolean>;
 
 const ConfirmContext = createContext<ConfirmFn | null>(null);
 
-interface PendingState extends ConfirmOptions {
-  resolve: (v: boolean) => void;
-}
-
 export function ConfirmProvider({ children }: { children: ReactNode }) {
-  const [pending, setPending] = useState<PendingState | null>(null);
+  const overlay = useOverlay();
+  const resolveRef = useRef<((v: boolean) => void) | null>(null);
+  const overlayIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (overlayIdRef.current) overlay.close(overlayIdRef.current);
+    };
+  }, [overlay]);
 
   const confirm = useCallback<ConfirmFn>(
     (opts) =>
-      new Promise((resolve) => {
-        setPending((prev) => {
-          prev?.resolve(false);
-          return { ...opts, resolve };
-        });
-      }),
-    [],
-  );
+      new Promise<boolean>((resolve) => {
+        resolveRef.current?.(false);
+        resolveRef.current = resolve;
 
-  function close(result: boolean) {
-    if (!pending) return;
-    pending.resolve(result);
-    setPending(null);
-  }
+        function close(result: boolean) {
+          resolve(result);
+          resolveRef.current = null;
+          const id = overlayIdRef.current;
+          overlayIdRef.current = null;
+          if (id) {
+            overlay.close(id);
+          }
+        }
 
-  return (
-    <ConfirmContext.Provider value={confirm}>
-      {children}
-      {pending && (
-        <div className="modal-mask" onClick={() => close(false)}>
+        const content = (
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h2>{pending.title}</h2>
-            {pending.description && <p className="modal-desc">{pending.description}</p>}
-            {pending.body}
+            <h2>{opts.title}</h2>
+            {opts.description && <p className="modal-desc">{opts.description}</p>}
+            {opts.body}
             <div className="modal-actions">
               <button className="btn-ghost" onClick={() => close(false)}>
-                {pending.cancelText ?? '取消'}
+                {opts.cancelText ?? '取消'}
               </button>
               <button
-                className={pending.tone === 'danger' ? 'btn-danger' : 'btn-primary'}
+                className={opts.tone === 'danger' ? 'btn-danger' : 'btn-primary'}
                 onClick={() => close(true)}
               >
-                {pending.confirmText ?? '确定'}
+                {opts.confirmText ?? '确定'}
               </button>
             </div>
           </div>
-        </div>
-      )}
-    </ConfirmContext.Provider>
+        );
+
+        if (overlayIdRef.current) {
+          overlay.update(overlayIdRef.current, { content, onClose: () => close(false) });
+        } else {
+          const inst = overlay.open({
+            content,
+            closeOnBackdrop: true,
+            onClose: () => close(false),
+          });
+          overlayIdRef.current = inst.id;
+        }
+      }),
+    [overlay],
   );
+
+  return <ConfirmContext.Provider value={confirm}>{children}</ConfirmContext.Provider>;
 }
 
 export function useConfirm(): ConfirmFn {

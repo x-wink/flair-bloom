@@ -46,9 +46,7 @@ body {
   height: 100%;
   overflow: hidden;
   border-radius: 14px;
-  box-shadow:
-    0 1px 2px rgba(0, 0, 0, 0.08),
-    0 8px 24px rgba(0, 0, 0, 0.18);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06);
   transition: background 0.4s ease;
 }
 
@@ -765,17 +763,101 @@ select {
   }
 }
 
+/* ---------- 下拉菜单 ---------- */
+
+.ctx-menu {
+  min-width: 140px;
+  background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+  animation: menu-pop 0.12s ease;
+}
+
+@keyframes menu-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.ctx-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  font-size: 13px;
+  color: #2d2d2d;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.ctx-menu-item:hover {
+  background: #f5f3ff;
+  color: #6c4de6;
+}
+
+.ctx-menu-item--danger:hover {
+  background: #fff0f0;
+  color: #d14343;
+}
+
+/* ---------- 关于卡片 ---------- */
+
+.about-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 28px 32px 24px;
+  width: 360px;
+  text-align: center;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+  animation: modal-pop 0.18s ease;
+}
+
+.about-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #2d2d2d;
+  margin: 0 0 12px;
+}
+
+.about-name {
+  font-size: 14px;
+  color: #555;
+  margin: 0 0 4px;
+}
+
+.about-ver {
+  font-size: 12px;
+  color: #999;
+  margin: 0 0 12px;
+}
+
+.about-desc {
+  font-size: 13px;
+  color: #666;
+  line-height: 1.6;
+  margin: 0 0 20px;
+}
+
+.about-close-btn {
+  padding: 6px 24px;
+}
+
 .toast-stack {
-  position: fixed;
-  top: 14px;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   gap: 8px;
-  z-index: 200;
   pointer-events: none;
-  width: calc(100% - 40px);
+  width: calc(100vw - 40px);
   max-width: 360px;
 }
 

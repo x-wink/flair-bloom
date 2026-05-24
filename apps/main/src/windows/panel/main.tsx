@@ -1,6 +1,7 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { ConfirmProvider } from './ConfirmDialog';
+import { OverlayRoot } from './Overlay';
 import PanelApp from './PanelApp';
 import { ToastProvider } from './Toast';
 import './PanelApp.css';
@@ -25,10 +26,12 @@ if (!import.meta.env.DEV) {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <ToastProvider>
-      <ConfirmProvider>
-        <PanelApp />
-      </ConfirmProvider>
-    </ToastProvider>
+    <OverlayRoot>
+      <ToastProvider>
+        <ConfirmProvider>
+          <PanelApp />
+        </ConfirmProvider>
+      </ToastProvider>
+    </OverlayRoot>
   </React.StrictMode>,
 );

@@ -1,12 +1,14 @@
 import {
-  ReactNode,
+  type ReactNode,
   createContext,
+  memo,
   useCallback,
   useContext,
   useEffect,
   useRef,
   useState,
 } from 'react';
+import { useOverlay } from './Overlay';
 
 export type ToastTone = 'info' | 'success' | 'warning' | 'error';
 
@@ -40,12 +42,46 @@ const DEFAULT_DURATION: Record<ToastTone, number> = {
 const ToastContext = createContext<ToastApi | null>(null);
 
 export function ToastProvider({ children }: { children: ReactNode }) {
+  const overlay = useOverlay();
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const idRef = useRef(0);
+  const overlayIdRef = useRef<string | null>(null);
+  const dismissRef = useRef<(id: number) => void>(() => {});
 
   const dismiss = useCallback((id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+  dismissRef.current = dismiss;
+
+  // 同步 toasts → overlay（React commit 后执行）
+  useEffect(() => {
+    if (toasts.length === 0) {
+      if (overlayIdRef.current) {
+        overlay.close(overlayIdRef.current);
+        overlayIdRef.current = null;
+      }
+      return;
+    }
+    const content = (
+      <div className="toast-stack" role="status" aria-live="polite">
+        {toasts.map((t) => (
+          <ToastItemView key={t.id} item={t} onDismiss={dismissRef.current} dismissId={t.id} />
+        ))}
+      </div>
+    );
+    if (overlayIdRef.current) {
+      overlay.update(overlayIdRef.current, { content, onClose: () => { overlayIdRef.current = null; } });
+    } else {
+      overlayIdRef.current = overlay.open({
+        content,
+        mask: false,
+        closeOnBackdrop: false,
+        location: 'top',
+        offset: [0, 2],
+        onClose: () => { overlayIdRef.current = null; },
+      }).id;
+    }
+  }, [toasts, overlay, dismiss]);
 
   const show = useCallback<ToastApi['show']>((opts) => {
     const tone = opts.tone ?? 'info';
@@ -64,24 +100,25 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     dismiss,
   };
 
-  return (
-    <ToastContext.Provider value={api}>
-      {children}
-      <div className="toast-stack" role="status" aria-live="polite">
-        {toasts.map((t) => (
-          <ToastItemView key={t.id} item={t} onDismiss={() => dismiss(t.id)} />
-        ))}
-      </div>
-    </ToastContext.Provider>
-  );
+  return <ToastContext.Provider value={api}>{children}</ToastContext.Provider>;
 }
 
-function ToastItemView({ item, onDismiss }: { item: ToastItem; onDismiss: () => void }) {
+const ToastItemView = memo(function ToastItemView({
+  item,
+  onDismiss,
+  dismissId,
+}: {
+  item: ToastItem;
+  onDismiss: (id: number) => void;
+  dismissId: number;
+}) {
+  const dismiss = useCallback(() => onDismiss(dismissId), [onDismiss, dismissId]);
+
   useEffect(() => {
     if (item.duration <= 0) return;
-    const timer = window.setTimeout(onDismiss, item.duration);
+    const timer = window.setTimeout(dismiss, item.duration);
     return () => window.clearTimeout(timer);
-  }, [item.duration, onDismiss]);
+  }, [item.duration, dismiss]);
 
   return (
     <div className={`toast toast-${item.tone}`}>
@@ -95,12 +132,12 @@ function ToastItemView({ item, onDismiss }: { item: ToastItem; onDismiss: () => 
               : 'i'}
       </span>
       <span className="toast-message">{item.message}</span>
-      <button className="toast-close" onClick={onDismiss} aria-label="关闭">
+      <button className="toast-close" onClick={dismiss} aria-label="关闭">
         ✕
       </button>
     </div>
   );
-}
+});
 
 export function useToast(): ToastApi {
   const ctx = useContext(ToastContext);
