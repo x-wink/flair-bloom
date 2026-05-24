@@ -25,6 +25,7 @@ cargo test -p <crate>           # 运行指定 crate 的测试，如 -p crypto
 ```
 
 克隆后执行一次：
+
 ```sh
 git config core.hooksPath .githooks
 ```
@@ -62,11 +63,11 @@ packages/qzh-format/src/
 
 ## 输入约束（在 `profile.rs::validate()` 执行）
 
-| 参数 | 范围 |
-|------|------|
-| 连发间隔 | 10ms – 10000ms |
-| 单配置规则数 | ≤ 64 |
-| 宏序列步骤数 | ≤ 256 |
+| 参数         | 范围           |
+| ------------ | -------------- |
+| 连发间隔     | 10ms – 10000ms |
+| 单配置规则数 | ≤ 64           |
+| 宏序列步骤数 | ≤ 256          |
 
 ## 功能分层
 
@@ -80,4 +81,8 @@ type：`feat` | `fix` | `docs` | `style` | `refactor` | `test` | `chore` | `ci` 
 
 **pre-commit**：暂存 `.rs` → `cargo fmt --check` + `cargo clippy -D warnings`；暂存 `.ts/.tsx` → `oxlint` + `oxfmt --check`。
 
+- 全程使用中文。
+
 - 提交信息不添加 `Co-Authored-By` 署名行。
+
+- 不主动commit，除非用户明确要求。

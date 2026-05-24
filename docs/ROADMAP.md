@@ -641,7 +641,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] `packages/migrate` 骨架（`run_migrations()` 泛型函数）
 - [x] `packages/qzh-format` 骨架（`Profile` / `BurstRule` 数据结构 + `FileHeader` + `migrate.rs`）
 - [x] GitHub Actions `release.yml`：推 tag 触发矩阵构建（`windows-latest` / `macos-latest`）→ 签名 → 发布 GitHub Release
-- [ ] GitHub Secrets：`TAURI_SIGNING_PRIVATE_KEY`（需在仓库 Settings 手动配置，见 `.env.example`）
+- [x] GitHub Secrets：`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 已配置
 - [x] `tauri.conf.json` updater endpoint 指向 GitHub Releases `latest.json`
 - [x] `tauri-plugin-single-instance`（防重复启动）
 - [x] oxlint + oxfmt 集成，git hooks（fmt / clippy / lint）
@@ -652,7 +652,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] `AtomicUsize` sim_count 过滤事件循环
 - [x] `catch_unwind` 包裹引擎主循环，panic 后自动重启
 - [x] 按压连发状态机（持键发送，抬键停止）
-- [x] Toggle 连发状态机（热键开关，`tauri-plugin-global-shortcut`）
+- [x] Toggle 连发状态机（热键开关，与 Hold 模式统一由 rdev 驱动；`tauri-plugin-global-shortcut` 留作全局功能快捷键，如一键切换全局开关、切换配置文件）
 - [x] 多规则并行支持
 
 **配置持久化**
@@ -676,7 +676,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **系统托盘**
 
-- [x] 托盘图标（启用/禁用双状态）
+- [x] 托盘图标 + 菜单（菜单文字区分启用/禁用状态；图标切换待 v0.2 补充）
 - [x] 托盘菜单：全局开关 / 打开面板 / 退出
 
 **自动更新**
@@ -726,6 +726,14 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [ ] 热键冲突检测与提示
 - [ ] 规则启用/禁用开关（不删除规则）
 - [ ] 连发间隔滑块 + 数值输入
+
+**连发引擎稳定性**
+
+- [ ] `set_rules` 替换规则列表前停止所有已运行的连发线程并清空 toggle 状态，防止删除规则后孤儿线程永久运行（`burst.rs:33`）
+- [ ] `set_rules` Tauri 命令加入入参校验（规则数 ≤ 64、`interval_ms` 在 `[10, 10000]`），防止非法值绕过 `profile.rs::validate()` 进入引擎导致忙循环（`commands/engine.rs:19`）
+- [ ] Hold 连发中 enigo `Direction::Click` 产生的模拟 KeyRelease 未受 SIM_COUNT 过滤，当 `trigger_key == target_key` 且为非 Unicode 键（F键/方向键等）时会被 `on_key_release` 识别为物理抬起，导致连发在第一次模拟按键后即终止（`burst.rs:159`）；需区分模拟 KeyRelease 与物理 KeyRelease
+- [ ] 模拟 target_key 产生的 KeyRelease 会触发其他以该键为 `trigger_key` 的 Hold 规则的 `stop_burst`，多规则并行时产生跨规则干扰（`burst.rs:76`）；与上条同源，同步修复
+- [ ] Toggle 连发未过滤系统按键重复事件（OS key-repeat）：`stop_key` 为空时 `stop == trigger_key`，持续按住触发键约 500ms 后系统以 ~30Hz 重复投递 KeyPress，导致连发在 started/stopped 间高频振荡并持续 spawn 新线程（`burst.rs:53`）
 
 **发布 v0.2**
 
@@ -851,3 +859,5 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 | ⑦   | Named Pipe 连接失败        | 架构改为单一 Tauri 多窗口，风险消除                                 | 消除 |
 | ⑧   | 更新包被中间人替换         | Tauri updater 强制 .sig 签名验证 + HTTPS                            | 确认 |
 | ⑨   | Mac 点击穿透 API 不同      | 改用 Tauri 内置 `set_ignore_cursor_events()`，跨平台，风险消除      | 消除 |
+| ⑩   | SIM_COUNT 竞态（非 Unicode 键） | `WH_KEYBOARD_LL` 在 rdev 线程异步投递，`SendInput` 返回后 SIM_COUNT 已归零；字母键因走 `KEYEVENTF_UNICODE`→`VK_PACKET`→VK=0 天然过滤，F键/方向键无此保护；v0.2 连发引擎稳定性专项一并修复 | 已知 |
+| ⑪   | 模拟 KeyRelease 未过滤 | enigo `Direction::Click` 同时发送 KeyPress+KeyRelease，KeyRelease 不经 SIM_COUNT 过滤，导致 Hold 自身被终止或跨规则误触发 stop_burst；v0.2 连发引擎稳定性专项修复 | 已知 |
