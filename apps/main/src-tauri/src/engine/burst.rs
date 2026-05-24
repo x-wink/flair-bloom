@@ -143,11 +143,14 @@ pub fn start_listener(engine: Arc<BurstEngine>) {
         let engine_ref = engine.clone();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
             let callback = move |event: rdev::Event| {
-                if SIM_COUNT.load(Ordering::SeqCst) > 0 {
-                    return;
-                }
                 match event.event_type {
                     rdev::EventType::KeyPress(key) => {
+                        // Filter simulated presses so they don't re-trigger burst rules.
+                        // KeyRelease is never filtered: physical releases must always reach
+                        // on_key_release so Hold bursts stop even on rapid press-release.
+                        if SIM_COUNT.load(Ordering::SeqCst) > 0 {
+                            return;
+                        }
                         let vk = rdev_key_to_vk(key);
                         if vk != 0 {
                             engine_ref.on_key_press(vk);
