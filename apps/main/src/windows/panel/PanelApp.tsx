@@ -2,9 +2,12 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LazyStore } from '@tauri-apps/plugin-store';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import iconUrl from '../../assets/icon-32.png';
 import bgUrl from '../../assets/icon-bg.png';
+import AgreementPage from './pages/AgreementPage/AgreementPage';
+import ContextMenu from './ContextMenu';
+import Overlay from './Overlay';
 import { useConfirm } from './ConfirmDialog';
 import './PanelApp.css';
 import { useToast } from './Toast';
@@ -24,6 +27,21 @@ interface BurstRule {
   mode: BurstMode;
   stop_key: number | null;
   interval_ms: number;
+}
+
+interface ProfileMeta {
+  name: string;
+  created_at: number;
+  updated_at: number;
+  app_version: string;
+}
+
+interface Profile {
+  schema_version: number;
+  meta: ProfileMeta;
+  rules: BurstRule[];
+  hotkeys: { global_toggle: number | null };
+  advanced: { log_level: string };
 }
 
 const KEY_NAMES: Record<number, string> = {
@@ -193,12 +211,25 @@ function KeyCapture({ value, onChange }: { value: number; onChange: (vk: number)
 }
 
 export default function PanelApp() {
+  const [showAgreement, setShowAgreement] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
   const [globalEnabled, setGlobalEnabled] = useState(false);
   const [rules, setRules] = useState<BurstRule[]>([]);
+  const [profileName, setProfileName] = useState('默认配置');
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<BurstMode>('toggle');
   const confirm = useConfirm();
   const toast = useToast();
+  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const initialLoadDone = useRef(false);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+    };
+  }, []);
 
   useEffect(() => {
     settingsStore
@@ -213,35 +244,95 @@ export default function PanelApp() {
       .catch(() => {
         toast.error('读取全局开关状态失败');
       });
+
+    // 引擎已在启动时从 .qzh 加载了规则，直接读取
     invoke<BurstRule[]>('get_rules')
       .then((loaded) => {
         if (loaded.length === 0) {
-          pushRules(() => defaultRules());
+          // 首次启动，初始化默认配置
+          invoke<Profile>('init_default_profile')
+            .then((profile) => {
+              setRules(profile.rules);
+              setProfileName(profile.meta.name);
+            })
+            .catch(() => {
+              toast.error('初始化默认配置失败');
+              setRules(defaultRules());
+              invoke('set_rules', { rules: defaultRules() }).catch(() => {});
+            });
         } else {
           setRules(loaded);
         }
+        initialLoadDone.current = true;
       })
       .catch(() => {
         toast.error('读取规则失败，已加载默认配置');
-        pushRules(() => defaultRules());
+        setRules(defaultRules());
+        invoke('set_rules', { rules: defaultRules() }).catch(() => {});
+        initialLoadDone.current = true;
       });
 
+    const unlistenAgreement = listen<string>('show-agreement', () => {
+      setShowAgreement(true);
+    });
+    // 兜底：如果 emit 在 listen 注册前就已触发（WebView 加载慢时可能丢失事件）
+    invoke<boolean>('needs_agreement')
+      .then((needed) => {
+        if (needed) setShowAgreement(true);
+      })
+      .catch(() => {});
     const unlistenGlobal = listen<boolean>('global-enabled-changed', (e) => {
       setGlobalEnabled(e.payload);
     });
     const unlistenUpdate = listen<string>('update-available', (e) => {
       toast.info(`发现新版本 v${e.payload}，请重启应用完成更新`);
     });
+    const unlistenUpToDate = listen('update-not-available', () => {
+      toast.info('已是最新版本');
+    });
     const unlistenClose = getCurrentWindow().onCloseRequested((event) => {
       event.preventDefault();
       void handleClose();
     });
     return () => {
+      unlistenAgreement.then((fn) => fn());
       unlistenGlobal.then((fn) => fn());
       unlistenUpdate.then((fn) => fn());
+      unlistenUpToDate.then((fn) => fn());
       unlistenClose.then((fn) => fn());
     };
   }, []);
+
+  // 规则变更后防抖自动保存到 .qzh
+  const saveRules = useCallback(
+    (r: BurstRule[]) => {
+      if (saveTimer.current) clearTimeout(saveTimer.current);
+      saveTimer.current = setTimeout(() => {
+        const profile: Profile = {
+          schema_version: 1,
+          meta: {
+            name: profileName,
+            created_at: 0, // backend will set timestamps
+            updated_at: 0,
+            app_version: '',
+          },
+          rules: r,
+          hotkeys: { global_toggle: null },
+          advanced: { log_level: 'info' },
+        };
+        invoke('save_profile', { name: profileName, profile }).catch(() => {
+          toast.warning('自动保存配置失败');
+        });
+      }, 500);
+    },
+    [profileName],
+  );
+
+  // 规则变更时自动保存（跳过初始加载，避免启动时重复写入）
+  useEffect(() => {
+    if (!initialLoadDone.current) return;
+    if (rules.length > 0) saveRules(rules);
+  }, [rules, saveRules]);
 
   function persistCloseBehavior(v: CloseBehavior) {
     settingsStore
@@ -253,23 +344,32 @@ export default function PanelApp() {
   }
 
   function toggleGlobal() {
-    const next = !globalEnabled;
-    setGlobalEnabled(next);
-    invoke('set_global_enabled', { enabled: next }).catch(() => {
-      toast.error('切换全局开关失败');
-      setGlobalEnabled(!next);
+    setGlobalEnabled((prev) => {
+      const next = !prev;
+      invoke('set_global_enabled', { enabled: next }).catch(() => {
+        toast.error('切换全局开关失败');
+        setGlobalEnabled(prev);
+      });
+      return next;
     });
   }
 
   function pushRules(updater: (prev: BurstRule[]) => BurstRule[]) {
+    let next: BurstRule[];
     setRules((prev) => {
-      const next = updater(prev);
-      queueMicrotask(() => {
-        invoke('set_rules', { rules: next }).catch(() => {
-          toast.error('保存规则失败');
-        });
-      });
+      next = updater(prev);
       return next;
+    });
+    queueMicrotask(() => {
+      invoke('set_rules', { rules: next! }).catch(async (e) => {
+        toast.error(`保存规则失败：${e}`);
+        try {
+          const engineRules = await invoke<BurstRule[]>('get_rules');
+          setRules(engineRules);
+        } catch {
+          setRules(defaultRules());
+        }
+      });
     });
   }
 
@@ -360,6 +460,42 @@ export default function PanelApp() {
     else getCurrentWindow().hide();
   }
 
+  function handleShowAgreement() {
+    setMenuOpen(false);
+    setShowAgreement(true);
+  }
+
+  function handleCheckUpdate() {
+    setMenuOpen(false);
+    invoke('check_update').catch((e) => {
+      toast.error(String(e));
+    });
+  }
+
+  function handleShowAbout() {
+    setMenuOpen(false);
+    setShowAbout(true);
+  }
+
+  function handleAgreed() {
+    invoke<BurstRule[]>('get_rules').then((loaded) => {
+      if (loaded.length === 0) {
+        invoke<Profile>('init_default_profile')
+          .then((profile) => {
+            setRules(profile.rules);
+            setProfileName(profile.meta.name);
+          })
+          .catch(() => {
+            setRules(defaultRules());
+            invoke('set_rules', { rules: defaultRules() }).catch(() => {});
+          });
+      } else {
+        setRules(loaded);
+      }
+      setShowAgreement(false);
+    });
+  }
+
   return (
     <div
       className={`panel${globalEnabled ? ' on' : ' off'}`}
@@ -369,6 +505,14 @@ export default function PanelApp() {
         <img className="header-icon" src={iconUrl} alt="" data-tauri-drag-region />
         <h1 data-tauri-drag-region>气质花按键助手 v0.1</h1>
         <div className="window-controls">
+          <button
+            ref={menuBtnRef}
+            className="win-btn menu-btn"
+            onClick={() => setMenuOpen((v) => !v)}
+            aria-label="菜单"
+          >
+            ☰
+          </button>
           <button
             className="win-btn"
             onClick={() => getCurrentWindow().minimize()}
@@ -556,6 +700,35 @@ export default function PanelApp() {
           {globalEnabled ? '已启用' : '已禁用'}
         </button>
       </footer>
+
+      <ContextMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        target={menuBtnRef}
+        items={[
+          { label: '检查更新', onClick: handleCheckUpdate },
+          { label: '用户协议', onClick: handleShowAgreement },
+          { label: '关于', onClick: handleShowAbout },
+        ]}
+      />
+
+      <Overlay open={showAgreement} onClose={() => setShowAgreement(false)} closeOnBackdrop={false}>
+        <AgreementPage onAgreed={handleAgreed} />
+      </Overlay>
+
+      <Overlay open={showAbout} onClose={() => setShowAbout(false)}>
+        <div className="about-card">
+          <h2 className="about-title">关于气质花</h2>
+          <p className="about-name">气质花按键助手（FlairBloom）</p>
+          <p className="about-ver">版本 0.1.0</p>
+          <p className="about-desc">
+            面向游戏辅助的按键助手。核心功能免费，亲友专属功能通过兑换码激活。
+          </p>
+          <button className="btn-primary about-close-btn" onClick={() => setShowAbout(false)}>
+            关闭
+          </button>
+        </div>
+      </Overlay>
     </div>
   );
 }
