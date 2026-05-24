@@ -38,14 +38,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Check signing secret
-        shell: pwsh
-        env:
-          KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-        run: |
-          if ($env:KEY) { Write-Host "TAURI_SIGNING_PRIVATE_KEY is SET (length=$($env:KEY.Length))" }
-          else { Write-Host "TAURI_SIGNING_PRIVATE_KEY is EMPTY or NOT SET" }
-
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
         env:
