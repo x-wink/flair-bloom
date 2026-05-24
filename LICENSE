@@ -1,25 +1,28 @@
-版权所有 (c) 2025 向文可 (x-wink)
-Copyright (c) 2025 x-wink <https://github.com/x-wink>
+版权所有 (c) 2026 向文可 (x-wink)
+Copyright (c) 2026 x-wink <https://github.com/x-wink>
 
-本项目仅供个人学习研究与本地运行使用，保留所有权利。
+本项目基于 Creative Commons 署名-非商业性使用-相同方式共享 4.0 国际协议授权。
+This work is licensed under the Creative Commons Attribution-NonCommercial-ShareAlike 4.0 International License.
 
-【禁止事项】
-- 禁止将本项目或其任何部分用于任何形式的商业用途（包括但不限于销售、
-  收费分发、内嵌于商业产品或服务中）
-- 禁止对本项目进行二次创作、修改后分发或以衍生作品形式公开发布
-- 禁止以任何方式移除或修改本版权声明
-
-【允许事项】
-- 允许在遵守上述限制的前提下，克隆或下载本项目到本地进行学习和研究
-- 允许在私下或内部环境中运行本项目
-
-本软件按"原样"提供，作者不对使用本软件产生的任何损失或损害承担责任。
+协议全文：https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode
+人类可读摘要：https://creativecommons.org/licenses/by-nc-sa/4.0/deed.zh-hans
 
 ---
 
-All rights reserved.
+【你可以自由地】
+- 共享 — 以任何媒介或格式复制、发行本作品
+- 演绎 — 修改、转换本作品，或以本作品为基础进行创作
 
-This project is provided for personal learning, research, and local execution
-only. No part of this project may be used for commercial purposes, redistributed
-in modified form, or published as a derivative work without explicit written
-permission from the author.
+【但须遵守以下条件】
+- 署名（BY）— 必须注明原作者「向文可 (x-wink)」及出处，提供指向本协议的链接，
+  并说明是否对原作品做出了修改
+- 非商业性使用（NC）— 不得将本作品用于商业目的
+- 相同方式共享（SA）— 若你对本作品进行了修改或以其为基础创作，
+  必须基于与原作品相同的许可协议分发你的贡献
+
+【无附加限制】
+- 不得使用法律条款或技术措施限制他人行使本协议所赋予的权利
+
+---
+
+本软件按「原样」提供，作者不对使用本软件产生的任何损失或损害承担责任。
