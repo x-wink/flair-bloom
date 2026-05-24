@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**气质花（FlairBloom）** — 面向游戏辅助的按键助手。基础功能免费，高级功能通过 Ed25519 离线兑换码激活。
+**气质花（FlairBloom）** — 面向游戏辅助的按键助手。核心功能免费，亲友专属功能通过 Ed25519 离线兑换码激活。
 
 详细规划见 `docs/ROADMAP.md`，资源清单见 `docs/ASSETS.md`。
 
@@ -71,8 +71,8 @@ packages/qzh-format/src/
 
 ## 功能分层
 
-免费：按压连发、Toggle 连发、配置文件管理、桌宠基础动画、自动更新。  
-高级（兑换码激活，`feature_bits` 控制）：宏录制回放、鼠标连点、随机抖动、条件配置集、桌宠扩展动画包。
+核心功能：按压连发、Toggle 连发、配置文件管理、桌宠基础动画、自动更新。  
+亲友专属功能（兑换码激活，`feature_bits` 控制）：宏录制回放、鼠标连点、随机抖动、条件配置集、桌宠扩展动画包。
 
 ## 协作规范
 

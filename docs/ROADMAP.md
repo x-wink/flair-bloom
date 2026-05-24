@@ -2,7 +2,7 @@
 
 ## 项目概述
 
-面向游戏辅助的按键助手。基础功能免费开放，高级功能通过兑换码离线激活使用时长。
+面向游戏辅助的按键助手。核心功能免费开放，亲友专属功能通过兑换码离线激活使用时长。
 Monorepo 结构，Rust workspace + pnpm workspace 双层管理。
 支持三种运行模式：面板模式、托盘模式、桌宠模式，均在单一 Tauri 进程内管理。
 
@@ -326,7 +326,7 @@ version = "1.1.0"
 date = "2025-05-01"
 title = "新增功能"
 notes = [
-    "新增随机抖动功能（高级功能）",
+    "新增随机抖动功能（亲友专属功能）",
     "新增宏录制与回放",
 ]
 ```
@@ -511,7 +511,7 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 
 ## 功能分层
 
-### 免费功能
+### 核心功能
 
 | 功能                     | 实现位置                              |
 | ------------------------ | ------------------------------------- |
@@ -525,7 +525,7 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 | 桌宠模式（基础动画）     | apps/main — pet/PetApp.tsx            |
 | 自动升级                 | apps/main — commands/updater.rs       |
 
-### 高级功能（兑换码激活，限时）
+### 亲友专属功能（兑换码激活，限时）
 
 | 功能           | 实现位置                                   |
 | -------------- | ------------------------------------------ |
@@ -657,15 +657,15 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **配置持久化**
 
-- [ ] Profile 数据结构读写 `.qzh` 文件（AES-256-GCM 加密）
+- [x] Profile 数据结构读写 `.qzh` 文件（AES-256-GCM 加密）
 - [x] `tauri-plugin-store` 存储当前激活的配置文件路径
-- [ ] 启动时自动加载上次使用的配置
+- [x] 启动时自动加载上次使用的配置
 
 **用户协议**
 
-- [ ] 首次启动检查协议状态（store 读取 `agreed` / `agreement_version`）
-- [ ] 未同意则面板展示协议页，屏蔽其他路由；同意后写入存储
-- [ ] 协议版本变更时强制重新展示
+- [x] 首次启动检查协议状态（store 读取 `agreed` / `agreement_version`）
+- [x] 未同意则面板展示协议页，屏蔽其他路由；同意后写入存储
+- [x] 协议版本变更时强制重新展示
 
 **基础 UI**
 
@@ -730,7 +730,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 **连发引擎稳定性**
 
 - [ ] `set_rules` 替换规则列表前停止所有已运行的连发线程并清空 toggle 状态，防止删除规则后孤儿线程永久运行（`burst.rs:33`）
-- [ ] `set_rules` Tauri 命令加入入参校验（规则数 ≤ 64、`interval_ms` 在 `[10, 10000]`），防止非法值绕过 `profile.rs::validate()` 进入引擎导致忙循环（`commands/engine.rs:19`）
+- [x] `set_rules` Tauri 命令加入入参校验（规则数 ≤ 64、`interval_ms` 在 `[10, 10000]`），防止非法值绕过 `profile.rs::validate()` 进入引擎导致忙循环（`commands/engine.rs:19`）
 - [ ] Hold 连发中 enigo `Direction::Click` 产生的模拟 KeyRelease 未受 SIM_COUNT 过滤，当 `trigger_key == target_key` 且为非 Unicode 键（F键/方向键等）时会被 `on_key_release` 识别为物理抬起，导致连发在第一次模拟按键后即终止（`burst.rs:159`）；需区分模拟 KeyRelease 与物理 KeyRelease
 - [ ] 模拟 target_key 产生的 KeyRelease 会触发其他以该键为 `trigger_key` 的 Hold 规则的 `stop_burst`，多规则并行时产生跨规则干扰（`burst.rs:76`）；与上条同源，同步修复
 - [ ] Toggle 连发未过滤系统按键重复事件（OS key-repeat）：`stop_key` 为空时 `stop == trigger_key`，持续按住触发键约 500ms 后系统以 ~30Hz 重复投递 KeyPress，导致连发在 started/stopped 间高频振荡并持续 spawn 新线程（`burst.rs:53`）
@@ -760,7 +760,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 ---
 
-### v0.4｜许可证系统 + 高级功能
+### v0.4｜许可证系统 + 亲友专属功能
 
 **目标：** 上线付费通道和高价值功能，开始商业化。
 
@@ -771,14 +771,14 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [ ] 激活面板 UI：输入兑换码、显示到期时间和已激活功能
 - [ ] 引擎启动时读取激活记录，按 feature bits 控制功能开关
 - [ ] 到期前 7 天 UI 提醒（面板 banner + 桌宠状态气泡）
-- [ ] 到期后高级功能自动降级（不崩溃，不锁死）
+- [ ] 到期后亲友专属功能自动降级（不崩溃，不锁死）
 - [ ] 许可证状态面板：剩余天数、激活时间、已授权功能列表
 
 **规则模板**
 
 - [ ] 内置常用规则模板（FPS 快速连发、MOBA 技能连按等），一键导入当前配置
 
-**高级功能**
+**亲友专属功能**
 
 - [ ] 鼠标连点（按压 / Toggle）
 - [ ] 随机抖动（间隔 ± 可配置随机偏差）
