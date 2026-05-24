@@ -412,66 +412,73 @@ export default function PanelApp() {
                     >
                       ✕
                     </button>
-                    <div className="rule-main">
-                      <input
-                        type="checkbox"
-                        checked={rule.enabled}
-                        onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
-                      />
-                      {mode === 'hold' ? (
-                        <>
-                          <div className="rule-field">
-                            <label>按压键</label>
-                            <KeyCapture
-                              value={rule.trigger_key}
-                              onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
+                    <div className="rule-body">
+                      <div className="rule-main">
+                        {mode === 'hold' ? (
+                          <>
+                            <div className="rule-field">
+                              <label>按压键</label>
+                              <KeyCapture
+                                value={rule.trigger_key}
+                                onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
+                              />
+                            </div>
+                            <span className="rule-arrow">→</span>
+                            <div className="rule-field">
+                              <label>连发按键</label>
+                              <KeyCapture
+                                value={rule.target_key}
+                                onChange={(vk) => updateRule(rule.id, { target_key: vk })}
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div className="rule-field">
+                              <label>启动热键</label>
+                              <KeyCapture
+                                value={rule.trigger_key}
+                                onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
+                              />
+                            </div>
+                            <span className="rule-arrow">→</span>
+                            <div className="rule-field">
+                              <label>连发按键</label>
+                              <KeyCapture
+                                value={rule.target_key}
+                                onChange={(vk) => updateRule(rule.id, { target_key: vk })}
+                              />
+                            </div>
+                          </>
+                        )}
+                        <div className="rule-field rule-interval">
+                          <label>间隔</label>
+                          <div className="interval-input">
+                            <input
+                              type="number"
+                              min={10}
+                              max={10000}
+                              value={rule.interval_ms}
+                              onChange={(e) =>
+                                updateRule(rule.id, {
+                                  interval_ms: Math.max(
+                                    10,
+                                    Math.min(10000, Number(e.target.value)),
+                                  ),
+                                })
+                              }
                             />
+                            <span>ms</span>
                           </div>
-                          <span className="rule-arrow">→</span>
-                          <div className="rule-field">
-                            <label>连发按键</label>
-                            <KeyCapture
-                              value={rule.target_key}
-                              onChange={(vk) => updateRule(rule.id, { target_key: vk })}
-                            />
-                          </div>
-                        </>
-                      ) : (
-                        <>
-                          <div className="rule-field">
-                            <label>启动热键</label>
-                            <KeyCapture
-                              value={rule.trigger_key}
-                              onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
-                            />
-                          </div>
-                          <span className="rule-arrow">→</span>
-                          <div className="rule-field">
-                            <label>连发按键</label>
-                            <KeyCapture
-                              value={rule.target_key}
-                              onChange={(vk) => updateRule(rule.id, { target_key: vk })}
-                            />
-                          </div>
-                        </>
-                      )}
-                      <div className="rule-field rule-interval">
-                        <label>间隔</label>
-                        <div className="interval-input">
-                          <input
-                            type="number"
-                            min={10}
-                            max={10000}
-                            value={rule.interval_ms}
-                            onChange={(e) =>
-                              updateRule(rule.id, {
-                                interval_ms: Math.max(10, Math.min(10000, Number(e.target.value))),
-                              })
-                            }
-                          />
-                          <span>ms</span>
                         </div>
                       </div>
+                      <input
+                        type="checkbox"
+                        className="enable-checkbox"
+                        checked={rule.enabled}
+                        onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
+                        aria-label="启用"
+                      />
                     </div>
                     {mode === 'toggle' && advancedOpen[rule.id] && (
                       <div className="rule-advanced">
