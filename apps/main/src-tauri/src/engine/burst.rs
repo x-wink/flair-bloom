@@ -139,29 +139,44 @@ impl BurstEngine {
 }
 
 pub fn start_listener(engine: Arc<BurstEngine>) {
-    thread::spawn(move || {
-        let callback = move |event: rdev::Event| {
-            if SIM_COUNT.load(Ordering::SeqCst) > 0 {
-                return;
-            }
-            match event.event_type {
-                rdev::EventType::KeyPress(key) => {
-                    let vk = rdev_key_to_vk(key);
-                    if vk != 0 {
-                        engine.on_key_press(vk);
-                    }
+    thread::spawn(move || loop {
+        let engine_ref = engine.clone();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            let callback = move |event: rdev::Event| {
+                if SIM_COUNT.load(Ordering::SeqCst) > 0 {
+                    return;
                 }
-                rdev::EventType::KeyRelease(key) => {
-                    let vk = rdev_key_to_vk(key);
-                    if vk != 0 {
-                        engine.on_key_release(vk);
+                match event.event_type {
+                    rdev::EventType::KeyPress(key) => {
+                        let vk = rdev_key_to_vk(key);
+                        if vk != 0 {
+                            engine_ref.on_key_press(vk);
+                        }
                     }
+                    rdev::EventType::KeyRelease(key) => {
+                        let vk = rdev_key_to_vk(key);
+                        if vk != 0 {
+                            engine_ref.on_key_release(vk);
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
+            };
+            rdev::listen(callback)
+        }));
+        match result {
+            Ok(Ok(())) => {
+                info!("engine listener exited cleanly");
+                break;
             }
-        };
-        if let Err(e) = rdev::listen(callback) {
-            error!("rdev listen error: {:?}", e);
+            Ok(Err(e)) => {
+                error!("rdev listen error: {:?}", e);
+                break;
+            }
+            Err(_) => {
+                error!("engine listener panicked, restarting in 1s");
+                thread::sleep(Duration::from_secs(1));
+            }
         }
     });
     info!("burst engine listener started");

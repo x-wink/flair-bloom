@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LazyStore } from '@tauri-apps/plugin-store';
 import { useEffect, useState } from 'react';
@@ -224,6 +225,17 @@ export default function PanelApp() {
         toast.error('读取规则失败，已加载默认配置');
         pushRules(() => defaultRules());
       });
+
+    const unlistenGlobal = listen<boolean>('global-enabled-changed', (e) => {
+      setGlobalEnabled(e.payload);
+    });
+    const unlistenUpdate = listen<string>('update-available', (e) => {
+      toast.info(`发现新版本 v${e.payload}，请重启应用完成更新`);
+    });
+    return () => {
+      unlistenGlobal.then((fn) => fn());
+      unlistenUpdate.then((fn) => fn());
+    };
   }, []);
 
   function persistCloseBehavior(v: CloseBehavior) {

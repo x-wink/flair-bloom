@@ -650,7 +650,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 - [x] `rdev` 全局键盘监听 + `enigo` 按键模拟
 - [x] `AtomicUsize` sim_count 过滤事件循环
-- [ ] `catch_unwind` 包裹引擎主循环，panic 后自动重启
+- [x] `catch_unwind` 包裹引擎主循环，panic 后自动重启
 - [x] 按压连发状态机（持键发送，抬键停止）
 - [x] Toggle 连发状态机（热键开关，`tauri-plugin-global-shortcut`）
 - [x] 多规则并行支持
@@ -676,13 +676,13 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **系统托盘**
 
-- [ ] 托盘图标（启用/禁用双状态）
-- [ ] 托盘菜单：全局开关 / 打开面板 / 退出
+- [x] 托盘图标（启用/禁用双状态）
+- [x] 托盘菜单：全局开关 / 打开面板 / 退出
 
 **自动更新**
 
 - [x] `tauri-plugin-updater` 集成（插件注册完成）
-- [ ] 启动时检查更新，有新版本弹提示（版本号 + 确认安装）
+- [x] 启动时检查更新，有新版本弹提示（toast 通知版本号）
 
 **发布 v0.1**
 
