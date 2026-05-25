@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import eulaText from '../../../../assets/EULA.md?raw';
-import './AgreementPage.css';
+import eulaText from '../../../assets/EULA.md?raw';
+import './AgreementDialog.css';
 
 interface Props {
   onAgreed: () => void;

@@ -35,6 +35,11 @@ git config core.hooksPath .githooks
 ```
 apps/main/src-tauri/src/        # Tauri 后端（Rust）
 apps/main/src/windows/panel/    # 面板窗口（React）
+  main.tsx                      # 入口，挂载 Provider
+  PanelApp.tsx / .css           # 根组件
+  components/                   # UI 基础组件（Overlay、Toast、ConfirmDialog、ContextMenu、KeyCapture、SvgIcon、icons、CloseBehaviorForm）
+  dialogs/                      # 弹窗内容组件（AboutDialog、AgreementDialog、UpdateNoticeDialog）
+apps/main/src/assets/icons/     # SVG 图标源文件（currentColor / 1em 尺寸）
 apps/keygen/                    # 兑换码生成 CLI
 apps/release-server/            # 落地页（Axum，待实现）
 packages/crypto/src/
@@ -57,9 +62,9 @@ packages/qzh-format/src/
 
 **许可证**：Ed25519 离线校验。私钥仅在 `apps/keygen` 使用，不进主应用二进制。兑换码 `QZHUA-XXXXX-XXXXX-XXXXX-XXXXX`（Base32：64 字节签名 + JSON payload）。payload 含 `issue_time`（防时钟回拨）+ `expiry` + `features u32`（位掩码，见 `license.rs::feature_bits`）。公钥当前为全零占位，发布前替换。
 
-**连发引擎**（待实现）：`rdev` 全局监听 + `enigo` 模拟，`AtomicUsize sim_count` 过滤自身事件防循环，引擎线程用 `catch_unwind` 包裹。
+**连发引擎**：`windows_sys` `WH_KEYBOARD_LL` 全局键盘 Hook 监听物理按键，`SendInput` + `KEYEVENTF_SCANCODE`（`MapVirtualKeyW(MAPVK_VK_TO_VSC_EX)`）模拟扫描码输入使游戏可识别。`dwExtraInfo = SIM_MARKER` 标记自身注入事件防循环。引擎线程用 `catch_unwind` 包裹，并发连发用 `AtomicBool cancel + thread::park_timeout`，`Drop` 时先 signal 再 join 确保按键不卡住。非 Windows 平台提供空实现（`cfg(windows)` 隔离）。
 
-**数据存储路径**：`{app_data_dir}/profiles/`（.qzh）、`{app_data_dir}/settings.json`（plugin-store）、`{app_log_dir}/`（rolling logs）。由 Tauri `PathResolver` 跨平台解析。
+**数据存储路径**：`{app_data_dir}/profiles/`（.qzh）、`{app_data_dir}/settings.json`（plugin-store）、`{app_local_data_dir}/pending_update/`（下载待安装更新包）、`{app_log_dir}/`（rolling logs）。由 Tauri `PathResolver` 跨平台解析。
 
 ## 输入约束（在 `profile.rs::validate()` 执行）
 

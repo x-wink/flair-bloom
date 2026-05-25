@@ -146,14 +146,9 @@ std::panic::set_hook → 捕获 panic 信息
 │   │   ├── src/
 │   │   │   ├── windows/
 │   │   │   │   ├── panel/              # 面板窗口 UI
-│   │   │   │   │   ├── components/
-│   │   │   │   │   │   ├── RuleList/
-│   │   │   │   │   │   ├── KeyInput/
-│   │   │   │   │   │   ├── ProfilePanel/
-│   │   │   │   │   │   ├── LicensePanel/
-│   │   │   │   │   │   └── UpdatePanel/
-│   │   │   │   │   ├── pages/
-│   │   │   │   │   │   └── AgreementPage/
+│   │   │   │   │   ├── components/     # 基础 UI（Overlay、Toast、ConfirmDialog、ContextMenu、KeyCapture、SvgIcon、icons、CloseBehaviorForm）
+│   │   │   │   │   ├── dialogs/        # 弹窗内容（AboutDialog、AgreementDialog、UpdateNoticeDialog）
+│   │   │   │   │   ├── main.tsx
 │   │   │   │   │   └── PanelApp.tsx
 │   │   │   │   └── pet/                # 桌宠窗口 UI
 │   │   │   │       ├── components/
@@ -682,7 +677,8 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 **自动更新**
 
 - [x] `tauri-plugin-updater` 集成（插件注册完成）
-- [x] 启动时检查更新，有新版本弹提示（toast 通知版本号）
+- [x] 启动时静默检查并自动下载新版本，下载完成后弹更新公告弹窗（含 Release 正文）；重启后自动安装
+- [x] 用户手动"检查更新"触发同一流程，无更新时提示"已是最新版本"
 
 **发布 v0.1**
 
@@ -722,14 +718,14 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **面板完善**
 
-- [ ] 更新提示弹窗（含更新说明）
+- [x] 更新提示弹窗（含更新说明）
 - [ ] 热键冲突检测与提示
 - [ ] 规则启用/禁用开关（不删除规则）
 - [ ] 连发间隔滑块 + 数值输入
 
 **连发引擎稳定性**
 
-- [ ] `set_rules` 替换规则列表前停止所有已运行的连发线程并清空 toggle 状态，防止删除规则后孤儿线程永久运行（`burst.rs:33`）
+- [x] `set_rules` 替换规则列表前停止所有已运行的连发线程并清空 toggle 状态，防止删除规则后孤儿线程永久运行
 - [x] `set_rules` Tauri 命令加入入参校验（规则数 ≤ 64、`interval_ms` 在 `[10, 10000]`），防止非法值绕过 `profile.rs::validate()` 进入引擎导致忙循环（`commands/engine.rs:19`）
 - [ ] Hold 连发中 enigo `Direction::Click` 产生的模拟 KeyRelease 未受 SIM_COUNT 过滤，当 `trigger_key == target_key` 且为非 Unicode 键（F键/方向键等）时会被 `on_key_release` 识别为物理抬起，导致连发在第一次模拟按键后即终止（`burst.rs:159`）；需区分模拟 KeyRelease 与物理 KeyRelease
 - [ ] 模拟 target_key 产生的 KeyRelease 会触发其他以该键为 `trigger_key` 的 Hold 规则的 `stop_burst`，多规则并行时产生跨规则干扰（`burst.rs:76`）；与上条同源，同步修复
@@ -825,8 +821,8 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 | 用途              | 库 / 工具                                                  |
 | ----------------- | ---------------------------------------------------------- |
-| 全局键盘/鼠标监听 | `rdev`                                                     |
-| 按键/鼠标模拟     | `enigo`                                                    |
+| 全局键盘监听      | `windows_sys` `WH_KEYBOARD_LL`（Windows）；macOS 待定      |
+| 按键模拟          | `windows_sys` `SendInput` + `KEYEVENTF_SCANCODE`（Windows）；macOS 待定 |
 | 全局热键注册      | `tauri-plugin-global-shortcut`                             |
 | 点击穿透          | `Window::set_ignore_cursor_events()`（Tauri 内置，跨平台） |
 | 自动升级          | `tauri-plugin-updater`                                     |

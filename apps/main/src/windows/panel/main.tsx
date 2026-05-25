@@ -1,9 +1,9 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import { ConfirmProvider } from './ConfirmDialog';
-import { OverlayRoot } from './Overlay';
+import { ConfirmProvider } from './components/ConfirmDialog';
+import { OverlayRoot } from './components/Overlay';
 import PanelApp from './PanelApp';
-import { ToastProvider } from './Toast';
+import { ToastProvider } from './components/Toast';
 import './PanelApp.css';
 
 window.addEventListener('contextmenu', (e) => e.preventDefault());

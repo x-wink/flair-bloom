@@ -8,7 +8,7 @@ mod engine;
 mod tray;
 
 use commands::{
-    app::{agree_license, check_update, exit_app, needs_agreement},
+    app::{agree_license, check_update, exit_app, needs_agreement, try_apply_pending_update},
     engine::{get_global_enabled, get_rules, set_global_enabled, set_rules, EngineState},
     profile::{
         get_active_profile_path, init_default_profile, list_profiles, load_profile,
@@ -271,15 +271,64 @@ fn init_and_save_default(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) -> R
 
 async fn check_for_updates(app: tauri::AppHandle) {
     use tauri_plugin_updater::UpdaterExt;
-    match app.updater() {
-        Ok(updater) => match updater.check().await {
-            Ok(Some(update)) => {
-                info!("update available: {}", update.version);
-                let _ = app.emit("update-available", &update.version);
-            }
-            Ok(None) => info!("app is up to date"),
-            Err(e) => warn!("update check failed: {}", e),
-        },
-        Err(e) => warn!("updater not available: {}", e),
+
+    // 优先应用上次已下载的待安装包
+    if try_apply_pending_update(&app).await {
+        return; // 安装触发后应用会重启，无需继续
+    }
+
+    // 静默检查新版本并自动下载（不弹"已是最新版本"提示）
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(e) => {
+            warn!("updater not available: {}", e);
+            return;
+        }
+    };
+    let update = match updater.check().await {
+        Ok(Some(u)) => u,
+        Ok(None) => {
+            info!("app is up to date");
+            return;
+        }
+        Err(e) => {
+            warn!("update check failed: {}", e);
+            return;
+        }
+    };
+
+    let version = update.version.clone();
+    let notes = update.body.clone();
+    info!("update available: {}", version);
+    let _ = app.emit("update-downloading", &version);
+
+    let bytes = match update.download(|_, _| {}, || {}).await {
+        Ok(b) => b,
+        Err(e) => {
+            warn!("update download failed: {}", e);
+            return;
+        }
+    };
+
+    let dir = match app
+        .path()
+        .app_local_data_dir()
+        .map(|d| d.join("pending_update"))
+    {
+        Ok(d) => d,
+        Err(e) => {
+            warn!("can't get data dir: {}", e);
+            return;
+        }
+    };
+
+    if std::fs::create_dir_all(&dir).is_ok()
+        && std::fs::write(dir.join("installer"), &bytes).is_ok()
+        && std::fs::write(dir.join("version"), &version).is_ok()
+    {
+        let _ = app.emit(
+            "update-ready",
+            serde_json::json!({ "version": version, "notes": notes }),
+        );
     }
 }

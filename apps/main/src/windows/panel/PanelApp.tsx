@@ -1,3 +1,4 @@
+import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -5,14 +6,18 @@ import { LazyStore } from '@tauri-apps/plugin-store';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import iconUrl from '../../assets/icon-32.png';
 import bgUrl from '../../assets/icon.png';
-import AgreementPage from './pages/AgreementPage/AgreementPage';
-import ContextMenu from './ContextMenu';
-import Overlay from './Overlay';
-import { useConfirm } from './ConfirmDialog';
+import AboutDialog from './dialogs/AboutDialog';
+import UpdateNoticeDialog, { type UpdateNoticeInfo } from './dialogs/UpdateNoticeDialog';
+import AgreementDialog from './dialogs/AgreementDialog';
+import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
+import ContextMenu from './components/ContextMenu';
+import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/icons';
+import KeyCapture from './components/KeyCapture';
+import Overlay from './components/Overlay';
+import { useConfirm } from './components/ConfirmDialog';
+import { useToast } from './components/Toast';
 import './PanelApp.css';
-import { useToast } from './Toast';
 
-type CloseBehavior = 'minimize' | 'exit';
 const settingsStore = new LazyStore('settings.json');
 const CLOSE_BEHAVIOR_KEY = 'closeBehavior';
 const ACTIVE_TAB_KEY = 'activeTab';
@@ -44,130 +49,6 @@ interface Profile {
   advanced: { log_level: string };
 }
 
-const KEY_NAMES: Record<number, string> = {
-  0x41: 'A',
-  0x42: 'B',
-  0x43: 'C',
-  0x44: 'D',
-  0x45: 'E',
-  0x46: 'F',
-  0x47: 'G',
-  0x48: 'H',
-  0x49: 'I',
-  0x4a: 'J',
-  0x4b: 'K',
-  0x4c: 'L',
-  0x4d: 'M',
-  0x4e: 'N',
-  0x4f: 'O',
-  0x50: 'P',
-  0x51: 'Q',
-  0x52: 'R',
-  0x53: 'S',
-  0x54: 'T',
-  0x55: 'U',
-  0x56: 'V',
-  0x57: 'W',
-  0x58: 'X',
-  0x59: 'Y',
-  0x5a: 'Z',
-  0x30: '0',
-  0x31: '1',
-  0x32: '2',
-  0x33: '3',
-  0x34: '4',
-  0x35: '5',
-  0x36: '6',
-  0x37: '7',
-  0x38: '8',
-  0x39: '9',
-  0x70: 'F1',
-  0x71: 'F2',
-  0x72: 'F3',
-  0x73: 'F4',
-  0x74: 'F5',
-  0x75: 'F6',
-  0x76: 'F7',
-  0x77: 'F8',
-  0x78: 'F9',
-  0x79: 'F10',
-  0x7a: 'F11',
-  0x7b: 'F12',
-  0x20: 'Space',
-  0x0d: 'Enter',
-  0x1b: 'Esc',
-  0x08: 'Backspace',
-  0x09: 'Tab',
-  0x26: '↑',
-  0x28: '↓',
-  0x25: '←',
-  0x27: '→',
-};
-
-const BROWSER_VK: Record<string, number> = {
-  KeyA: 0x41,
-  KeyB: 0x42,
-  KeyC: 0x43,
-  KeyD: 0x44,
-  KeyE: 0x45,
-  KeyF: 0x46,
-  KeyG: 0x47,
-  KeyH: 0x48,
-  KeyI: 0x49,
-  KeyJ: 0x4a,
-  KeyK: 0x4b,
-  KeyL: 0x4c,
-  KeyM: 0x4d,
-  KeyN: 0x4e,
-  KeyO: 0x4f,
-  KeyP: 0x50,
-  KeyQ: 0x51,
-  KeyR: 0x52,
-  KeyS: 0x53,
-  KeyT: 0x54,
-  KeyU: 0x55,
-  KeyV: 0x56,
-  KeyW: 0x57,
-  KeyX: 0x58,
-  KeyY: 0x59,
-  KeyZ: 0x5a,
-  Digit0: 0x30,
-  Digit1: 0x31,
-  Digit2: 0x32,
-  Digit3: 0x33,
-  Digit4: 0x34,
-  Digit5: 0x35,
-  Digit6: 0x36,
-  Digit7: 0x37,
-  Digit8: 0x38,
-  Digit9: 0x39,
-  F1: 0x70,
-  F2: 0x71,
-  F3: 0x72,
-  F4: 0x73,
-  F5: 0x74,
-  F6: 0x75,
-  F7: 0x76,
-  F8: 0x77,
-  F9: 0x78,
-  F10: 0x79,
-  F11: 0x7a,
-  F12: 0x7b,
-  Space: 0x20,
-  Enter: 0x0d,
-  Escape: 0x1b,
-  Backspace: 0x08,
-  Tab: 0x09,
-  ArrowUp: 0x26,
-  ArrowDown: 0x28,
-  ArrowLeft: 0x25,
-  ArrowRight: 0x27,
-};
-
-function keyLabel(vk: number): string {
-  return KEY_NAMES[vk] ?? (vk ? `0x${vk.toString(16).toUpperCase()}` : '—');
-}
-
 function newRule(mode: BurstMode = 'hold'): BurstRule {
   const isHold = mode === 'hold';
   const vk = isHold ? 0x51 : 0x46;
@@ -186,34 +67,13 @@ function defaultRules(): BurstRule[] {
   return [newRule('hold'), newRule('toggle')];
 }
 
-function KeyCapture({ value, onChange }: { value: number; onChange: (vk: number) => void }) {
-  const [capturing, setCapturing] = useState(false);
-
-  function handleKeyDown(e: React.KeyboardEvent) {
-    e.preventDefault();
-    const vk = BROWSER_VK[e.code];
-    if (vk) {
-      onChange(vk);
-      setCapturing(false);
-    }
-  }
-
-  return (
-    <button
-      className={`key-capture${capturing ? ' capturing' : ''}`}
-      onKeyDown={capturing ? handleKeyDown : undefined}
-      onClick={() => setCapturing(true)}
-      onBlur={() => setCapturing(false)}
-    >
-      {capturing ? '按下按键…' : keyLabel(value)}
-    </button>
-  );
-}
-
 export default function PanelApp() {
   const [showAgreement, setShowAgreement] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [appVersion, setAppVersion] = useState('');
+  const [updateNotice, setUpdateNotice] = useState<UpdateNoticeInfo | null>(null);
+  const [showUpdateNotice, setShowUpdateNotice] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const [globalEnabled, setGlobalEnabled] = useState(false);
   const [rules, setRules] = useState<BurstRule[]>([]);
@@ -229,6 +89,12 @@ export default function PanelApp() {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
     };
+  }, []);
+
+  useEffect(() => {
+    getVersion()
+      .then(setAppVersion)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -284,8 +150,12 @@ export default function PanelApp() {
     const unlistenGlobal = listen<boolean>('global-enabled-changed', (e) => {
       setGlobalEnabled(e.payload);
     });
-    const unlistenUpdate = listen<string>('update-available', (e) => {
-      toast.info(`发现新版本 v${e.payload}，请重启应用完成更新`);
+    const unlistenDownloading = listen<string>('update-downloading', (e) => {
+      toast.info(`发现新版本 v${e.payload}，正在下载更新…`);
+    });
+    const unlistenReady = listen<UpdateNoticeInfo>('update-ready', (e) => {
+      setUpdateNotice(e.payload);
+      setShowUpdateNotice(true);
     });
     const unlistenUpToDate = listen('update-not-available', () => {
       toast.info('已是最新版本');
@@ -297,7 +167,8 @@ export default function PanelApp() {
     return () => {
       unlistenAgreement.then((fn) => fn());
       unlistenGlobal.then((fn) => fn());
-      unlistenUpdate.then((fn) => fn());
+      unlistenDownloading.then((fn) => fn());
+      unlistenReady.then((fn) => fn());
       unlistenUpToDate.then((fn) => fn());
       unlistenClose.then((fn) => fn());
     };
@@ -472,6 +343,17 @@ export default function PanelApp() {
     });
   }
 
+  function handleShowUpdateNotice() {
+    setMenuOpen(false);
+    if (updateNotice) {
+      setShowUpdateNotice(true);
+    } else {
+      invoke('check_update').catch(() => {
+        toast.warning('检查更新失败，请检查网络连接后重试');
+      });
+    }
+  }
+
   function handleShowAbout() {
     setMenuOpen(false);
     setShowAbout(true);
@@ -503,7 +385,7 @@ export default function PanelApp() {
     >
       <header className="panel-header" data-tauri-drag-region>
         <img className="header-icon" src={iconUrl} alt="" data-tauri-drag-region />
-        <h1 data-tauri-drag-region>气质花按键助手 v0.1</h1>
+        <h1 data-tauri-drag-region>气质花按键助手{appVersion ? ` v${appVersion}` : ''}</h1>
         <div className="window-controls">
           <button
             ref={menuBtnRef}
@@ -511,17 +393,17 @@ export default function PanelApp() {
             onClick={() => setMenuOpen((v) => !v)}
             aria-label="菜单"
           >
-            ☰
+            <MenuIcon size={14} />
           </button>
           <button
             className="win-btn"
             onClick={() => getCurrentWindow().minimize()}
             aria-label="最小化"
           >
-            ─
+            <MinimizeIcon size={14} />
           </button>
           <button className="win-btn close" onClick={handleClose} aria-label="关闭">
-            ✕
+            <CloseIcon size={14} />
           </button>
         </div>
       </header>
@@ -659,22 +541,7 @@ export default function PanelApp() {
                         onClick={() => toggleAdvanced(rule.id)}
                         aria-label="高级设置"
                       >
-                        <svg
-                          className="chevron"
-                          viewBox="0 0 12 12"
-                          width="10"
-                          height="10"
-                          aria-hidden="true"
-                        >
-                          <path
-                            d="M2 4 L6 8 L10 4"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="1.6"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                          />
-                        </svg>
+                        <ChevronIcon size={10} className="chevron" />
                         <span className="expand-label">
                           {advancedOpen[rule.id] ? '收起高级设置' : '高级设置'}
                         </span>
@@ -707,82 +574,28 @@ export default function PanelApp() {
         target={menuBtnRef}
         items={[
           { label: '检查更新', onClick: handleCheckUpdate },
+          {
+            label: updateNotice ? '更新公告 ●' : '更新公告',
+            onClick: handleShowUpdateNotice,
+          },
           { label: '用户协议', onClick: handleShowAgreement },
           { label: '关于', onClick: handleShowAbout },
         ]}
       />
 
       <Overlay open={showAgreement} onClose={() => setShowAgreement(false)} closeOnBackdrop={false}>
-        <AgreementPage onAgreed={handleAgreed} />
+        <AgreementDialog onAgreed={handleAgreed} />
+      </Overlay>
+
+      <Overlay open={showUpdateNotice} onClose={() => setShowUpdateNotice(false)}>
+        {updateNotice && (
+          <UpdateNoticeDialog info={updateNotice} onClose={() => setShowUpdateNotice(false)} />
+        )}
       </Overlay>
 
       <Overlay open={showAbout} onClose={() => setShowAbout(false)}>
-        <div className="about-card">
-          <h2 className="about-title">关于气质花</h2>
-          <p className="about-name">气质花按键助手（FlairBloom）</p>
-          <p className="about-ver">版本 0.1.0</p>
-          <p className="about-desc">
-            面向游戏辅助的按键助手。核心功能免费，亲友专属功能通过兑换码激活。
-          </p>
-          <button className="btn-primary about-close-btn" onClick={() => setShowAbout(false)}>
-            关闭
-          </button>
-        </div>
+        <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />
       </Overlay>
     </div>
-  );
-}
-
-function CloseBehaviorForm({
-  defaultChoice,
-  onChange,
-}: {
-  defaultChoice: CloseBehavior;
-  onChange: (choice: CloseBehavior, remember: boolean) => void;
-}) {
-  const [choice, setChoice] = useState<CloseBehavior>(defaultChoice);
-  const [remember, setRemember] = useState(false);
-
-  function update(c: CloseBehavior, r: boolean) {
-    setChoice(c);
-    setRemember(r);
-    onChange(c, r);
-  }
-
-  return (
-    <>
-      <label className="radio-row">
-        <input
-          type="radio"
-          name="close-choice"
-          checked={choice === 'minimize'}
-          onChange={() => update('minimize', remember)}
-        />
-        <span>
-          <strong>最小化到托盘</strong>
-          <small>程序继续在后台运行（推荐）</small>
-        </span>
-      </label>
-      <label className="radio-row">
-        <input
-          type="radio"
-          name="close-choice"
-          checked={choice === 'exit'}
-          onChange={() => update('exit', remember)}
-        />
-        <span>
-          <strong>直接退出</strong>
-          <small>关闭程序与所有连发功能</small>
-        </span>
-      </label>
-      <label className="check-row">
-        <input
-          type="checkbox"
-          checked={remember}
-          onChange={(e) => update(choice, e.target.checked)}
-        />
-        <span>记住我的选择</span>
-      </label>
-    </>
   );
 }
