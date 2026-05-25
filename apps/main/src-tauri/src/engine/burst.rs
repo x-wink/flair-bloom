@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 use tracing::{error, info};
+#[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{LPARAM, WPARAM},
     UI::WindowsAndMessaging::{
@@ -20,6 +21,7 @@ use windows_sys::Win32::{
 };
 
 /// hook 回调通过静态 Weak 引用访问引擎，避免 Arc 延长生命周期
+#[cfg(windows)]
 static ENGINE_HOOK: OnceLock<Weak<BurstEngine>> = OnceLock::new();
 
 type ActiveLoops = Arc<Mutex<HashMap<String, (Arc<AtomicBool>, thread::Thread)>>>;
@@ -165,9 +167,11 @@ impl BurstEngine {
 
 /// KF_REPEAT (0x4000) >> 8：KBDLLHOOKSTRUCT.flags 第 6 位，OS key-repeat 时置位。
 /// Microsoft SDK 未定义命名常量，但与 LLKHF_EXTENDED/ALTDOWN/UP 的推导规律一致。
+#[cfg(windows)]
 const LLKHF_REPEAT: u32 = 0x40;
 
 /// WH_KEYBOARD_LL 低级键盘钩子回调；运行在安装 hook 的线程（消息循环线程）上
+#[cfg(windows)]
 unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> isize {
     if ncode >= 0 {
         let kb = &*(lparam as *const KBDLLHOOKSTRUCT);
@@ -188,6 +192,7 @@ unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
     CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam)
 }
 
+#[cfg(windows)]
 pub fn start_listener(engine: Arc<BurstEngine>) {
     let _ = ENGINE_HOOK.set(Arc::downgrade(&engine));
     thread::spawn(move || {
@@ -214,4 +219,9 @@ pub fn start_listener(engine: Arc<BurstEngine>) {
         info!("键盘 hook 已卸载");
     });
     info!("连发引擎监听器已启动");
+}
+
+#[cfg(not(windows))]
+pub fn start_listener(_engine: Arc<BurstEngine>) {
+    info!("连发引擎监听器（当前平台暂不支持键盘 hook）");
 }

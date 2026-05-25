@@ -1,3 +1,4 @@
+#[cfg(windows)]
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_KEYUP,
 };
@@ -6,6 +7,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 pub const SIM_MARKER: usize = 0x5148_5844;
 
 pub fn simulate_keypress(vk: u32) {
+    #[cfg(windows)]
     unsafe {
         let inputs = [
             INPUT {
@@ -39,4 +41,6 @@ pub fn simulate_keypress(vk: u32) {
             std::mem::size_of::<INPUT>() as i32,
         );
     }
+    #[cfg(not(windows))]
+    let _ = vk;
 }
