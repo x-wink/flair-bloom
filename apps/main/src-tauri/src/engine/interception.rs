@@ -1,5 +1,4 @@
 use interception_sys::*;
-use std::ptr;
 use tracing::{error, info};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MapVirtualKeyW, MAPVK_VK_TO_VSC_EX};
 
@@ -17,7 +16,7 @@ impl InterceptionBackend {
         if ctx.is_null() {
             return None;
         }
-        let device = find_keyboard(ctx)?;
+        let device = find_keyboard()?;
         info!("Interception 后端初始化成功，键盘设备 ID: {}", device);
         Some(Self {
             ctx,
@@ -65,7 +64,7 @@ impl Drop for InterceptionBackend {
     }
 }
 
-fn find_keyboard(ctx: InterceptionContext) -> Option<InterceptionDevice> {
+fn find_keyboard() -> Option<InterceptionDevice> {
     for device in 1..=(INTERCEPTION_MAX_KEYBOARD as InterceptionDevice) {
         if unsafe { interception_is_keyboard(device) } != 0 {
             return Some(device);

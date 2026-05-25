@@ -17,7 +17,7 @@ use commands::{
     },
     engine::{
         get_global_enabled, get_input_mode, get_rules, install_driver, is_driver_installed,
-        set_global_enabled, set_input_mode, set_rules, EngineState,
+        set_global_enabled, set_input_mode, set_rules, uninstall_driver, EngineState,
     },
     log::{log_from_frontend, open_log_dir},
     profile::{
@@ -135,6 +135,7 @@ pub fn run() {
             set_input_mode,
             is_driver_installed,
             install_driver,
+            uninstall_driver,
             save_profile,
             load_profile,
             list_profiles,

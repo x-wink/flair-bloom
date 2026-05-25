@@ -13,6 +13,7 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "resources": ["resources/install-interception.exe"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

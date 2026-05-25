@@ -1,7 +1,9 @@
-use super::input::{key_down, key_up};
 #[cfg(windows)]
 use super::input::SIM_MARKER;
+use super::input::{key_down, key_up};
 use qzh_format::profile::{BurstMode, BurstRule};
+#[cfg(windows)]
+use std::sync::{RwLock, Weak};
 use std::{
     collections::HashMap,
     sync::{
@@ -12,10 +14,8 @@ use std::{
     time::Duration,
 };
 #[cfg(windows)]
-use std::sync::{RwLock, Weak};
-use tracing::info;
-#[cfg(windows)]
 use tracing::error;
+use tracing::info;
 #[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{LPARAM, WPARAM},
@@ -30,7 +30,8 @@ use windows_sys::Win32::{
 #[cfg(windows)]
 static ENGINE_HOOK: RwLock<Option<Weak<BurstEngine>>> = RwLock::new(None);
 
-type ActiveLoops = Arc<Mutex<HashMap<String, (Arc<AtomicBool>, thread::Thread, u32, thread::JoinHandle<()>)>>>;
+type ActiveLoops =
+    Arc<Mutex<HashMap<String, (Arc<AtomicBool>, thread::Thread, u32, thread::JoinHandle<()>)>>>;
 
 pub struct BurstEngine {
     pub global_enabled: Arc<AtomicBool>,
@@ -148,7 +149,10 @@ impl BurstEngine {
             handle.thread().unpark();
             return;
         }
-        loops.insert(rule.id.clone(), (cancel, handle.thread().clone(), target_key, handle));
+        loops.insert(
+            rule.id.clone(),
+            (cancel, handle.thread().clone(), target_key, handle),
+        );
     }
 
     fn handle_toggle_press(&self, rule: &BurstRule) {
@@ -199,11 +203,16 @@ impl BurstEngine {
             handle.thread().unpark();
             return;
         }
-        loops.insert(rule.id.clone(), (cancel, handle.thread().clone(), target_key, handle));
+        loops.insert(
+            rule.id.clone(),
+            (cancel, handle.thread().clone(), target_key, handle),
+        );
     }
 
     fn stop_burst(&self, rule_id: &str) {
-        if let Some((cancel, thread_handle, _, _join)) = self.active_loops.lock().unwrap().remove(rule_id) {
+        if let Some((cancel, thread_handle, _, _join)) =
+            self.active_loops.lock().unwrap().remove(rule_id)
+        {
             cancel.store(true, Ordering::SeqCst);
             // 调用两次覆盖 hold_ms 和 rest_ms 两个 park 点：
             // token 是单 bit，若线程在 hold_ms 睡眠则第一次唤醒、第二次 no-op；
@@ -248,7 +257,11 @@ unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
         let kb = &*(lparam as *const KBDLLHOOKSTRUCT);
         // 通过 dwExtraInfo 精确过滤 SendInput 模拟事件，无竞态
         if kb.dwExtraInfo != SIM_MARKER {
-            let engine = ENGINE_HOOK.read().unwrap().as_ref().and_then(|w| w.upgrade());
+            let engine = ENGINE_HOOK
+                .read()
+                .unwrap()
+                .as_ref()
+                .and_then(|w| w.upgrade());
             if let Some(engine) = engine {
                 match wparam as u32 {
                     // key-repeat 时跳过：Toggle 模式下持续按键会反复开关连发

@@ -1,6 +1,6 @@
 pub mod burst;
+pub mod input;
 #[cfg(windows)]
 pub mod interception;
-pub mod input;
 
 pub use burst::BurstEngine;

@@ -1,9 +1,9 @@
 #[cfg(windows)]
 use super::interception::InterceptionBackend;
 #[cfg(windows)]
-use std::sync::OnceLock;
-#[cfg(windows)]
 use std::sync::Mutex;
+#[cfg(windows)]
+use std::sync::OnceLock;
 #[cfg(windows)]
 use tracing::{info, warn};
 #[cfg(windows)]
@@ -16,18 +16,12 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 pub const SIM_MARKER: usize = 0x5148_5844;
 
 #[cfg(windows)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InputMode {
+    #[default]
     SendInput,
     Interception,
-}
-
-#[cfg(windows)]
-impl Default for InputMode {
-    fn default() -> Self {
-        Self::SendInput
-    }
 }
 
 #[cfg(windows)]
@@ -90,7 +84,11 @@ unsafe fn send_via_sendinput(vk: u32, flags: u32) {
     let (w_vk, w_scan, scan_flags) = if scan == 0 || prefix == 0xE1 {
         (vk as u16, 0u16, 0u32)
     } else {
-        let ext = if prefix == 0xE0 { KEYEVENTF_EXTENDEDKEY } else { 0 };
+        let ext = if prefix == 0xE0 {
+            KEYEVENTF_EXTENDEDKEY
+        } else {
+            0
+        };
         (0u16, scan, KEYEVENTF_SCANCODE | ext)
     };
     let input = INPUT {

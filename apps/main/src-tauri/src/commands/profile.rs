@@ -2,7 +2,9 @@ use crypto::aes;
 use qzh_format::{
     header::{FileHeader, MAGIC, VERSION},
     migrate::migrate_profile,
-    profile::{BurstMode, BurstRule, Hotkeys, Advanced, Profile, ProfileMeta, CURRENT_SCHEMA_VERSION},
+    profile::{
+        Advanced, BurstMode, BurstRule, Hotkeys, Profile, ProfileMeta, CURRENT_SCHEMA_VERSION,
+    },
 };
 use std::{
     path::{Path, PathBuf},
@@ -110,7 +112,11 @@ pub fn save_profile(
 }
 
 #[tauri::command]
-pub fn load_profile(app: AppHandle, path: String, state: State<EngineState>) -> Result<Profile, String> {
+pub fn load_profile(
+    app: AppHandle,
+    path: String,
+    state: State<EngineState>,
+) -> Result<Profile, String> {
     // 只允许加载 profiles_dir 下的文件，防止路径遍历
     let dir = profiles_dir(&app)?;
     let file_name = Path::new(&path)
@@ -173,13 +179,12 @@ pub fn list_profiles(app: AppHandle) -> Result<Vec<ProfileMeta>, String> {
                     let aad = header.aad();
                     let ciphertext = &data[FileHeader::SIZE..];
                     if let Ok(plaintext) = aes::decrypt(ciphertext, &header.nonce, &aad) {
-                        if let Ok(meta) =
-                            serde_json::from_slice::<serde_json::Value>(&plaintext)
-                                .and_then(|v| {
-                                    serde_json::from_value::<ProfileMeta>(
-                                        v.get("meta").cloned().unwrap_or_default(),
-                                    )
-                                })
+                        if let Ok(meta) = serde_json::from_slice::<serde_json::Value>(&plaintext)
+                            .and_then(|v| {
+                                serde_json::from_value::<ProfileMeta>(
+                                    v.get("meta").cloned().unwrap_or_default(),
+                                )
+                            })
                         {
                             metas.push(meta);
                         }
@@ -196,10 +201,7 @@ pub fn list_profiles(app: AppHandle) -> Result<Vec<ProfileMeta>, String> {
 }
 
 #[tauri::command]
-pub fn init_default_profile(
-    app: AppHandle,
-    state: State<EngineState>,
-) -> Result<Profile, String> {
+pub fn init_default_profile(app: AppHandle, state: State<EngineState>) -> Result<Profile, String> {
     let now = now_secs();
 
     let profile = Profile {

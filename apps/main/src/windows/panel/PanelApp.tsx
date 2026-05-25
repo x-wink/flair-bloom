@@ -258,13 +258,32 @@ export default function PanelApp() {
         if (!driverInstalled) {
           const ok = await confirm({
             title: '安装驱动',
-            description: '驱动增强需要安装 Interception 内核驱动，安装后需重启电脑生效。确认安装？',
+            description: (
+              <>
+                驱动增强需要安装 Interception 内核驱动。点击「安装」后将弹出 UAC
+                授权窗口，授权后控制台窗口会一闪而过即为安装完成。
+                <br />
+                <br />
+                <strong>安装完成后必须重启电脑，驱动才会生效。</strong>
+              </>
+            ),
             confirmText: '安装',
           });
           if (!ok) return;
           await invoke('install_driver');
-          setDriverInstalled(true);
-          toast.info('驱动安装程序已启动，请在 UAC 弹窗中确认，完成后重启电脑');
+          await confirm({
+            title: '请重启电脑',
+            description: (
+              <>
+                驱动安装程序已启动。如系统弹出「可能未正确安装此程序」提示，请点击「已正确安装此程序」。
+                <br />
+                <br />
+                <strong>安装完成后请重启电脑</strong>，重启后再次开启驱动增强即可生效。
+              </>
+            ),
+            confirmText: '我已知晓',
+            cancelText: '稍后处理',
+          });
           return;
         }
         await invoke('set_input_mode', { mode: 'interception' });
@@ -288,12 +307,9 @@ export default function PanelApp() {
   }
 
   function pushRules(updater: (prev: BurstRule[]) => BurstRule[]) {
-    let next: BurstRule[];
-    setRules((prev) => {
-      next = updater(prev);
-      return next;
-    });
-    invoke('set_rules', { rules: next! }).catch(async (e) => {
+    const next = updater(rules);
+    setRules(next);
+    invoke('set_rules', { rules: next }).catch(async (e) => {
       toast.error(`保存规则失败：${e}`);
       try {
         const engineRules = await invoke<BurstRule[]>('get_rules');
@@ -424,6 +440,45 @@ export default function PanelApp() {
   function handleShowAbout() {
     setMenuOpen(false);
     setShowAbout(true);
+  }
+
+  async function handleUninstallDriver() {
+    setMenuOpen(false);
+    const ok = await confirm({
+      title: '卸载驱动',
+      description: (
+        <>
+          将卸载 Interception 内核驱动。卸载后驱动增强功能将不可用，应用会切回标准模式。
+          <br />
+          <br />
+          <strong>卸载完成后必须重启电脑才能彻底生效。</strong>
+        </>
+      ),
+      confirmText: '卸载',
+      cancelText: '取消',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await invoke('uninstall_driver');
+      setDriverMode(false);
+      setDriverInstalled(false);
+      await confirm({
+        title: '卸载完成',
+        description: (
+          <>
+            驱动已卸载。如系统弹出「可能未正确安装此程序」提示，请点击「已正确安装此程序」。
+            <br />
+            <br />
+            <strong>请重启电脑使卸载彻底生效。</strong>
+          </>
+        ),
+        confirmText: '我已知晓',
+        cancelText: '稍后处理',
+      });
+    } catch (e) {
+      toast.error(`卸载失败：${e}`);
+    }
   }
 
   function handleAgreed() {
@@ -670,6 +725,9 @@ export default function PanelApp() {
           { label: '查看日志', onClick: handleOpenLogDir },
           { label: '用户协议', onClick: handleShowAgreement },
           { label: '关于', onClick: handleShowAbout },
+          ...(driverInstalled
+            ? [{ label: '卸载驱动', onClick: handleUninstallDriver, danger: true }]
+            : []),
         ]}
       />
 

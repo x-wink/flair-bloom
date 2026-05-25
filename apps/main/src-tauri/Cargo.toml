@@ -31,5 +31,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
+    "Win32_System_Threading",
+    "Win32_System_Registry",
 ] }
 interception-sys = "0.1.3"

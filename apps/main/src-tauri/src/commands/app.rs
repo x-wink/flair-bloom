@@ -54,7 +54,9 @@ pub fn agree_license(app: AppHandle) -> Result<(), String> {
         "app_version_at_agree",
         serde_json::json!(env!("CARGO_PKG_VERSION")),
     );
-    store.save().map_err(|e| format!("保存协议状态失败: {}", e))?;
+    store
+        .save()
+        .map_err(|e| format!("保存协议状态失败: {}", e))?;
     Ok(())
 }
 
@@ -91,16 +93,19 @@ async fn do_check_update(app: &AppHandle) -> Result<(), String> {
     let _ = app.emit("update-downloading", &version);
 
     let bytes = update
-        .download(|_chunk, _total| {}, || {
-            info!("update downloaded");
-        })
+        .download(
+            |_chunk, _total| {},
+            || {
+                info!("update downloaded");
+            },
+        )
         .await
         .map_err(|e| {
             warn!("update download failed: {}", e);
             format!("下载更新失败: {}", e)
         })?;
 
-    save_pending_update(&app, &version, &bytes)?;
+    save_pending_update(app, &version, &bytes)?;
     let _ = app.emit(
         "update-ready",
         serde_json::json!({ "version": version, "notes": notes }),
@@ -116,10 +121,8 @@ fn save_pending_update(app: &AppHandle, version: &str, bytes: &[u8]) -> Result<(
         .map_err(|e| format!("无法获取应用数据目录: {}", e))?
         .join(PENDING_UPDATE_DIR);
     std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建更新目录: {}", e))?;
-    std::fs::write(dir.join("installer"), bytes)
-        .map_err(|e| format!("保存安装包失败: {}", e))?;
-    std::fs::write(dir.join("version"), version)
-        .map_err(|e| format!("保存版本信息失败: {}", e))?;
+    std::fs::write(dir.join("installer"), bytes).map_err(|e| format!("保存安装包失败: {}", e))?;
+    std::fs::write(dir.join("version"), version).map_err(|e| format!("保存版本信息失败: {}", e))?;
     Ok(())
 }
 
@@ -225,8 +228,6 @@ fn now_secs() -> u64 {
 }
 
 fn version_ge(a: &str, b: &str) -> bool {
-    let parse = |s: &str| -> Vec<u32> {
-        s.split('.').filter_map(|p| p.parse().ok()).collect()
-    };
+    let parse = |s: &str| -> Vec<u32> { s.split('.').filter_map(|p| p.parse().ok()).collect() };
     parse(a) >= parse(b)
 }
