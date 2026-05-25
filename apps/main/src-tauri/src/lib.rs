@@ -16,10 +16,10 @@ use commands::{
         UpdateLock,
     },
     engine::{
-        get_global_enabled, get_input_mode, get_rules, install_dd_hid_driver, install_driver,
-        is_dd_hid_driver_installed, is_driver_installed, is_elevated, relaunch_as_admin,
-        set_global_enabled, set_input_mode, set_rules, uninstall_dd_hid_driver, uninstall_driver,
-        EngineState,
+        get_active_rules, get_global_enabled, get_input_mode, get_rules, install_dd_hid_driver,
+        install_driver, is_dd_hid_driver_installed, is_driver_installed, is_elevated,
+        relaunch_as_admin, set_global_enabled, set_input_mode, set_rules, uninstall_dd_hid_driver,
+        uninstall_driver, EngineState,
     },
     log::{log_from_frontend, open_log_dir},
     profile::{
@@ -133,6 +133,7 @@ pub fn run() {
             get_global_enabled,
             set_rules,
             get_rules,
+            get_active_rules,
             get_input_mode,
             set_input_mode,
             is_driver_installed,
@@ -290,7 +291,7 @@ fn init_and_save_default(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) -> R
     let profile = qzh_format::profile::Profile {
         schema_version: qzh_format::profile::CURRENT_SCHEMA_VERSION,
         meta: qzh_format::profile::ProfileMeta {
-            name: "默认配置".to_string(),
+            name: "defults".to_string(),
             created_at: now,
             updated_at: now,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -349,7 +350,7 @@ fn init_and_save_default(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) -> R
     };
 
     let header = qzh_format::header::FileHeader::new(nonce);
-    let file_path = dir.join("默认配置.qzh");
+    let file_path = dir.join("defults.qzh");
     let tmp_path = file_path.with_extension("qzh.tmp");
     let mut data = header.to_bytes();
     data.extend_from_slice(&ciphertext);

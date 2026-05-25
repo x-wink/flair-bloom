@@ -73,6 +73,11 @@ pub fn get_rules(state: State<EngineState>) -> Vec<BurstRule> {
 }
 
 #[tauri::command]
+pub fn get_active_rules(state: State<EngineState>) -> Vec<String> {
+    state.0.get_active_ids()
+}
+
+#[tauri::command]
 pub fn get_input_mode() -> String {
     #[cfg(windows)]
     {

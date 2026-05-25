@@ -94,7 +94,8 @@ export default function PanelApp() {
   const [modePickerOpen, setModePickerOpen] = useState(false);
   const modeBtnRef = useRef<HTMLButtonElement>(null);
   const [rules, setRules] = useState<BurstRule[]>([]);
-  const [profileName, setProfileName] = useState('默认配置');
+  const [activeRuleIds, setActiveRuleIds] = useState<Set<string>>(new Set());
+  const [profileName, setProfileName] = useState('defults');
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<BurstMode>('toggle');
   const confirm = useConfirm();
@@ -112,7 +113,7 @@ export default function PanelApp() {
   useEffect(() => {
     getVersion()
       .then(setAppVersion)
-      .catch(() => { });
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -121,7 +122,7 @@ export default function PanelApp() {
       .then((v) => {
         if (v === 'hold' || v === 'toggle') setActiveTab(v);
       })
-      .catch(() => { });
+      .catch(() => {});
 
     invoke<boolean>('get_global_enabled')
       .then(setGlobalEnabled)
@@ -135,16 +136,16 @@ export default function PanelApp() {
           setInputMode(mode as InputMode);
         }
       })
-      .catch(() => { });
+      .catch(() => {});
     invoke<boolean>('is_driver_installed')
       .then(setInterceptionInstalled)
-      .catch(() => { });
+      .catch(() => {});
     invoke<boolean>('is_dd_hid_driver_installed')
       .then(setDdHidInstalled)
-      .catch(() => { });
+      .catch(() => {});
     invoke<boolean>('is_elevated')
       .then(setElevated)
-      .catch(() => { });
+      .catch(() => {});
 
     // 引擎已在启动时从 .qzh 加载了规则，直接读取
     invoke<BurstRule[]>('get_rules')
@@ -162,7 +163,7 @@ export default function PanelApp() {
             .catch(() => {
               toast.error('初始化默认配置失败');
               setRules(defaultRules());
-              invoke('set_rules', { rules: defaultRules() }).catch(() => { });
+              invoke('set_rules', { rules: defaultRules() }).catch(() => {});
               queueMicrotask(() => {
                 initialLoadDone.current = true;
               });
@@ -177,7 +178,7 @@ export default function PanelApp() {
       .catch(() => {
         toast.error('读取规则失败，已加载默认配置');
         setRules(defaultRules());
-        invoke('set_rules', { rules: defaultRules() }).catch(() => { });
+        invoke('set_rules', { rules: defaultRules() }).catch(() => {});
         queueMicrotask(() => {
           initialLoadDone.current = true;
         });
@@ -191,7 +192,7 @@ export default function PanelApp() {
       .then((needed) => {
         if (needed) setShowAgreement(true);
       })
-      .catch(() => { });
+      .catch(() => {});
     const unlistenGlobal = listen<boolean>('global-enabled-changed', (e) => {
       setGlobalEnabled(e.payload);
     });
@@ -248,6 +249,33 @@ export default function PanelApp() {
     if (!initialLoadDone.current) return;
     saveRules(rules);
   }, [rules, saveRules]);
+
+  // 全局开关启用时轮询活动规则 ID，驱动激活态脉冲动画。
+  // 关闭时清空，避免残留高亮。
+  useEffect(() => {
+    if (!globalEnabled) {
+      setActiveRuleIds((prev) => (prev.size === 0 ? prev : new Set()));
+      return;
+    }
+    let cancelled = false;
+    const poll = () => {
+      invoke<string[]>('get_active_rules')
+        .then((ids) => {
+          if (cancelled) return;
+          setActiveRuleIds((prev) => {
+            if (prev.size === ids.length && ids.every((id) => prev.has(id))) return prev;
+            return new Set(ids);
+          });
+        })
+        .catch(() => {});
+    };
+    poll();
+    const timer = setInterval(poll, 120);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [globalEnabled]);
 
   function persistCloseBehavior(v: CloseBehavior) {
     settingsStore
@@ -398,16 +426,7 @@ export default function PanelApp() {
   }
 
   function updateRule(id: string, patch: Partial<BurstRule>) {
-    pushRules((prev) =>
-      prev.map((r) => {
-        if (r.id !== id) return r;
-        const merged = { ...r, ...patch };
-        if (patch.trigger_key !== undefined && r.mode === 'hold' && !advancedOpen[id]) {
-          merged.target_key = patch.trigger_key;
-        }
-        return merged;
-      }),
-    );
+    pushRules((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)));
   }
 
   function toggleAdvanced(id: string) {
@@ -587,7 +606,7 @@ export default function PanelApp() {
           })
           .catch(() => {
             setRules(defaultRules());
-            invoke('set_rules', { rules: defaultRules() }).catch(() => { });
+            invoke('set_rules', { rules: defaultRules() }).catch(() => {});
           });
       } else {
         setRules(loaded);
@@ -666,110 +685,122 @@ export default function PanelApp() {
             <div className="rule-group" key={mode}>
               <div className="rules-list">
                 {groupRules.length === 0 && <p className="empty">暂无{title}规则</p>}
-                {groupRules.map((rule) => (
-                  <div key={rule.id} className={`rule-row${rule.enabled ? '' : ' disabled'}`}>
-                    <button
-                      className="del-btn"
-                      onClick={() => handleDelete(rule.id)}
-                      aria-label="删除"
-                      title="删除"
+                {groupRules.map((rule) => {
+                  const isActive = activeRuleIds.has(rule.id);
+                  const showAdvanced = advancedOpen[rule.id];
+                  return (
+                    <div
+                      key={rule.id}
+                      className={`rule-row${rule.enabled ? '' : ' disabled'}${isActive ? ' active' : ''}`}
                     >
-                      ✕
-                    </button>
-                    <div className="rule-body">
-                      <div className="rule-main">
-                        {mode === 'hold' ? (
-                          <>
-                            <div className="rule-field">
-                              <label>按压键</label>
-                              <KeyCapture
-                                value={rule.trigger_key}
-                                onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
-                              />
-                            </div>
-                            <span className="rule-arrow">→</span>
+                      <button
+                        className="del-btn"
+                        onClick={() => handleDelete(rule.id)}
+                        aria-label="删除"
+                        title="删除"
+                      >
+                        ✕
+                      </button>
+                      <div className="rule-body">
+                        <div className="rule-main">
+                          {mode === 'hold' ? (
                             <div className="rule-field">
                               <label>连发按键</label>
                               <KeyCapture
                                 value={rule.target_key}
-                                onChange={(vk) => updateRule(rule.id, { target_key: vk })}
+                                onChange={(vk) => {
+                                  const patch: Partial<BurstRule> = { target_key: vk };
+                                  // 高级未展开时，触发键跟随连发键同步，符合「等技能 CD 好就按」的默认场景
+                                  if (!showAdvanced) patch.trigger_key = vk;
+                                  updateRule(rule.id, patch);
+                                }}
                               />
                             </div>
-                          </>
-                        ) : (
-                          <>
-                            <div className="rule-field">
-                              <label>启动热键</label>
-                              <KeyCapture
-                                value={rule.trigger_key}
-                                onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
+                          ) : (
+                            <>
+                              <div className="rule-field">
+                                <label>启动热键</label>
+                                <KeyCapture
+                                  value={rule.trigger_key}
+                                  onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
+                                />
+                              </div>
+                              <span className="rule-arrow">→</span>
+                              <div className="rule-field">
+                                <label>连发按键</label>
+                                <KeyCapture
+                                  value={rule.target_key}
+                                  onChange={(vk) => updateRule(rule.id, { target_key: vk })}
+                                />
+                              </div>
+                            </>
+                          )}
+                          <div className="rule-field rule-interval">
+                            <label>间隔</label>
+                            <div className="interval-input">
+                              <input
+                                type="number"
+                                min={10}
+                                max={10000}
+                                value={rule.interval_ms}
+                                onChange={(e) =>
+                                  updateRule(rule.id, {
+                                    interval_ms: Math.max(
+                                      10,
+                                      Math.min(10000, Number(e.target.value)),
+                                    ),
+                                  })
+                                }
                               />
+                              <span>ms</span>
                             </div>
-                            <span className="rule-arrow">→</span>
-                            <div className="rule-field">
-                              <label>连发按键</label>
-                              <KeyCapture
-                                value={rule.target_key}
-                                onChange={(vk) => updateRule(rule.id, { target_key: vk })}
-                              />
-                            </div>
-                          </>
-                        )}
-                        <div className="rule-field rule-interval">
-                          <label>间隔</label>
-                          <div className="interval-input">
-                            <input
-                              type="number"
-                              min={10}
-                              max={10000}
-                              value={rule.interval_ms}
-                              onChange={(e) =>
-                                updateRule(rule.id, {
-                                  interval_ms: Math.max(
-                                    10,
-                                    Math.min(10000, Number(e.target.value)),
-                                  ),
-                                })
-                              }
-                            />
-                            <span>ms</span>
                           </div>
                         </div>
+                        <input
+                          type="checkbox"
+                          className="enable-checkbox"
+                          checked={rule.enabled}
+                          onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
+                          aria-label="启用"
+                        />
                       </div>
-                      <input
-                        type="checkbox"
-                        className="enable-checkbox"
-                        checked={rule.enabled}
-                        onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
-                        aria-label="启用"
-                      />
-                    </div>
-                    {mode === 'toggle' && advancedOpen[rule.id] && (
-                      <div className="rule-advanced">
-                        <div className="rule-field">
-                          <label>停止热键</label>
-                          <KeyCapture
-                            value={rule.stop_key ?? rule.trigger_key}
-                            onChange={(vk) => updateRule(rule.id, { stop_key: vk })}
-                          />
+                      {mode === 'hold' && showAdvanced && (
+                        <div className="rule-advanced">
+                          <div className="rule-field">
+                            <label>按压键</label>
+                            <KeyCapture
+                              value={rule.trigger_key}
+                              onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
+                            />
+                          </div>
+                          <span className="adv-hint">默认与连发按键相同</span>
                         </div>
-                        <span className="adv-hint">默认与启动热键相同</span>
-                      </div>
-                    )}
-                    {mode === 'toggle' && (
+                      )}
+                      {mode === 'toggle' && showAdvanced && (
+                        <div className="rule-advanced">
+                          <div className="rule-field">
+                            <label>停止热键</label>
+                            <KeyCapture
+                              value={rule.stop_key ?? rule.trigger_key}
+                              onChange={(vk) => updateRule(rule.id, { stop_key: vk })}
+                            />
+                          </div>
+                          <span className="adv-hint">默认与启动热键相同</span>
+                        </div>
+                      )}
                       <button
-                        className={`expand-btn${advancedOpen[rule.id] ? ' open' : ''}`}
+                        className={`expand-btn${showAdvanced ? ' open' : ''}`}
                         onClick={() => toggleAdvanced(rule.id)}
                         aria-label="高级设置"
                       >
                         <ChevronIcon size={10} className="chevron" />
                         <span className="expand-label">
-                          {advancedOpen[rule.id] ? '收起高级设置' : '高级设置'}
+                          {showAdvanced ? '收起高级设置' : '高级设置'}
                         </span>
                       </button>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
               </div>
               <button className="add-btn" onClick={() => addRule(mode)}>
                 + 添加{title}规则

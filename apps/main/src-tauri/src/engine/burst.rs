@@ -72,6 +72,12 @@ impl BurstEngine {
         self.rules.lock().unwrap().clone()
     }
 
+    /// 当前正在执行连发的规则 ID 集合：hold 模式表示触发键被按住，toggle 模式表示已开启。
+    /// 用于前端轮询展示激活态视觉反馈。
+    pub fn get_active_ids(&self) -> Vec<String> {
+        self.active_loops.lock().unwrap().keys().cloned().collect()
+    }
+
     pub fn on_key_press(&self, vk: u32) {
         if !self.global_enabled.load(Ordering::SeqCst) {
             return;

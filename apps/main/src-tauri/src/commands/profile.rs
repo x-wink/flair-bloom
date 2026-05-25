@@ -207,7 +207,7 @@ pub fn init_default_profile(app: AppHandle, state: State<EngineState>) -> Result
     let profile = Profile {
         schema_version: CURRENT_SCHEMA_VERSION,
         meta: ProfileMeta {
-            name: "默认配置".to_string(),
+            name: "defults".to_string(),
             created_at: now,
             updated_at: now,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -238,7 +238,7 @@ pub fn init_default_profile(app: AppHandle, state: State<EngineState>) -> Result
 
     let dir = profiles_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建配置目录: {}", e))?;
-    let file_path = dir.join("默认配置.qzh");
+    let file_path = dir.join("defults.qzh");
 
     let rules = profile.rules.clone();
     let path = write_profile_file_to_path(&file_path, &profile)?;
