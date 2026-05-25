@@ -22,13 +22,14 @@
     ]
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "panel",
         "title": "FlairBloom",
         "url": "/panel.html",
-        "width": 425,
-        "height": 740,
+        "width": 405,
+        "height": 720,
         "visible": false,
         "resizable": false,
         "maximizable": false,
