@@ -18,6 +18,9 @@ src-tauri/target/
 !apps/main/src-tauri/resources/*
 !apps/main/src-tauri/resources/**/*
 
+# build.rs 从 interception-sys 的 OUT_DIR 复制过来的产物，不入库
+apps/main/src-tauri/resources/interception.dll
+
 # Env & secrets
 .env
 .env.*

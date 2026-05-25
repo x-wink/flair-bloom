@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-05-26
+
+### 问题修复
+
+- 修复 NSIS 安装包（setup.exe）在未预装 Interception 驱动的机器上启动时报「找不到 interception.dll」无法运行的问题：构建脚本现在会把 DLL 同步到 `resources/`，安装包通过新增的 NSIS hook 在 PostInstall 阶段把它移动到 EXE 同级目录，卸载时一并清理
+
+### 升级方式
+
+覆盖安装新版安装包即可，配置文件完全兼容。
+
 ## [0.1.5] - 2026-05-26
 
 ### 新功能
