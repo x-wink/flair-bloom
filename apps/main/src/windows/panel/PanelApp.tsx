@@ -332,6 +332,13 @@ export default function PanelApp() {
     else getCurrentWindow().hide();
   }
 
+  function handleOpenLogDir() {
+    setMenuOpen(false);
+    invoke('open_log_dir').catch(() => {
+      toast.warning('打开日志文件夹失败');
+    });
+  }
+
   function handleShowAgreement() {
     setMenuOpen(false);
     setShowAgreement(true);
@@ -582,6 +589,7 @@ export default function PanelApp() {
             label: updateNotice ? '更新公告 ●' : '更新公告',
             onClick: handleShowUpdateNotice,
           },
+          { label: '查看日志', onClick: handleOpenLogDir },
           { label: '用户协议', onClick: handleShowAgreement },
           { label: '关于', onClick: handleShowAbout },
         ]}

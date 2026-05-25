@@ -21,6 +21,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 crypto = { path = "../../../packages/crypto" }
 qzh-format = { path = "../../../packages/qzh-format" }
 

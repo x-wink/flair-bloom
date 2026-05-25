@@ -1,4 +1,6 @@
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 use tauri::{Emitter, Manager};
 use tauri_plugin_store::StoreExt;
 use tracing::{error, info, warn};
@@ -10,9 +12,9 @@ mod tray;
 use commands::{
     app::{agree_license, check_update, exit_app, needs_agreement, try_apply_pending_update},
     engine::{get_global_enabled, get_rules, set_global_enabled, set_rules, EngineState},
+    log::{log_from_frontend, open_log_dir},
     profile::{
-        get_active_profile_path, init_default_profile, list_profiles, load_profile,
-        save_profile,
+        get_active_profile_path, init_default_profile, list_profiles, load_profile, save_profile,
     },
 };
 use engine::{burst::start_listener, BurstEngine};
@@ -21,14 +23,86 @@ pub const APP_NAME: &str = "FlairBloom";
 pub const APP_NAME_CN: &str = "气质花按键助手";
 const AGREEMENT_VERSION: &str = "1.0";
 const STORE_PATH: &str = "settings.json";
+const APP_IDENTIFIER: &str = "fun.xwink.flairbloom";
+
+pub fn log_dir() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        let base = std::env::var("LOCALAPPDATA").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(base).join(APP_IDENTIFIER).join("logs")
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        PathBuf::from(home)
+            .join("Library/Logs")
+            .join(APP_IDENTIFIER)
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        PathBuf::from(".").join("logs")
+    }
+}
+
+fn cleanup_old_logs(dir: &PathBuf) {
+    let cutoff = SystemTime::now() - Duration::from_secs(7 * 24 * 3600);
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.starts_with("crash-") {
+            continue;
+        }
+        let Ok(meta) = entry.metadata() else { continue };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
+        if modified < cutoff {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+}
 
 pub fn run() {
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
+    let dir = log_dir();
+    std::fs::create_dir_all(&dir).ok();
+
+    let file_appender = tracing_appender::rolling::daily(&dir, "flair-bloom");
+    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    // Leak the guard so the background writer thread lives until process::exit.
+    // Tauri's event loop calls process::exit() bypassing destructors; leaking
+    // ensures the writer thread stays alive and the OS flushes the fd on exit.
+    Box::leak(Box::new(guard));
+
+    use tracing_subscriber::{fmt, layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+    tracing_subscriber::registry()
+        .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")))
+        .with(fmt::layer().with_writer(std::io::stdout))
+        .with(fmt::layer().with_writer(non_blocking).with_ansi(false))
         .init();
+
+    // panic hook：写崩溃日志到同一目录
+    let crash_dir = dir.clone();
+    let prev_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let ts = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        let crash_file = crash_dir.join(format!("crash-{}.log", ts));
+        let msg = format!(
+            "{}\n\nBacktrace:\n{:?}",
+            info,
+            std::backtrace::Backtrace::force_capture()
+        );
+        let _ = std::fs::write(&crash_file, &msg);
+        eprintln!("PANIC: {}", info);
+        prev_hook(info);
+    }));
+
+    cleanup_old_logs(&dir);
 
     let burst_engine = Arc::new(BurstEngine::new());
     let engine_for_listener = burst_engine.clone();
@@ -58,6 +132,8 @@ pub fn run() {
             agree_license,
             check_update,
             exit_app,
+            log_from_frontend,
+            open_log_dir,
         ])
         .setup(move |app| {
             let need_agreement = check_agreement(app.handle());
@@ -106,14 +182,11 @@ fn check_agreement(app: &tauri::AppHandle) -> bool {
 }
 
 fn load_or_init_profile(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
-    let active_path: Option<String> = app
-        .store(STORE_PATH)
-        .ok()
-        .and_then(|store| {
-            store
-                .get("activeProfilePath")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-        });
+    let active_path: Option<String> = app.store(STORE_PATH).ok().and_then(|store| {
+        store
+            .get("activeProfilePath")
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+    });
 
     let profiles_dir = match app.path().app_data_dir() {
         Ok(d) => d.join("profiles"),
@@ -144,15 +217,17 @@ fn load_or_init_profile(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
     }
 }
 
-fn load_profile_from_path(path: &str, profiles_dir: &std::path::Path) -> Result<qzh_format::profile::Profile, String> {
+fn load_profile_from_path(
+    path: &str,
+    profiles_dir: &std::path::Path,
+) -> Result<qzh_format::profile::Profile, String> {
     let file_name = std::path::Path::new(path)
         .file_name()
         .ok_or("无效文件路径")?
         .to_string_lossy();
     let safe_path = profiles_dir.join(file_name.as_ref());
     let data = std::fs::read(&safe_path).map_err(|e| format!("读取文件失败: {}", e))?;
-    let header =
-        qzh_format::header::FileHeader::from_bytes(&data).ok_or("文件格式无效")?;
+    let header = qzh_format::header::FileHeader::from_bytes(&data).ok_or("文件格式无效")?;
     let aad = header.aad();
     let ciphertext = &data[qzh_format::header::FileHeader::SIZE..];
     let plaintext =

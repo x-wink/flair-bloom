@@ -727,9 +727,9 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 - [x] `set_rules` 替换规则列表前停止所有已运行的连发线程并清空 toggle 状态，防止删除规则后孤儿线程永久运行
 - [x] `set_rules` Tauri 命令加入入参校验（规则数 ≤ 64、`interval_ms` 在 `[10, 10000]`），防止非法值绕过 `profile.rs::validate()` 进入引擎导致忙循环（`commands/engine.rs:19`）
-- [ ] Hold 连发中 enigo `Direction::Click` 产生的模拟 KeyRelease 未受 SIM_COUNT 过滤，当 `trigger_key == target_key` 且为非 Unicode 键（F键/方向键等）时会被 `on_key_release` 识别为物理抬起，导致连发在第一次模拟按键后即终止（`burst.rs:159`）；需区分模拟 KeyRelease 与物理 KeyRelease
-- [ ] 模拟 target_key 产生的 KeyRelease 会触发其他以该键为 `trigger_key` 的 Hold 规则的 `stop_burst`，多规则并行时产生跨规则干扰（`burst.rs:76`）；与上条同源，同步修复
-- [ ] Toggle 连发未过滤系统按键重复事件（OS key-repeat）：`stop_key` 为空时 `stop == trigger_key`，持续按住触发键约 500ms 后系统以 ~30Hz 重复投递 KeyPress，导致连发在 started/stopped 间高频振荡并持续 spawn 新线程（`burst.rs:53`）
+- [x] Hold 连发中模拟 KeyRelease 未过滤：已改用 `dwExtraInfo = SIM_MARKER` 标记所有 SendInput 事件，hook 统一过滤，不再误触发 `on_key_release`
+- [x] 跨规则干扰：同上，模拟 target_key 的 release 带 SIM_MARKER，不会进入其他规则的 stop_burst
+- [x] Toggle 连发未过滤 OS key-repeat：hook 回调中 `LLKHF_REPEAT` 标志位检测，仅首次按下进入 `on_key_press`
 
 **发布 v0.2**
 
@@ -855,5 +855,5 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 | ⑦   | Named Pipe 连接失败        | 架构改为单一 Tauri 多窗口，风险消除                                 | 消除 |
 | ⑧   | 更新包被中间人替换         | Tauri updater 强制 .sig 签名验证 + HTTPS                            | 确认 |
 | ⑨   | Mac 点击穿透 API 不同      | 改用 Tauri 内置 `set_ignore_cursor_events()`，跨平台，风险消除      | 消除 |
-| ⑩   | SIM_COUNT 竞态（非 Unicode 键） | `WH_KEYBOARD_LL` 在 rdev 线程异步投递，`SendInput` 返回后 SIM_COUNT 已归零；字母键因走 `KEYEVENTF_UNICODE`→`VK_PACKET`→VK=0 天然过滤，F键/方向键无此保护；v0.2 连发引擎稳定性专项一并修复 | 已知 |
-| ⑪   | 模拟 KeyRelease 未过滤 | enigo `Direction::Click` 同时发送 KeyPress+KeyRelease，KeyRelease 不经 SIM_COUNT 过滤，导致 Hold 自身被终止或跨规则误触发 stop_burst；v0.2 连发引擎稳定性专项修复 | 已知 |
+| ⑩   | SIM_COUNT 竞态（非 Unicode 键） | 已用 `windows_sys` 替换 rdev/enigo，`SendInput` 的 `dwExtraInfo = SIM_MARKER` 精确标记，hook 统一过滤，无竞态 | 消除 |
+| ⑪   | 模拟 KeyRelease 未过滤 | 同上，所有 SendInput（含 key_up）均带 SIM_MARKER，hook 不再区分 press/release 统一跳过 | 消除 |
