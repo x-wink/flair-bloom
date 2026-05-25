@@ -1,4 +1,6 @@
+use super::input::SIM_MARKER;
 use interception_sys::*;
+use std::os::raw::c_uint;
 use tracing::{error, info};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MapVirtualKeyW, MAPVK_VK_TO_VSC_EX};
 
@@ -40,10 +42,12 @@ impl InterceptionBackend {
             state |= InterceptionKeyState_INTERCEPTION_KEY_E0 as u16;
         }
 
+        // 将 SIM_MARKER 写入 information，驱动会把它转写为 KBDLLHOOKSTRUCT.dwExtraInfo
+        // 低级钩子据此过滤自身注入事件，避免触发键 == 目标键时 toggle 自停
         let stroke = InterceptionKeyStroke {
             code: scan,
             state,
-            information: 0,
+            information: SIM_MARKER as c_uint,
         };
 
         unsafe {
