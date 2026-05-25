@@ -652,7 +652,7 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
 name = "crypto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "aes-gcm",
  "base32",
@@ -1182,7 +1182,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "flair-bloom"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crypto",
  "qzh-format",
@@ -2195,7 +2195,7 @@ dependencies = [
 
 [[package]]
 name = "keygen"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crypto",
  "serde_json",
@@ -2335,7 +2335,7 @@ dependencies = [
 
 [[package]]
 name = "migrate"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde_json",
  "thiserror 2.0.18",
@@ -3060,7 +3060,7 @@ dependencies = [
 
 [[package]]
 name = "qzh-format"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crypto",
  "migrate",

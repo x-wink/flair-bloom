@@ -1,15 +1,21 @@
-use super::input::{simulate_keypress, SIM_MARKER};
+use super::input::{key_down, key_up};
+#[cfg(windows)]
+use super::input::SIM_MARKER;
 use qzh_format::profile::{BurstMode, BurstRule};
 use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc, Mutex, OnceLock, Weak,
+        Arc, Mutex,
     },
     thread,
     time::Duration,
 };
-use tracing::{error, info};
+#[cfg(windows)]
+use std::sync::{RwLock, Weak};
+use tracing::info;
+#[cfg(windows)]
+use tracing::error;
 #[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{LPARAM, WPARAM},
@@ -20,16 +26,16 @@ use windows_sys::Win32::{
     },
 };
 
-/// hook 回调通过静态 Weak 引用访问引擎，避免 Arc 延长生命周期
+/// hook 回调通过静态 Weak 引用访问引擎，避免 Arc 延长生命周期；RwLock 支持重复注册
 #[cfg(windows)]
-static ENGINE_HOOK: OnceLock<Weak<BurstEngine>> = OnceLock::new();
+static ENGINE_HOOK: RwLock<Option<Weak<BurstEngine>>> = RwLock::new(None);
 
-type ActiveLoops = Arc<Mutex<HashMap<String, (Arc<AtomicBool>, thread::Thread)>>>;
+type ActiveLoops = Arc<Mutex<HashMap<String, (Arc<AtomicBool>, thread::Thread, u32, thread::JoinHandle<()>)>>>;
 
 pub struct BurstEngine {
     pub global_enabled: Arc<AtomicBool>,
     rules: Arc<Mutex<Vec<BurstRule>>>,
-    /// rule_id -> (cancel_flag, thread_handle)；thread_handle 用于 unpark 即时停止
+    /// rule_id -> (cancel_flag, thread_handle, target_key, join_handle)
     active_loops: ActiveLoops,
     toggle_states: Arc<Mutex<HashMap<String, bool>>>,
 }
@@ -46,14 +52,15 @@ impl BurstEngine {
 
     pub fn set_rules(&self, rules: Vec<BurstRule>) {
         let mut loops = self.active_loops.lock().unwrap();
-        for (cancel, thread_handle) in loops.values() {
+        for (cancel, thread_handle, _, _) in loops.values() {
             cancel.store(true, Ordering::SeqCst);
+            thread_handle.unpark();
             thread_handle.unpark();
         }
         loops.clear();
-        drop(loops);
         self.toggle_states.lock().unwrap().clear();
         *self.rules.lock().unwrap() = rules;
+        // loops 在此 drop，持锁直到 rules 更新完毕，消除 TOCTOU 窗口
     }
 
     pub fn get_rules(&self) -> Vec<BurstRule> {
@@ -106,22 +113,42 @@ impl BurstEngine {
     }
 
     fn start_hold_burst(&self, rule: &BurstRule) {
-        let mut loops = self.active_loops.lock().unwrap();
-        if loops.contains_key(&rule.id) {
+        if self.active_loops.lock().unwrap().contains_key(&rule.id) {
             return;
         }
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_clone = cancel.clone();
         let target_key = rule.target_key;
         let interval_ms = rule.interval_ms;
+        // spawn 在锁外执行，避免 thread::spawn panic 时中毒 Mutex
         let handle = thread::spawn(move || {
-            while !cancel_clone.load(Ordering::SeqCst) {
-                simulate_keypress(target_key);
-                // park_timeout 可被 unpark() 立即打断，确保停止命令即时响应
-                thread::park_timeout(Duration::from_millis(interval_ms as u64));
+            let hold_ms = (interval_ms as u64 / 3)
+                .clamp(5, 30)
+                .min((interval_ms as u64).saturating_sub(1));
+            let rest_ms = interval_ms as u64 - hold_ms;
+            let result = std::panic::catch_unwind(|| {
+                while !cancel_clone.load(Ordering::SeqCst) {
+                    key_down(target_key);
+                    thread::park_timeout(Duration::from_millis(hold_ms));
+                    key_up(target_key);
+                    if cancel_clone.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    thread::park_timeout(Duration::from_millis(rest_ms));
+                }
+            });
+            if result.is_err() {
+                key_up(target_key);
             }
         });
-        loops.insert(rule.id.clone(), (cancel, handle.thread().clone()));
+        let mut loops = self.active_loops.lock().unwrap();
+        if loops.contains_key(&rule.id) {
+            // spawn 后极罕见的并发插入：取消刚启动的线程
+            cancel.store(true, Ordering::SeqCst);
+            handle.thread().unpark();
+            return;
+        }
+        loops.insert(rule.id.clone(), (cancel, handle.thread().clone(), target_key, handle));
     }
 
     fn handle_toggle_press(&self, rule: &BurstRule) {
@@ -139,8 +166,7 @@ impl BurstEngine {
     }
 
     fn start_toggle_burst(&self, rule: &BurstRule) {
-        let mut loops = self.active_loops.lock().unwrap();
-        if loops.contains_key(&rule.id) {
+        if self.active_loops.lock().unwrap().contains_key(&rule.id) {
             return;
         }
         let cancel = Arc::new(AtomicBool::new(false));
@@ -148,19 +174,64 @@ impl BurstEngine {
         let target_key = rule.target_key;
         let interval_ms = rule.interval_ms;
         let handle = thread::spawn(move || {
-            while !cancel_clone.load(Ordering::SeqCst) {
-                simulate_keypress(target_key);
-                thread::park_timeout(Duration::from_millis(interval_ms as u64));
+            let hold_ms = (interval_ms as u64 / 3)
+                .clamp(5, 30)
+                .min((interval_ms as u64).saturating_sub(1));
+            let rest_ms = interval_ms as u64 - hold_ms;
+            let result = std::panic::catch_unwind(|| {
+                while !cancel_clone.load(Ordering::SeqCst) {
+                    key_down(target_key);
+                    thread::park_timeout(Duration::from_millis(hold_ms));
+                    key_up(target_key);
+                    if cancel_clone.load(Ordering::SeqCst) {
+                        break;
+                    }
+                    thread::park_timeout(Duration::from_millis(rest_ms));
+                }
+            });
+            if result.is_err() {
+                key_up(target_key);
             }
         });
-        loops.insert(rule.id.clone(), (cancel, handle.thread().clone()));
+        let mut loops = self.active_loops.lock().unwrap();
+        if loops.contains_key(&rule.id) {
+            cancel.store(true, Ordering::SeqCst);
+            handle.thread().unpark();
+            return;
+        }
+        loops.insert(rule.id.clone(), (cancel, handle.thread().clone(), target_key, handle));
     }
 
     fn stop_burst(&self, rule_id: &str) {
-        if let Some((cancel, thread_handle)) = self.active_loops.lock().unwrap().remove(rule_id) {
+        if let Some((cancel, thread_handle, _, _join)) = self.active_loops.lock().unwrap().remove(rule_id) {
             cancel.store(true, Ordering::SeqCst);
-            // unpark 立即唤醒处于 park_timeout 中的连发线程
+            // 调用两次覆盖 hold_ms 和 rest_ms 两个 park 点：
+            // token 是单 bit，若线程在 hold_ms 睡眠则第一次唤醒、第二次 no-op；
+            // 若 token 已被 hold_ms 消耗而线程进入 rest_ms，第二次唤醒 rest_ms。
             thread_handle.unpark();
+            thread_handle.unpark();
+        }
+    }
+}
+
+impl Drop for BurstEngine {
+    fn drop(&mut self) {
+        let entries: Vec<_> = {
+            let mut loops = self.active_loops.lock().unwrap();
+            loops.drain().map(|(_, v)| v).collect()
+        };
+        // 先全部发出取消信号
+        for (cancel, thread_handle, _, _) in &entries {
+            cancel.store(true, Ordering::SeqCst);
+            thread_handle.unpark();
+            thread_handle.unpark();
+        }
+        // join 后再补发 key_up，确保线程已完成自身的 key_up，避免与线程竞态
+        for (_, _, target_key, join_handle) in entries {
+            // 仅在线程 panic 时补发 key_up；正常退出路径线程已自行调用
+            if join_handle.join().is_err() {
+                key_up(target_key);
+            }
         }
     }
 }
@@ -177,7 +248,8 @@ unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
         let kb = &*(lparam as *const KBDLLHOOKSTRUCT);
         // 通过 dwExtraInfo 精确过滤 SendInput 模拟事件，无竞态
         if kb.dwExtraInfo != SIM_MARKER {
-            if let Some(engine) = ENGINE_HOOK.get().and_then(|w| w.upgrade()) {
+            let engine = ENGINE_HOOK.read().unwrap().as_ref().and_then(|w| w.upgrade());
+            if let Some(engine) = engine {
                 match wparam as u32 {
                     // key-repeat 时跳过：Toggle 模式下持续按键会反复开关连发
                     WM_KEYDOWN | WM_SYSKEYDOWN if (kb.flags & LLKHF_REPEAT) == 0 => {
@@ -194,7 +266,14 @@ unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
 
 #[cfg(windows)]
 pub fn start_listener(engine: Arc<BurstEngine>) {
-    let _ = ENGINE_HOOK.set(Arc::downgrade(&engine));
+    {
+        let mut guard = ENGINE_HOOK.write().unwrap();
+        if guard.as_ref().and_then(|w| w.upgrade()).is_some() {
+            error!("start_listener 重复调用：旧引擎仍存活，忽略以防双重 hook");
+            return;
+        }
+        *guard = Some(Arc::downgrade(&engine));
+    }
     thread::spawn(move || {
         let hook =
             unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), std::ptr::null_mut(), 0) };
