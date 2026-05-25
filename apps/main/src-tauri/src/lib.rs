@@ -17,6 +17,8 @@ use commands::{
 };
 use engine::{burst::start_listener, BurstEngine};
 
+pub const APP_NAME: &str = "FlairBloom";
+pub const APP_NAME_CN: &str = "气质花按键助手";
 const AGREEMENT_VERSION: &str = "1.0";
 const STORE_PATH: &str = "settings.json";
 
@@ -77,7 +79,7 @@ pub fn run() {
                 check_for_updates(handle).await;
             });
 
-            info!("FlairBloom started");
+            info!("{} started", APP_NAME);
             Ok(())
         })
         .run(tauri::generate_context!())

@@ -1,0 +1,53 @@
+name: 功能建议
+description: 提出新功能或改进现有功能的想法
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        欢迎提功能建议！请描述你的使用场景，比单纯描述「我要 X 功能」更有帮助。
+
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 使用场景
+      description: 在什么情况下需要这个功能？现在是怎么处理的？
+      placeholder: |
+        打 MOBA 游戏时需要同时连发多个技能键，现在只能建多条规则分别开关，很繁琐。
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 你期望软件怎么做？可以是交互描述、草图、或参考其他工具的做法
+      placeholder: |
+        希望支持「组合规则」，一个热键可以同时触发多个连发规则的开关。
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: 对你的重要程度
+      options:
+        - 高（没有这个功能严重影响使用）
+        - 中（有了会方便很多）
+        - 低（锦上添花）
+    validations:
+      required: true
+
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 参考截图、相关 Issues 等
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: 提交前确认
+      options:
+        - label: 我已搜索过现有 Issues，没有相同建议
+          required: true

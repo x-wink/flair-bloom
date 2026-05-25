@@ -38,6 +38,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Extract changelog
+        id: changelog
+        shell: bash
+        run: pnpm exec tsx scripts/extract-changelog.ts "${{ github.ref_name }}"
+
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
         env:
@@ -47,7 +52,8 @@ jobs:
         with:
           projectPath: apps/main
           tagName: ${{ github.ref_name }}
-          releaseName: FlairBloom ${{ github.ref_name }}
+          releaseName: 气质花按键助手 FlairBloom ${{ github.ref_name }}
+          releaseBody: ${{ steps.changelog.outputs.body }}
           releaseDraft: true
           prerelease: false
           args: --target x86_64-pc-windows-msvc

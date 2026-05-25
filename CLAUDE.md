@@ -79,6 +79,22 @@ packages/qzh-format/src/
 核心功能：按压连发、Toggle 连发、配置文件管理、桌宠基础动画、自动更新。  
 亲友专属功能（兑换码激活，`feature_bits` 控制）：宏录制回放、鼠标连点、随机抖动、条件配置集、桌宠扩展动画包。
 
+## 发版流程
+
+**更新日志**：`CHANGELOG.md`（项目根目录）是唯一内容源，格式为 `## [版本号] - 日期` + 中文分节（新功能 / 问题修复 / 行为变更 / 升级方式 / 已知问题）。CI 发版时由 `scripts/extract-changelog.ts` 自动提取当前版本节作为 GitHub Release 正文，同时作为 `update.body` 通过 `update-ready` 事件在应用内「更新公告」弹窗展示。
+
+**应用名称入口**（改名时同步修改以下位置）：
+- 前端：`apps/main/src/constants.ts` — `APP_NAME`（中文）、`APP_NAME_EN`（英文），所有前端代码从此引入
+- Rust：`apps/main/src-tauri/src/lib.rs` — `APP_NAME` / `APP_NAME_CN` 常量，Rust 代码引用此处
+- 配置：`tauri.conf.json` 的 `productName` / `title`；`apps/main/src-tauri/Cargo.toml` 的 `name`（标识符，轻易不改）
+
+**发版步骤**：
+1. 在 `CHANGELOG.md` 的 `[Unreleased]` 节填写本次更新内容
+2. 运行 `pnpm bump-version X.X.X`，自动同步三处版本号并将 `[Unreleased]` 重命名为 `[X.X.X] - 日期`（脚本：`scripts/bump-version.ts`）
+3. 提交：`chore(release): bump version to X.X.X`
+4. 打 tag：`git tag vX.X.X && git push origin main && git push origin vX.X.X`
+5. tag 推送后 CI 自动构建、提取 changelog、发布 Draft Release，审查后手动发布
+
 ## 协作规范
 
 **commit-msg**（Conventional Commits）：`type(scope): description`  

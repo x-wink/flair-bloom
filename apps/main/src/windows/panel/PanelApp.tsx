@@ -1,4 +1,5 @@
 import { getVersion } from '@tauri-apps/api/app';
+import { APP_NAME } from '../../constants';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -385,7 +386,10 @@ export default function PanelApp() {
     >
       <header className="panel-header" data-tauri-drag-region>
         <img className="header-icon" src={iconUrl} alt="" data-tauri-drag-region />
-        <h1 data-tauri-drag-region>气质花按键助手{appVersion ? ` v${appVersion}` : ''}</h1>
+        <h1 data-tauri-drag-region>
+          {APP_NAME}
+          {appVersion ? ` v${appVersion}` : ''}
+        </h1>
         <div className="window-controls">
           <button
             ref={menuBtnRef}
