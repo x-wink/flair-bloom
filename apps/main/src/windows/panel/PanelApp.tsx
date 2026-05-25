@@ -78,6 +78,9 @@ export default function PanelApp() {
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const [globalEnabled, setGlobalEnabled] = useState(false);
   const [togglingGlobal, setTogglingGlobal] = useState(false);
+  const [driverMode, setDriverMode] = useState(false);
+  const [driverInstalled, setDriverInstalled] = useState(false);
+  const [togglingDriver, setTogglingDriver] = useState(false);
   const [rules, setRules] = useState<BurstRule[]>([]);
   const [profileName, setProfileName] = useState('默认配置');
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({});
@@ -113,6 +116,13 @@ export default function PanelApp() {
       .catch(() => {
         toast.error('读取全局开关状态失败');
       });
+
+    invoke<string>('get_input_mode')
+      .then((mode) => setDriverMode(mode === 'interception'))
+      .catch(() => {});
+    invoke<boolean>('is_driver_installed')
+      .then(setDriverInstalled)
+      .catch(() => {});
 
     // 引擎已在启动时从 .qzh 加载了规则，直接读取
     invoke<BurstRule[]>('get_rules')
@@ -237,6 +247,43 @@ export default function PanelApp() {
       toast.error('切换全局开关失败');
     } finally {
       setTogglingGlobal(false);
+    }
+  }
+
+  async function toggleDriverMode() {
+    if (togglingDriver) return;
+    setTogglingDriver(true);
+    try {
+      if (!driverMode) {
+        if (!driverInstalled) {
+          const ok = await confirm({
+            title: '安装驱动',
+            description: '驱动增强需要安装 Interception 内核驱动，安装后需重启电脑生效。确认安装？',
+            confirmText: '安装',
+          });
+          if (!ok) return;
+          await invoke('install_driver');
+          setDriverInstalled(true);
+          toast.info('驱动安装程序已启动，请在 UAC 弹窗中确认，完成后重启电脑');
+          return;
+        }
+        await invoke('set_input_mode', { mode: 'interception' });
+        const actual = await invoke<string>('get_input_mode');
+        if (actual === 'interception') {
+          setDriverMode(true);
+          toast.success('驱动增强已启用');
+        } else {
+          toast.warning('驱动未就绪，请重启电脑后再试');
+        }
+      } else {
+        await invoke('set_input_mode', { mode: 'sendinput' });
+        setDriverMode(false);
+        toast.info('已切换为标准模式');
+      }
+    } catch (e) {
+      toast.error(`切换失败：${e}`);
+    } finally {
+      setTogglingDriver(false);
     }
   }
 
@@ -585,14 +632,29 @@ export default function PanelApp() {
         <button className="reset-btn" onClick={handleRestoreDefaults} title="恢复默认配置">
           恢复默认
         </button>
-        <span className="footer-label">全局开关</span>
-        <button
-          className={`toggle-btn${globalEnabled ? ' active' : ''}`}
-          onClick={toggleGlobal}
-          disabled={togglingGlobal}
-        >
-          {togglingGlobal ? '切换中…' : globalEnabled ? '已启用' : '已禁用'}
-        </button>
+        <div className="footer-controls">
+          <div className="footer-control">
+            <span className="footer-label">驱动增强</span>
+            <button
+              className={`toggle-btn mini${driverMode ? ' active' : ''}`}
+              onClick={toggleDriverMode}
+              disabled={togglingDriver}
+              title="启用后可兼容剑网三等使用 Raw Input 的游戏"
+            >
+              {togglingDriver ? '…' : driverMode ? '开' : '关'}
+            </button>
+          </div>
+          <div className="footer-control">
+            <span className="footer-label">全局开关</span>
+            <button
+              className={`toggle-btn${globalEnabled ? ' active' : ''}`}
+              onClick={toggleGlobal}
+              disabled={togglingGlobal}
+            >
+              {togglingGlobal ? '切换中…' : globalEnabled ? '已启用' : '已禁用'}
+            </button>
+          </div>
+        </div>
       </footer>
 
       <ContextMenu

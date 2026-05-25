@@ -15,7 +15,10 @@ use commands::{
         agree_license, check_update, exit_app, needs_agreement, try_apply_pending_update,
         UpdateLock,
     },
-    engine::{get_global_enabled, get_rules, set_global_enabled, set_rules, EngineState},
+    engine::{
+        get_global_enabled, get_input_mode, get_rules, install_driver, is_driver_installed,
+        set_global_enabled, set_input_mode, set_rules, EngineState,
+    },
     log::{log_from_frontend, open_log_dir},
     profile::{
         get_active_profile_path, init_default_profile, list_profiles, load_profile, save_profile,
@@ -25,7 +28,7 @@ use engine::{burst::start_listener, BurstEngine};
 
 pub const APP_NAME: &str = "FlairBloom";
 pub const APP_NAME_CN: &str = "气质花按键助手";
-const AGREEMENT_VERSION: &str = "1.0";
+const AGREEMENT_VERSION: &str = "1.1";
 const STORE_PATH: &str = "settings.json";
 const APP_IDENTIFIER: &str = "fun.xwink.flairbloom";
 
@@ -128,6 +131,10 @@ pub fn run() {
             get_global_enabled,
             set_rules,
             get_rules,
+            get_input_mode,
+            set_input_mode,
+            is_driver_installed,
+            install_driver,
             save_profile,
             load_profile,
             list_profiles,
@@ -143,6 +150,8 @@ pub fn run() {
         .setup(move |app| {
             let need_agreement = check_agreement(app.handle());
             load_or_init_profile(app.handle(), &burst_engine);
+
+            init_input_backend(app.handle());
 
             tray::setup_tray(app.handle(), engine_for_tray)?;
 
@@ -414,4 +423,26 @@ async fn do_silent_update(app: &tauri::AppHandle) -> Result<(), String> {
         serde_json::json!({ "version": version, "notes": notes }),
     );
     Ok(())
+}
+
+fn init_input_backend(app: &tauri::AppHandle) {
+    #[cfg(windows)]
+    {
+        use engine::input::{init_backend, InputMode};
+        use tauri_plugin_store::StoreExt;
+
+        let mode_str: Option<String> = app.store(STORE_PATH).ok().and_then(|store| {
+            store
+                .get("input_mode")
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+        });
+
+        let mode = match mode_str.as_deref() {
+            Some("interception") => InputMode::Interception,
+            _ => InputMode::SendInput,
+        };
+        init_backend(mode);
+    }
+    #[cfg(not(windows))]
+    let _ = app;
 }

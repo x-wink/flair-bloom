@@ -315,17 +315,28 @@ body {
 }
 
 .footer-label {
-  margin-left: auto;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   color: #555;
 }
 
-.footer-label {
+.footer-controls {
   margin-left: auto;
-  font-size: 13px;
-  font-weight: 500;
-  color: #555;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.footer-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.toggle-btn.mini {
+  min-width: 32px;
+  padding: 4px 8px;
+  font-size: 11px;
 }
 
 .empty {

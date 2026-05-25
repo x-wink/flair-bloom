@@ -6,7 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **气质花（FlairBloom）** — 面向游戏辅助的按键助手。核心功能免费，亲友专属功能通过 Ed25519 离线兑换码激活。
 
-详细规划见 `docs/ROADMAP.md`，资源清单见 `docs/ASSETS.md`。
+详细规划见 `docs/ROADMAP.md`，资源清单见 `docs/ASSETS.md`。  
+`README.md` 即面向用户的使用说明书，`apps/main/src/assets/EULA.md` 为用户协议，`THIRD_PARTY.md` 为第三方组件声明。
 
 ## 常用命令
 
