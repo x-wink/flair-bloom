@@ -68,6 +68,10 @@ pub enum ProfileError {
     TooManyRules,
     #[error("rule interval {0}ms is out of range [10, 10000]")]
     InvalidInterval(u32),
+    #[error("rule {0}: target_key must differ from trigger_key in DD mode")]
+    DdTargetEqualsTrigger(String),
+    #[error("rule {0}: target_key must differ from stop_key in DD mode")]
+    DdTargetEqualsStop(String),
     #[error(transparent)]
     Json(#[from] serde_json::Error),
     #[error(transparent)]
@@ -84,6 +88,15 @@ pub enum ProfileError {
 
 impl Profile {
     pub fn validate(&self) -> Result<(), ProfileError> {
+        self.validate_for_mode(false)
+    }
+
+    /// `distinct_target = true` 时启用 DD 模式专属约束：
+    /// 因为 DD 后端无法在 dwExtraInfo 中写入过滤标记，注入事件会被自身 LL 钩子
+    /// 误判为物理按键。规则：
+    /// - 任何模式：`target_key != trigger_key`
+    /// - Toggle 模式：`target_key != stop_key`（默认 `stop_key = trigger_key`）
+    pub fn validate_for_mode(&self, distinct_target: bool) -> Result<(), ProfileError> {
         if self.rules.len() > MAX_RULES {
             return Err(ProfileError::TooManyRules);
         }
@@ -91,6 +104,17 @@ impl Profile {
             let i = rule.interval_ms;
             if !(10..=10000).contains(&i) {
                 return Err(ProfileError::InvalidInterval(i));
+            }
+            if distinct_target && rule.enabled {
+                if rule.target_key == rule.trigger_key {
+                    return Err(ProfileError::DdTargetEqualsTrigger(rule.id.clone()));
+                }
+                if rule.mode == BurstMode::Toggle {
+                    let stop = rule.stop_key.unwrap_or(rule.trigger_key);
+                    if rule.target_key == stop {
+                        return Err(ProfileError::DdTargetEqualsStop(rule.id.clone()));
+                    }
+                }
             }
         }
         Ok(())

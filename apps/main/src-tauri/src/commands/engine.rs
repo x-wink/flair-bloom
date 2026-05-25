@@ -35,6 +35,32 @@ pub fn set_rules(state: State<EngineState>, rules: Vec<BurstRule>) -> Result<(),
             ));
         }
     }
+
+    // DD 模式下要求 target_key 与 trigger_key/stop_key 不同
+    #[cfg(windows)]
+    {
+        let mode = crate::engine::input::current_mode();
+        if mode.requires_distinct_target() {
+            for rule in rules.iter().filter(|r| r.enabled) {
+                if rule.target_key == rule.trigger_key {
+                    return Err(format!(
+                        "究极HID 模式下，规则「{}」的目标键不可与触发键相同",
+                        rule.id
+                    ));
+                }
+                if matches!(rule.mode, qzh_format::profile::BurstMode::Toggle) {
+                    let stop = rule.stop_key.unwrap_or(rule.trigger_key);
+                    if rule.target_key == stop {
+                        return Err(format!(
+                            "究极HID 模式下，规则「{}」的目标键不可与停止键相同",
+                            rule.id
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     state.0.set_rules(rules);
     Ok(())
 }
@@ -48,11 +74,7 @@ pub fn get_rules(state: State<EngineState>) -> Vec<BurstRule> {
 pub fn get_input_mode() -> String {
     #[cfg(windows)]
     {
-        let mode = crate::engine::input::current_mode();
-        match mode {
-            crate::engine::input::InputMode::SendInput => "sendinput".to_string(),
-            crate::engine::input::InputMode::Interception => "interception".to_string(),
-        }
+        crate::engine::input::current_mode().as_str().to_string()
     }
     #[cfg(not(windows))]
     {
@@ -61,28 +83,57 @@ pub fn get_input_mode() -> String {
 }
 
 #[tauri::command]
-pub fn set_input_mode(app: AppHandle, mode: String) -> Result<(), String> {
+pub fn set_input_mode(
+    app: AppHandle,
+    state: State<EngineState>,
+    mode: String,
+) -> Result<(), String> {
     #[cfg(windows)]
     {
         use crate::engine::input::{init_backend, InputMode};
         use tauri_plugin_store::StoreExt;
 
-        let input_mode = match mode.as_str() {
-            "interception" => InputMode::Interception,
-            "sendinput" => InputMode::SendInput,
-            _ => return Err(format!("未知输入模式: {}", mode)),
-        };
+        let input_mode =
+            InputMode::from_str(&mode).ok_or_else(|| format!("未知输入模式: {}", mode))?;
+
+        // 切到 DD-HID 时要求当前已是管理员，否则前端应先发起提权重启
+        if input_mode.requires_admin() && !is_process_elevated() {
+            return Err("究极HID 模式需要管理员权限，请先以管理员身份重启应用".to_string());
+        }
+
+        // 切到 DD 系列前先用新规则约束做静态校验（即使引擎此刻还是旧模式）
+        if input_mode.requires_distinct_target() {
+            let rules = state.0.get_rules();
+            for rule in rules.iter().filter(|r| r.enabled) {
+                if rule.target_key == rule.trigger_key {
+                    return Err(format!(
+                        "切换失败：规则「{}」的目标键与触发键相同。\n究极HID 模式下，目标键不可与触发键/停止键相同。请修改后再切换。",
+                        rule.id
+                    ));
+                }
+                if matches!(rule.mode, qzh_format::profile::BurstMode::Toggle) {
+                    let stop = rule.stop_key.unwrap_or(rule.trigger_key);
+                    if rule.target_key == stop {
+                        return Err(format!(
+                            "切换失败：规则「{}」的目标键与停止键相同。\n究极HID 模式下，目标键不可与触发键/停止键相同。请修改后再切换。",
+                            rule.id
+                        ));
+                    }
+                }
+            }
+        }
+
         init_backend(input_mode);
 
         if let Ok(store) = app.store(crate::STORE_PATH) {
-            store.set("input_mode", serde_json::json!(mode));
+            store.set("input_mode", serde_json::json!(input_mode.as_str()));
             let _ = store.save();
         }
         Ok(())
     }
     #[cfg(not(windows))]
     {
-        let _ = (app, mode);
+        let _ = (app, state, mode);
         Err("仅 Windows 平台支持切换输入模式".to_string())
     }
 }
@@ -100,7 +151,11 @@ pub fn is_driver_installed() -> bool {
 }
 
 #[cfg(windows)]
-async fn run_interception_installer(app: AppHandle, action: &'static str) -> Result<(), String> {
+async fn run_elevated_exe(
+    app: AppHandle,
+    file_path: std::path::PathBuf,
+    params: Option<&str>,
+) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, WAIT_OBJECT_0};
     use windows_sys::Win32::System::Threading::{
@@ -110,27 +165,24 @@ async fn run_interception_installer(app: AppHandle, action: &'static str) -> Res
         ShellExecuteExW, SEE_MASK_NOCLOSEPROCESS, SHELLEXECUTEINFOW,
     };
 
-    let resource_path = app
-        .path()
-        .resource_dir()
-        .map_err(|e| format!("无法获取资源目录: {}", e))?
-        .join("resources")
-        .join("install-interception.exe");
-
-    if !resource_path.exists() {
-        return Err("安装程序不存在，请重新安装应用".to_string());
+    let _ = app;
+    if !file_path.exists() {
+        return Err(format!("可执行文件不存在: {}", file_path.display()));
     }
 
-    let path_wide: Vec<u16> = resource_path
+    let path_wide: Vec<u16> = file_path
         .as_os_str()
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
     let verb: Vec<u16> = "runas\0".encode_utf16().collect();
-    let params: Vec<u16> = format!("{}\0", action).encode_utf16().collect();
-    let working_dir: Vec<u16> = resource_path
+    let params_wide: Vec<u16> = match params {
+        Some(p) => format!("{}\0", p).encode_utf16().collect(),
+        None => vec![0u16],
+    };
+    let working_dir: Vec<u16> = file_path
         .parent()
-        .ok_or_else(|| "无法获取安装程序所在目录".to_string())?
+        .ok_or_else(|| "无法获取所在目录".to_string())?
         .as_os_str()
         .encode_wide()
         .chain(std::iter::once(0))
@@ -142,9 +194,9 @@ async fn run_interception_installer(app: AppHandle, action: &'static str) -> Res
         sei.fMask = SEE_MASK_NOCLOSEPROCESS;
         sei.lpVerb = verb.as_ptr();
         sei.lpFile = path_wide.as_ptr();
-        sei.lpParameters = params.as_ptr();
+        sei.lpParameters = params_wide.as_ptr();
         sei.lpDirectory = working_dir.as_ptr();
-        sei.nShow = 1; // SW_SHOWNORMAL
+        sei.nShow = 1;
 
         let ok = unsafe { ShellExecuteExW(&mut sei) };
         if ok == 0 {
@@ -152,18 +204,18 @@ async fn run_interception_installer(app: AppHandle, action: &'static str) -> Res
             return if err == ERROR_CANCELLED {
                 Err("已取消管理员授权".to_string())
             } else {
-                Err(format!("启动安装程序失败 (Win32 错误码 {})", err))
+                Err(format!("启动程序失败 (Win32 错误码 {})", err))
             };
         }
 
         if sei.hProcess.is_null() {
-            return Err("无法获取安装程序进程句柄".to_string());
+            return Err("无法获取进程句柄".to_string());
         }
 
         let wait = unsafe { WaitForSingleObject(sei.hProcess, INFINITE) };
         if wait != WAIT_OBJECT_0 {
             unsafe { CloseHandle(sei.hProcess) };
-            return Err("等待安装程序结束时出错".to_string());
+            return Err("等待程序结束时出错".to_string());
         }
 
         let mut exit_code: u32 = 0;
@@ -171,24 +223,34 @@ async fn run_interception_installer(app: AppHandle, action: &'static str) -> Res
         unsafe { CloseHandle(sei.hProcess) };
 
         if got == 0 {
-            return Err("无法读取安装程序退出码".to_string());
+            return Err("无法读取退出码".to_string());
         }
 
         if exit_code == 0 {
             Ok(())
         } else {
-            Err(format!("安装程序返回错误码 {}", exit_code))
+            Err(format!("程序返回错误码 {}", exit_code))
         }
     })
     .await
-    .map_err(|e| format!("安装任务异常: {}", e))?
+    .map_err(|e| format!("任务异常: {}", e))?
+}
+
+#[cfg(windows)]
+fn resource_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    Ok(app
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("无法获取资源目录: {}", e))?
+        .join("resources"))
 }
 
 #[tauri::command]
 pub async fn install_driver(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
-        run_interception_installer(app, "/install").await
+        let exe = resource_dir(&app)?.join("install-interception.exe");
+        run_elevated_exe(app, exe, Some("/install")).await
     }
     #[cfg(not(windows))]
     {
@@ -201,7 +263,6 @@ pub async fn install_driver(app: AppHandle) -> Result<(), String> {
 pub async fn uninstall_driver(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
-        // 卸载前先切回 SendInput，避免句柄被 Drop 的时机问题
         use crate::engine::input::{init_backend, InputMode};
         use tauri_plugin_store::StoreExt;
         init_backend(InputMode::SendInput);
@@ -210,11 +271,176 @@ pub async fn uninstall_driver(app: AppHandle) -> Result<(), String> {
             let _ = store.save();
         }
 
-        run_interception_installer(app, "/uninstall").await
+        let exe = resource_dir(&app)?.join("install-interception.exe");
+        run_elevated_exe(app, exe, Some("/uninstall")).await
     }
     #[cfg(not(windows))]
     {
         let _ = app;
         Err("仅 Windows 平台支持卸载驱动".to_string())
+    }
+}
+
+// ===== DD-HID 驱动管理 =====
+
+/// HID 驱动是否已安装：检测 system32\drivers\ddhid63340.sys 是否存在
+#[tauri::command]
+pub fn is_dd_hid_driver_installed() -> bool {
+    #[cfg(windows)]
+    {
+        let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+        let drv_path = std::path::Path::new(&sysroot)
+            .join("System32")
+            .join("drivers")
+            .join("ddhid63340.sys");
+        drv_path.exists()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+#[tauri::command]
+pub async fn install_dd_hid_driver(app: AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        let exe = resource_dir(&app)?.join("ddhid-driver").join("ddc.exe");
+        run_elevated_exe(app, exe, None).await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        Err("仅 Windows 平台支持安装 DD-HID 驱动".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use crate::engine::input::{init_backend, InputMode};
+        use tauri_plugin_store::StoreExt;
+        // 卸载前先切回 SendInput，释放 DLL
+        init_backend(InputMode::SendInput);
+        if let Ok(store) = app.store(crate::STORE_PATH) {
+            store.set("input_mode", serde_json::json!("sendinput"));
+            let _ = store.save();
+        }
+
+        let exe = resource_dir(&app)?.join("ddhid-driver").join("ddc.exe");
+        run_elevated_exe(app, exe, Some("-u")).await
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = app;
+        Err("仅 Windows 平台支持卸载 DD-HID 驱动".to_string())
+    }
+}
+
+// ===== 提权重启 =====
+
+#[cfg(windows)]
+fn is_process_elevated() -> bool {
+    use std::mem;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows_sys::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    const TOKEN_QUERY: u32 = 0x0008;
+    let mut token: HANDLE = std::ptr::null_mut();
+    let ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
+    if ok == 0 {
+        return false;
+    }
+    let mut elev: TOKEN_ELEVATION = unsafe { mem::zeroed() };
+    let mut ret_len: u32 = 0;
+    let got = unsafe {
+        GetTokenInformation(
+            token,
+            TokenElevation,
+            &mut elev as *mut _ as *mut _,
+            mem::size_of::<TOKEN_ELEVATION>() as u32,
+            &mut ret_len,
+        )
+    };
+    unsafe { CloseHandle(token) };
+    got != 0 && elev.TokenIsElevated != 0
+}
+
+#[tauri::command]
+pub fn is_elevated() -> bool {
+    #[cfg(windows)]
+    {
+        is_process_elevated()
+    }
+    #[cfg(not(windows))]
+    {
+        false
+    }
+}
+
+/// 以管理员身份重启自身。当前进程会通过 ShellExecuteEx 启动新实例（带 runas verb），
+/// 然后 `app.exit(0)` 触发本进程退出。新进程读取 `--switch-mode=<id>` 自动设定模式。
+#[tauri::command]
+pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::ERROR_CANCELLED;
+        use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW};
+
+        // 校验目标模式合法
+        let _ = crate::engine::input::InputMode::from_str(&mode)
+            .ok_or_else(|| format!("未知输入模式: {}", mode))?;
+
+        let exe = std::env::current_exe()
+            .map_err(|e| format!("无法定位当前可执行文件: {}", e))?;
+        let path_wide: Vec<u16> = exe
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        let verb: Vec<u16> = "runas\0".encode_utf16().collect();
+        let params: Vec<u16> = format!("--elevated --switch-mode={}\0", mode)
+            .encode_utf16()
+            .collect();
+
+        let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+            let mut sei: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+            sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+            sei.lpVerb = verb.as_ptr();
+            sei.lpFile = path_wide.as_ptr();
+            sei.lpParameters = params.as_ptr();
+            sei.nShow = 1;
+
+            let ok = unsafe { ShellExecuteExW(&mut sei) };
+            if ok == 0 {
+                let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
+                return if err == ERROR_CANCELLED {
+                    Err("已取消管理员授权".to_string())
+                } else {
+                    Err(format!("启动管理员实例失败 (Win32 错误码 {})", err))
+                };
+            }
+            Ok(())
+        })
+        .await
+        .map_err(|e| format!("任务异常: {}", e))?;
+
+        result.as_ref().map_err(|e| e.clone())?;
+
+        // 新实例已启动（不等其退出）。让前端有时间收到响应，再触发本进程退出
+        let app_clone = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            std::thread::sleep(std::time::Duration::from_millis(300));
+            app_clone.exit(0);
+        });
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, mode);
+        Err("仅 Windows 平台支持提权重启".to_string())
     }
 }

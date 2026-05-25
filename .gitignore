@@ -16,6 +16,7 @@ src-tauri/target/
 *.msi
 *.exe
 !apps/main/src-tauri/resources/*
+!apps/main/src-tauri/resources/**/*
 
 # Env & secrets
 .env

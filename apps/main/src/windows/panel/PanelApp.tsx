@@ -1,5 +1,4 @@
 import { getVersion } from '@tauri-apps/api/app';
-import { APP_NAME } from '../../constants';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -7,16 +6,17 @@ import { LazyStore } from '@tauri-apps/plugin-store';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import iconUrl from '../../assets/icon-32.png';
 import bgUrl from '../../assets/icon.png';
-import AboutDialog from './dialogs/AboutDialog';
-import UpdateNoticeDialog, { type UpdateNoticeInfo } from './dialogs/UpdateNoticeDialog';
-import AgreementDialog from './dialogs/AgreementDialog';
+import { APP_NAME } from '../../constants';
 import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
+import { useConfirm } from './components/ConfirmDialog';
 import ContextMenu from './components/ContextMenu';
 import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/icons';
 import KeyCapture from './components/KeyCapture';
 import Overlay from './components/Overlay';
-import { useConfirm } from './components/ConfirmDialog';
 import { useToast } from './components/Toast';
+import AboutDialog from './dialogs/AboutDialog';
+import AgreementDialog from './dialogs/AgreementDialog';
+import UpdateNoticeDialog, { type UpdateNoticeInfo } from './dialogs/UpdateNoticeDialog';
 import './PanelApp.css';
 
 const settingsStore = new LazyStore('settings.json');
@@ -24,6 +24,14 @@ const CLOSE_BEHAVIOR_KEY = 'closeBehavior';
 const ACTIVE_TAB_KEY = 'activeTab';
 
 type BurstMode = 'hold' | 'toggle';
+type InputMode = 'sendinput' | 'interception' | 'dd_hid';
+
+const INPUT_MODE_LABELS: Record<InputMode, string> = {
+  sendinput: '通用模式',
+  interception: '游戏模式',
+  dd_hid: '究极HID',
+};
+const INPUT_MODE_LIST: InputMode[] = ['sendinput', 'interception', 'dd_hid'];
 
 interface BurstRule {
   id: string;
@@ -78,9 +86,13 @@ export default function PanelApp() {
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const [globalEnabled, setGlobalEnabled] = useState(false);
   const [togglingGlobal, setTogglingGlobal] = useState(false);
-  const [driverMode, setDriverMode] = useState(false);
-  const [driverInstalled, setDriverInstalled] = useState(false);
-  const [togglingDriver, setTogglingDriver] = useState(false);
+  const [inputMode, setInputMode] = useState<InputMode>('sendinput');
+  const [interceptionInstalled, setInterceptionInstalled] = useState(false);
+  const [ddHidInstalled, setDdHidInstalled] = useState(false);
+  const [elevated, setElevated] = useState(false);
+  const [switchingMode, setSwitchingMode] = useState(false);
+  const [modePickerOpen, setModePickerOpen] = useState(false);
+  const modeBtnRef = useRef<HTMLButtonElement>(null);
   const [rules, setRules] = useState<BurstRule[]>([]);
   const [profileName, setProfileName] = useState('默认配置');
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({});
@@ -100,7 +112,7 @@ export default function PanelApp() {
   useEffect(() => {
     getVersion()
       .then(setAppVersion)
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   useEffect(() => {
@@ -109,7 +121,7 @@ export default function PanelApp() {
       .then((v) => {
         if (v === 'hold' || v === 'toggle') setActiveTab(v);
       })
-      .catch(() => {});
+      .catch(() => { });
 
     invoke<boolean>('get_global_enabled')
       .then(setGlobalEnabled)
@@ -118,11 +130,21 @@ export default function PanelApp() {
       });
 
     invoke<string>('get_input_mode')
-      .then((mode) => setDriverMode(mode === 'interception'))
-      .catch(() => {});
+      .then((mode) => {
+        if ((INPUT_MODE_LIST as string[]).includes(mode)) {
+          setInputMode(mode as InputMode);
+        }
+      })
+      .catch(() => { });
     invoke<boolean>('is_driver_installed')
-      .then(setDriverInstalled)
-      .catch(() => {});
+      .then(setInterceptionInstalled)
+      .catch(() => { });
+    invoke<boolean>('is_dd_hid_driver_installed')
+      .then(setDdHidInstalled)
+      .catch(() => { });
+    invoke<boolean>('is_elevated')
+      .then(setElevated)
+      .catch(() => { });
 
     // 引擎已在启动时从 .qzh 加载了规则，直接读取
     invoke<BurstRule[]>('get_rules')
@@ -140,7 +162,7 @@ export default function PanelApp() {
             .catch(() => {
               toast.error('初始化默认配置失败');
               setRules(defaultRules());
-              invoke('set_rules', { rules: defaultRules() }).catch(() => {});
+              invoke('set_rules', { rules: defaultRules() }).catch(() => { });
               queueMicrotask(() => {
                 initialLoadDone.current = true;
               });
@@ -155,7 +177,7 @@ export default function PanelApp() {
       .catch(() => {
         toast.error('读取规则失败，已加载默认配置');
         setRules(defaultRules());
-        invoke('set_rules', { rules: defaultRules() }).catch(() => {});
+        invoke('set_rules', { rules: defaultRules() }).catch(() => { });
         queueMicrotask(() => {
           initialLoadDone.current = true;
         });
@@ -169,7 +191,7 @@ export default function PanelApp() {
       .then((needed) => {
         if (needed) setShowAgreement(true);
       })
-      .catch(() => {});
+      .catch(() => { });
     const unlistenGlobal = listen<boolean>('global-enabled-changed', (e) => {
       setGlobalEnabled(e.payload);
     });
@@ -250,59 +272,106 @@ export default function PanelApp() {
     }
   }
 
-  async function toggleDriverMode() {
-    if (togglingDriver) return;
-    setTogglingDriver(true);
+  async function selectInputMode(target: InputMode) {
+    if (switchingMode || target === inputMode) return;
+    setSwitchingMode(true);
     try {
-      if (!driverMode) {
-        if (!driverInstalled) {
-          const ok = await confirm({
-            title: '安装驱动',
-            description: (
-              <>
-                驱动增强需要安装 Interception 内核驱动。点击「安装」后将弹出 UAC
-                授权窗口，授权后控制台窗口会一闪而过即为安装完成。
-                <br />
-                <br />
-                <strong>安装完成后必须重启电脑，驱动才会生效。</strong>
-              </>
-            ),
-            confirmText: '安装',
-          });
-          if (!ok) return;
-          await invoke('install_driver');
-          await confirm({
-            title: '请重启电脑',
-            description: (
-              <>
-                驱动安装程序已启动。如系统弹出「可能未正确安装此程序」提示，请点击「已正确安装此程序」。
-                <br />
-                <br />
-                <strong>安装完成后请重启电脑</strong>，重启后再次开启驱动增强即可生效。
-              </>
-            ),
-            confirmText: '我已知晓',
-            cancelText: '稍后处理',
-          });
-          return;
+      // Interception 驱动：未安装则先安装并退出（要求重启电脑）
+      if (target === 'interception' && !interceptionInstalled) {
+        const ok = await confirm({
+          title: '安装驱动',
+          description: (
+            <>
+              游戏模式需要安装 Interception 内核驱动。点击「安装」后将弹出 UAC
+              授权窗口，授权后控制台窗口会一闪而过即为安装完成。
+              <br />
+              <br />
+              <strong>安装完成后必须重启电脑，驱动才会生效。</strong>
+            </>
+          ),
+          confirmText: '安装',
+        });
+        if (!ok) return;
+        await invoke('install_driver');
+        await confirm({
+          title: '请重启电脑',
+          description: (
+            <>
+              驱动安装程序已启动。如系统弹出「可能未正确安装此程序」提示，请点击「已正确安装此程序」。
+              <br />
+              <br />
+              <strong>安装完成后请重启电脑</strong>，重启后再次切换到游戏模式即可生效。
+            </>
+          ),
+          confirmText: '我已知晓',
+          cancelText: '稍后处理',
+        });
+        return;
+      }
+
+      // DD-HID：未安装则先 PnP 安装（无需重启）
+      if (target === 'dd_hid' && !ddHidInstalled) {
+        const ok = await confirm({
+          title: '安装究极HID 驱动',
+          description: (
+            <>
+              究极HID 模式需要安装 ddxoft 提供的 WHQL 签名 HID 虚拟驱动。点击「安装」后将弹出 UAC
+              授权窗口，授权后会出现一个一闪而过的命令行窗口即为安装完成。
+              <br />
+              <br />
+              <strong>本驱动无需重启电脑即可生效。</strong>
+            </>
+          ),
+          confirmText: '安装',
+        });
+        if (!ok) return;
+        await invoke('install_dd_hid_driver');
+        setDdHidInstalled(true);
+        toast.success('究极HID 驱动已安装');
+      }
+
+      // DD-HID 模式需要管理员：当前非管理员则提示重启
+      const targetNeedsAdmin = target === 'dd_hid';
+      if (targetNeedsAdmin && !elevated) {
+        const ok = await confirm({
+          title: '需要管理员权限',
+          description: (
+            <>
+              究极HID 模式底层调用 DeviceIoControl，需要以管理员身份运行。
+              <br />
+              <br />
+              点击「以管理员重启」会立刻关闭当前应用并启动管理员实例，自动切换到所选模式。
+            </>
+          ),
+          confirmText: '以管理员重启',
+        });
+        if (!ok) return;
+        try {
+          await invoke('relaunch_as_admin', { mode: target });
+        } catch (e) {
+          toast.error(`提权重启失败：${e}`);
         }
-        await invoke('set_input_mode', { mode: 'interception' });
-        const actual = await invoke<string>('get_input_mode');
-        if (actual === 'interception') {
-          setDriverMode(true);
-          toast.success('驱动增强已启用');
-        } else {
-          toast.warning('驱动未就绪，请重启电脑后再试');
-        }
-      } else {
-        await invoke('set_input_mode', { mode: 'sendinput' });
-        setDriverMode(false);
-        toast.info('已切换为标准模式');
+        return; // 进程将退出，不再继续
+      }
+
+      // 常规切换
+      await invoke('set_input_mode', { mode: target });
+      const actual = await invoke<string>('get_input_mode');
+      if (actual === target) {
+        setInputMode(target);
+        toast.success(`已切换为${INPUT_MODE_LABELS[target]}`);
+      } else if ((INPUT_MODE_LIST as string[]).includes(actual)) {
+        setInputMode(actual as InputMode);
+        toast.warning(
+          target === 'interception'
+            ? '驱动未就绪，请重启电脑后再试'
+            : `切换未生效，已停留在${INPUT_MODE_LABELS[actual as InputMode]}`,
+        );
       }
     } catch (e) {
       toast.error(`切换失败：${e}`);
     } finally {
-      setTogglingDriver(false);
+      setSwitchingMode(false);
     }
   }
 
@@ -448,7 +517,7 @@ export default function PanelApp() {
       title: '卸载驱动',
       description: (
         <>
-          将卸载 Interception 内核驱动。卸载后驱动增强功能将不可用，应用会切回标准模式。
+          将卸载 Interception 内核驱动。卸载后游戏模式将不可用，应用会切回通用模式。
           <br />
           <br />
           <strong>卸载完成后必须重启电脑才能彻底生效。</strong>
@@ -461,8 +530,8 @@ export default function PanelApp() {
     if (!ok) return;
     try {
       await invoke('uninstall_driver');
-      setDriverMode(false);
-      setDriverInstalled(false);
+      if (inputMode === 'interception') setInputMode('sendinput');
+      setInterceptionInstalled(false);
       await confirm({
         title: '卸载完成',
         description: (
@@ -481,6 +550,33 @@ export default function PanelApp() {
     }
   }
 
+  async function handleUninstallDdHid() {
+    setMenuOpen(false);
+    const ok = await confirm({
+      title: '卸载究极HID 驱动',
+      description: (
+        <>
+          将卸载究极HID 虚拟驱动。卸载后究极HID 模式将不可用，应用会切回通用模式。
+          <br />
+          <br />
+          本驱动卸载无需重启电脑。
+        </>
+      ),
+      confirmText: '卸载',
+      cancelText: '取消',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      await invoke('uninstall_dd_hid_driver');
+      if (inputMode === 'dd_hid') setInputMode('sendinput');
+      setDdHidInstalled(false);
+      toast.success('究极HID 驱动已卸载');
+    } catch (e) {
+      toast.error(`卸载失败：${e}`);
+    }
+  }
+
   function handleAgreed() {
     invoke<BurstRule[]>('get_rules').then((loaded) => {
       if (loaded.length === 0) {
@@ -491,7 +587,7 @@ export default function PanelApp() {
           })
           .catch(() => {
             setRules(defaultRules());
-            invoke('set_rules', { rules: defaultRules() }).catch(() => {});
+            invoke('set_rules', { rules: defaultRules() }).catch(() => { });
           });
       } else {
         setRules(loaded);
@@ -689,14 +785,16 @@ export default function PanelApp() {
         </button>
         <div className="footer-controls">
           <div className="footer-control">
-            <span className="footer-label">驱动增强</span>
+            <span className="footer-label">输入模式</span>
             <button
-              className={`toggle-btn mini${driverMode ? ' active' : ''}`}
-              onClick={toggleDriverMode}
-              disabled={togglingDriver}
-              title="启用后可兼容剑网三等使用 Raw Input 的游戏"
+              ref={modeBtnRef}
+              className={`toggle-btn mini${inputMode !== 'sendinput' ? ' active' : ''}`}
+              onClick={() => setModePickerOpen((v) => !v)}
+              disabled={switchingMode}
+              title="点击选择输入模式"
             >
-              {togglingDriver ? '…' : driverMode ? '开' : '关'}
+              {switchingMode ? '…' : INPUT_MODE_LABELS[inputMode]}
+              {elevated && inputMode === 'dd_hid' ? ' ★' : ''}
             </button>
           </div>
           <div className="footer-control">
@@ -713,6 +811,30 @@ export default function PanelApp() {
       </footer>
 
       <ContextMenu
+        open={modePickerOpen}
+        onClose={() => setModePickerOpen(false)}
+        target={modeBtnRef}
+        location="bottom-left"
+        items={INPUT_MODE_LIST.map((m) => ({
+          label:
+            (inputMode === m ? '✓ ' : '   ') +
+            INPUT_MODE_LABELS[m] +
+            (m === 'sendinput'
+              ? '（最稳定，但很多游戏不响应）'
+              : m === 'interception'
+                ? interceptionInstalled
+                  ? '（兼容多数游戏）'
+                  : '（点击安装驱动）'
+                : m === 'dd_hid'
+                  ? ddHidInstalled
+                    ? '（极致兼容，HVCI 友好）'
+                    : '（点击安装驱动）'
+                  : '（高级兼容，需管理员）'),
+          onClick: () => void selectInputMode(m),
+        }))}
+      />
+
+      <ContextMenu
         open={menuOpen}
         onClose={() => setMenuOpen(false)}
         target={menuBtnRef}
@@ -725,8 +847,11 @@ export default function PanelApp() {
           { label: '查看日志', onClick: handleOpenLogDir },
           { label: '用户协议', onClick: handleShowAgreement },
           { label: '关于', onClick: handleShowAbout },
-          ...(driverInstalled
-            ? [{ label: '卸载驱动', onClick: handleUninstallDriver, danger: true }]
+          ...(interceptionInstalled
+            ? [{ label: '卸载游戏模式驱动', onClick: handleUninstallDriver, danger: true }]
+            : []),
+          ...(ddHidInstalled
+            ? [{ label: '卸载究极HID 驱动', onClick: handleUninstallDdHid, danger: true }]
             : []),
         ]}
       />

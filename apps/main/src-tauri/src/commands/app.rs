@@ -5,7 +5,7 @@ use tauri_plugin_updater::UpdaterExt;
 use tracing::{info, warn};
 
 const STORE_PATH: &str = "settings.json";
-const AGREEMENT_VERSION: &str = "1.0";
+const AGREEMENT_VERSION: &str = "1.2";
 const PENDING_UPDATE_DIR: &str = "pending_update";
 
 pub struct UpdateLock(pub AtomicBool);

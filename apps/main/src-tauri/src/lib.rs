@@ -16,8 +16,10 @@ use commands::{
         UpdateLock,
     },
     engine::{
-        get_global_enabled, get_input_mode, get_rules, install_driver, is_driver_installed,
-        set_global_enabled, set_input_mode, set_rules, uninstall_driver, EngineState,
+        get_global_enabled, get_input_mode, get_rules, install_dd_hid_driver, install_driver,
+        is_dd_hid_driver_installed, is_driver_installed, is_elevated, relaunch_as_admin,
+        set_global_enabled, set_input_mode, set_rules, uninstall_dd_hid_driver, uninstall_driver,
+        EngineState,
     },
     log::{log_from_frontend, open_log_dir},
     profile::{
@@ -28,7 +30,7 @@ use engine::{burst::start_listener, BurstEngine};
 
 pub const APP_NAME: &str = "FlairBloom";
 pub const APP_NAME_CN: &str = "气质花按键助手";
-const AGREEMENT_VERSION: &str = "1.1";
+const AGREEMENT_VERSION: &str = "1.2";
 const STORE_PATH: &str = "settings.json";
 const APP_IDENTIFIER: &str = "fun.xwink.flairbloom";
 
@@ -136,6 +138,11 @@ pub fn run() {
             is_driver_installed,
             install_driver,
             uninstall_driver,
+            is_dd_hid_driver_installed,
+            install_dd_hid_driver,
+            uninstall_dd_hid_driver,
+            is_elevated,
+            relaunch_as_admin,
             save_profile,
             load_profile,
             list_profiles,
@@ -429,21 +436,48 @@ async fn do_silent_update(app: &tauri::AppHandle) -> Result<(), String> {
 fn init_input_backend(app: &tauri::AppHandle) {
     #[cfg(windows)]
     {
-        use engine::input::{init_backend, InputMode};
+        use engine::input::{init_backend, set_resources_dir, InputMode};
         use tauri_plugin_store::StoreExt;
 
-        let mode_str: Option<String> = app.store(STORE_PATH).ok().and_then(|store| {
+        // 先注册资源目录，DD 后端需要它定位 DLL
+        if let Ok(dir) = app.path().resource_dir() {
+            set_resources_dir(dir.join("resources"));
+        }
+
+        // 启动参数 --switch-mode=<id> 优先于 settings 中的持久值（提权重启场景）
+        let cli_mode = parse_switch_mode_arg();
+
+        let stored_mode: Option<String> = app.store(STORE_PATH).ok().and_then(|store| {
             store
                 .get("input_mode")
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
         });
 
-        let mode = match mode_str.as_deref() {
-            Some("interception") => InputMode::Interception,
-            _ => InputMode::SendInput,
-        };
+        let mode_str = cli_mode.clone().or(stored_mode);
+        let mode = mode_str
+            .as_deref()
+            .and_then(InputMode::from_str)
+            .unwrap_or_default();
         init_backend(mode);
+
+        // CLI 指定的模式需要持久化，下次启动直接生效
+        if let Some(m) = cli_mode {
+            if let Ok(store) = app.store(STORE_PATH) {
+                store.set("input_mode", serde_json::json!(m));
+                let _ = store.save();
+            }
+        }
     }
     #[cfg(not(windows))]
     let _ = app;
+}
+
+#[cfg(windows)]
+fn parse_switch_mode_arg() -> Option<String> {
+    for arg in std::env::args() {
+        if let Some(v) = arg.strip_prefix("--switch-mode=") {
+            return Some(v.to_string());
+        }
+    }
+    None
 }
