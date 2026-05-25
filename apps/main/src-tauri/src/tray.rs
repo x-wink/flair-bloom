@@ -6,7 +6,7 @@ use tauri::{
     AppHandle, Emitter, Manager, Runtime,
 };
 
-fn build_menu<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> tauri::Result<Menu<R>> {
+pub fn build_menu<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> tauri::Result<Menu<R>> {
     let toggle_label = if enabled {
         "✓ 连发已启用"
     } else {

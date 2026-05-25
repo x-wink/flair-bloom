@@ -1,13 +1,18 @@
 use crate::engine::BurstEngine;
 use qzh_format::profile::{BurstRule, MAX_RULES};
 use std::sync::{atomic::Ordering, Arc};
-use tauri::State;
+use tauri::{AppHandle, Manager, State};
 
 pub struct EngineState(pub Arc<BurstEngine>);
 
 #[tauri::command]
-pub fn set_global_enabled(state: State<EngineState>, enabled: bool) {
+pub fn set_global_enabled(app: AppHandle, state: State<EngineState>, enabled: bool) {
     state.0.global_enabled.store(enabled, Ordering::SeqCst);
+    if let Some(tray) = app.tray_by_id("main") {
+        if let Ok(menu) = crate::tray::build_menu(&app, enabled) {
+            let _ = tray.set_menu(Some(menu));
+        }
+    }
 }
 
 #[tauri::command]

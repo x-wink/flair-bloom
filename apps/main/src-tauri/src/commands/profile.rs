@@ -1,6 +1,6 @@
 use crypto::aes;
 use qzh_format::{
-    header::FileHeader,
+    header::{FileHeader, MAGIC, VERSION},
     migrate::migrate_profile,
     profile::{BurstMode, BurstRule, Hotkeys, Advanced, Profile, ProfileMeta, CURRENT_SCHEMA_VERSION},
 };
@@ -37,8 +37,11 @@ fn make_id() -> String {
 
 /// AAD 仅含 magic + version + flags，不含 nonce，所以可预先计算。
 fn compute_aad() -> Vec<u8> {
-    let header = FileHeader::new([0u8; 12]);
-    header.aad()
+    let mut aad = Vec::with_capacity(7);
+    aad.extend_from_slice(MAGIC);
+    aad.push(VERSION);
+    aad.extend_from_slice(&0u16.to_le_bytes()); // flags = 0
+    aad
 }
 
 fn write_profile_file_to_path(file_path: &Path, profile: &Profile) -> Result<String, String> {
@@ -49,7 +52,10 @@ fn write_profile_file_to_path(file_path: &Path, profile: &Profile) -> Result<Str
 
     let mut data = header.to_bytes();
     data.extend_from_slice(&ciphertext);
-    std::fs::write(file_path, &data).map_err(|e| format!("写入文件失败: {}", e))?;
+
+    let tmp_path = file_path.with_extension("qzh.tmp");
+    std::fs::write(&tmp_path, &data).map_err(|e| format!("写入临时文件失败: {}", e))?;
+    std::fs::rename(&tmp_path, file_path).map_err(|e| format!("替换配置文件失败: {}", e))?;
     Ok(file_path.to_string_lossy().to_string())
 }
 

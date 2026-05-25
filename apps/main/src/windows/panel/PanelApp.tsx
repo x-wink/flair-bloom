@@ -77,6 +77,7 @@ export default function PanelApp() {
   const [showUpdateNotice, setShowUpdateNotice] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const [globalEnabled, setGlobalEnabled] = useState(false);
+  const [togglingGlobal, setTogglingGlobal] = useState(false);
   const [rules, setRules] = useState<BurstRule[]>([]);
   const [profileName, setProfileName] = useState('默认配置');
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({});
@@ -85,6 +86,7 @@ export default function PanelApp() {
   const toast = useToast();
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
   const initialLoadDone = useRef(false);
+  const profileNameRef = useRef(profileName);
 
   useEffect(() => {
     return () => {
@@ -121,22 +123,32 @@ export default function PanelApp() {
             .then((profile) => {
               setRules(profile.rules);
               setProfileName(profile.meta.name);
+              queueMicrotask(() => {
+                initialLoadDone.current = true;
+              });
             })
             .catch(() => {
               toast.error('初始化默认配置失败');
               setRules(defaultRules());
               invoke('set_rules', { rules: defaultRules() }).catch(() => {});
+              queueMicrotask(() => {
+                initialLoadDone.current = true;
+              });
             });
         } else {
           setRules(loaded);
+          queueMicrotask(() => {
+            initialLoadDone.current = true;
+          });
         }
-        initialLoadDone.current = true;
       })
       .catch(() => {
         toast.error('读取规则失败，已加载默认配置');
         setRules(defaultRules());
         invoke('set_rules', { rules: defaultRules() }).catch(() => {});
-        initialLoadDone.current = true;
+        queueMicrotask(() => {
+          initialLoadDone.current = true;
+        });
       });
 
     const unlistenAgreement = listen<string>('show-agreement', () => {
@@ -176,34 +188,33 @@ export default function PanelApp() {
   }, []);
 
   // 规则变更后防抖自动保存到 .qzh
-  const saveRules = useCallback(
-    (r: BurstRule[]) => {
-      if (saveTimer.current) clearTimeout(saveTimer.current);
-      saveTimer.current = setTimeout(() => {
-        const profile: Profile = {
-          schema_version: 1,
-          meta: {
-            name: profileName,
-            created_at: 0, // backend will set timestamps
-            updated_at: 0,
-            app_version: '',
-          },
-          rules: r,
-          hotkeys: { global_toggle: null },
-          advanced: { log_level: 'info' },
-        };
-        invoke('save_profile', { name: profileName, profile }).catch(() => {
-          toast.warning('自动保存配置失败');
-        });
-      }, 500);
-    },
-    [profileName],
-  );
+  profileNameRef.current = profileName;
+  const saveRules = useCallback((r: BurstRule[]) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      const name = profileNameRef.current;
+      const profile: Profile = {
+        schema_version: 1,
+        meta: {
+          name,
+          created_at: 0, // backend will set timestamps
+          updated_at: 0,
+          app_version: '',
+        },
+        rules: r,
+        hotkeys: { global_toggle: null },
+        advanced: { log_level: 'info' },
+      };
+      invoke('save_profile', { name, profile }).catch(() => {
+        toast.warning('自动保存配置失败');
+      });
+    }, 500);
+  }, []);
 
   // 规则变更时自动保存（跳过初始加载，避免启动时重复写入）
   useEffect(() => {
     if (!initialLoadDone.current) return;
-    if (rules.length > 0) saveRules(rules);
+    saveRules(rules);
   }, [rules, saveRules]);
 
   function persistCloseBehavior(v: CloseBehavior) {
@@ -215,15 +226,18 @@ export default function PanelApp() {
       });
   }
 
-  function toggleGlobal() {
-    setGlobalEnabled((prev) => {
-      const next = !prev;
-      invoke('set_global_enabled', { enabled: next }).catch(() => {
-        toast.error('切换全局开关失败');
-        setGlobalEnabled(prev);
-      });
-      return next;
-    });
+  async function toggleGlobal() {
+    if (togglingGlobal) return;
+    const next = !globalEnabled;
+    setTogglingGlobal(true);
+    try {
+      await invoke('set_global_enabled', { enabled: next });
+      setGlobalEnabled(next);
+    } catch {
+      toast.error('切换全局开关失败');
+    } finally {
+      setTogglingGlobal(false);
+    }
   }
 
   function pushRules(updater: (prev: BurstRule[]) => BurstRule[]) {
@@ -232,16 +246,14 @@ export default function PanelApp() {
       next = updater(prev);
       return next;
     });
-    queueMicrotask(() => {
-      invoke('set_rules', { rules: next! }).catch(async (e) => {
-        toast.error(`保存规则失败：${e}`);
-        try {
-          const engineRules = await invoke<BurstRule[]>('get_rules');
-          setRules(engineRules);
-        } catch {
-          setRules(defaultRules());
-        }
-      });
+    invoke('set_rules', { rules: next! }).catch(async (e) => {
+      toast.error(`保存规则失败：${e}`);
+      try {
+        const engineRules = await invoke<BurstRule[]>('get_rules');
+        setRules(engineRules);
+      } catch {
+        setRules(defaultRules());
+      }
     });
   }
 
@@ -574,8 +586,12 @@ export default function PanelApp() {
           恢复默认
         </button>
         <span className="footer-label">全局开关</span>
-        <button className={`toggle-btn${globalEnabled ? ' active' : ''}`} onClick={toggleGlobal}>
-          {globalEnabled ? '已启用' : '已禁用'}
+        <button
+          className={`toggle-btn${globalEnabled ? ' active' : ''}`}
+          onClick={toggleGlobal}
+          disabled={togglingGlobal}
+        >
+          {togglingGlobal ? '切换中…' : globalEnabled ? '已启用' : '已禁用'}
         </button>
       </footer>
 

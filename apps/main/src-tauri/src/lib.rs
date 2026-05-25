@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tauri::{Emitter, Manager};
@@ -10,7 +11,10 @@ mod engine;
 mod tray;
 
 use commands::{
-    app::{agree_license, check_update, exit_app, needs_agreement, try_apply_pending_update},
+    app::{
+        agree_license, check_update, exit_app, needs_agreement, try_apply_pending_update,
+        UpdateLock,
+    },
     engine::{get_global_enabled, get_rules, set_global_enabled, set_rules, EngineState},
     log::{log_from_frontend, open_log_dir},
     profile::{
@@ -118,6 +122,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(EngineState(burst_engine.clone()))
+        .manage(UpdateLock(AtomicBool::new(false)))
         .invoke_handler(tauri::generate_handler![
             set_global_enabled,
             get_global_enabled,
@@ -315,7 +320,10 @@ fn init_and_save_default(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) -> R
         }
     };
 
-    let aad = qzh_format::header::FileHeader::new([0u8; 12]).aad();
+    let mut aad = Vec::with_capacity(7);
+    aad.extend_from_slice(qzh_format::header::MAGIC);
+    aad.push(qzh_format::header::VERSION);
+    aad.extend_from_slice(&0u16.to_le_bytes());
     let (ciphertext, nonce) = match crypto::aes::encrypt(&json, &aad) {
         Ok(c) => c,
         Err(e) => {
@@ -325,11 +333,15 @@ fn init_and_save_default(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) -> R
 
     let header = qzh_format::header::FileHeader::new(nonce);
     let file_path = dir.join("默认配置.qzh");
+    let tmp_path = file_path.with_extension("qzh.tmp");
     let mut data = header.to_bytes();
     data.extend_from_slice(&ciphertext);
 
-    if let Err(e) = std::fs::write(&file_path, &data) {
-        return Err(format!("写入配置失败: {}", e));
+    if let Err(e) = std::fs::write(&tmp_path, &data) {
+        return Err(format!("写入临时文件失败: {}", e));
+    }
+    if let Err(e) = std::fs::rename(&tmp_path, &file_path) {
+        return Err(format!("替换配置文件失败: {}", e));
     }
 
     let path_str = file_path.to_string_lossy().to_string();
@@ -347,31 +359,34 @@ fn init_and_save_default(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) -> R
 }
 
 async fn check_for_updates(app: tauri::AppHandle) {
-    use tauri_plugin_updater::UpdaterExt;
-
     // 优先应用上次已下载的待安装包
     if try_apply_pending_update(&app).await {
         return; // 安装触发后应用会重启，无需继续
     }
 
-    // 静默检查新版本并自动下载（不弹"已是最新版本"提示）
-    let updater = match app.updater() {
-        Ok(u) => u,
-        Err(e) => {
-            warn!("updater not available: {}", e);
-            return;
-        }
+    let lock = app.state::<UpdateLock>();
+    let _guard = match lock.acquire() {
+        Some(g) => g,
+        None => return,
     };
+
+    // 静默检查新版本并自动下载（不弹"已是最新版本"提示）
+    if let Err(e) = do_silent_update(&app).await {
+        warn!("silent update failed: {}", e);
+    }
+}
+
+async fn do_silent_update(app: &tauri::AppHandle) -> Result<(), String> {
+    use tauri_plugin_updater::UpdaterExt;
+
+    let updater = app.updater().map_err(|e| format!("{}", e))?;
     let update = match updater.check().await {
         Ok(Some(u)) => u,
         Ok(None) => {
             info!("app is up to date");
-            return;
+            return Ok(());
         }
-        Err(e) => {
-            warn!("update check failed: {}", e);
-            return;
-        }
+        Err(e) => return Err(format!("update check failed: {}", e)),
     };
 
     let version = update.version.clone();
@@ -379,33 +394,24 @@ async fn check_for_updates(app: tauri::AppHandle) {
     info!("update available: {}", version);
     let _ = app.emit("update-downloading", &version);
 
-    let bytes = match update.download(|_, _| {}, || {}).await {
-        Ok(b) => b,
-        Err(e) => {
-            warn!("update download failed: {}", e);
-            return;
-        }
-    };
+    let bytes = update
+        .download(|_, _| {}, || {})
+        .await
+        .map_err(|e| format!("download failed: {}", e))?;
 
-    let dir = match app
+    let dir = app
         .path()
         .app_local_data_dir()
         .map(|d| d.join("pending_update"))
-    {
-        Ok(d) => d,
-        Err(e) => {
-            warn!("can't get data dir: {}", e);
-            return;
-        }
-    };
+        .map_err(|e| format!("can't get data dir: {}", e))?;
 
-    if std::fs::create_dir_all(&dir).is_ok()
-        && std::fs::write(dir.join("installer"), &bytes).is_ok()
-        && std::fs::write(dir.join("version"), &version).is_ok()
-    {
-        let _ = app.emit(
-            "update-ready",
-            serde_json::json!({ "version": version, "notes": notes }),
-        );
-    }
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}", e))?;
+    std::fs::write(dir.join("installer"), &bytes).map_err(|e| format!("{}", e))?;
+    std::fs::write(dir.join("version"), &version).map_err(|e| format!("{}", e))?;
+
+    let _ = app.emit(
+        "update-ready",
+        serde_json::json!({ "version": version, "notes": notes }),
+    );
+    Ok(())
 }

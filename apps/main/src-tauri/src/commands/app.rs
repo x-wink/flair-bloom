@@ -1,4 +1,5 @@
-use tauri::{AppHandle, Emitter, Manager};
+use std::sync::atomic::{AtomicBool, Ordering};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tauri_plugin_updater::UpdaterExt;
 use tracing::{info, warn};
@@ -6,6 +7,25 @@ use tracing::{info, warn};
 const STORE_PATH: &str = "settings.json";
 const AGREEMENT_VERSION: &str = "1.0";
 const PENDING_UPDATE_DIR: &str = "pending_update";
+
+pub struct UpdateLock(pub AtomicBool);
+
+impl UpdateLock {
+    pub fn acquire(&self) -> Option<UpdateGuard<'_>> {
+        self.0
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .ok()
+            .map(|_| UpdateGuard(&self.0))
+    }
+}
+
+pub struct UpdateGuard<'a>(&'a AtomicBool);
+
+impl Drop for UpdateGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
 
 #[tauri::command]
 pub fn needs_agreement(app: AppHandle) -> Result<bool, String> {
@@ -44,7 +64,12 @@ pub fn exit_app(app: AppHandle) {
 }
 
 #[tauri::command]
-pub async fn check_update(app: AppHandle) -> Result<(), String> {
+pub async fn check_update(app: AppHandle, lock: State<'_, UpdateLock>) -> Result<(), String> {
+    let _guard = lock.acquire().ok_or("更新正在进行中")?;
+    do_check_update(&app).await
+}
+
+async fn do_check_update(app: &AppHandle) -> Result<(), String> {
     let updater = app
         .updater()
         .map_err(|e| format!("更新模块不可用: {}", e))?;
@@ -129,7 +154,7 @@ pub async fn try_apply_pending_update(app: &AppHandle) -> bool {
     };
 
     // 当前版本已经 >= 保存的版本，说明更新已生效或文件残留，清理
-    if env!("CARGO_PKG_VERSION") >= saved_version.as_str() {
+    if version_ge(env!("CARGO_PKG_VERSION"), &saved_version) {
         info!(
             "待安装版本 {} 已过期（当前 {}），清理",
             saved_version,
@@ -179,12 +204,10 @@ pub async fn try_apply_pending_update(app: &AppHandle) -> bool {
         }
     };
 
-    // 安装前清理（install 成功后应用会重启，不会执行到后续代码）
-    let _ = std::fs::remove_dir_all(&dir);
-
     match update.install(saved_bytes) {
         Ok(_) => {
             info!("更新安装完成，应用即将重启");
+            let _ = std::fs::remove_dir_all(&dir);
             true
         }
         Err(e) => {
@@ -199,4 +222,11 @@ fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn version_ge(a: &str, b: &str) -> bool {
+    let parse = |s: &str| -> Vec<u32> {
+        s.split('.').filter_map(|p| p.parse().ok()).collect()
+    };
+    parse(a) >= parse(b)
 }
