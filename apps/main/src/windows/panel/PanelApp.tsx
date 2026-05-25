@@ -4,7 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LazyStore } from '@tauri-apps/plugin-store';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import iconUrl from '../../assets/icon-32.png';
-import bgUrl from '../../assets/icon-bg.png';
+import bgUrl from '../../assets/icon.png';
 import AgreementPage from './pages/AgreementPage/AgreementPage';
 import ContextMenu from './ContextMenu';
 import Overlay from './Overlay';

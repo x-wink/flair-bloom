@@ -137,7 +137,9 @@ export function OverlayRoot({ children }: { children: ReactNode }) {
         }
       },
       update(id, patch) {
-        setItems((prev) => prev.map((i) => (i.id === id ? { ...i, ...patch, id, version: i.version + 1 } : i)));
+        setItems((prev) =>
+          prev.map((i) => (i.id === id ? { ...i, ...patch, id, version: i.version + 1 } : i)),
+        );
         if (patch.duration !== undefined) {
           const oldTimer = timersRef.current.get(id);
           if (oldTimer) clearTimeout(oldTimer);

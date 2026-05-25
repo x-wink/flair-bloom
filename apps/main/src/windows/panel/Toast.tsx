@@ -70,7 +70,12 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       </div>
     );
     if (overlayIdRef.current) {
-      overlay.update(overlayIdRef.current, { content, onClose: () => { overlayIdRef.current = null; } });
+      overlay.update(overlayIdRef.current, {
+        content,
+        onClose: () => {
+          overlayIdRef.current = null;
+        },
+      });
     } else {
       overlayIdRef.current = overlay.open({
         content,
@@ -78,7 +83,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         closeOnBackdrop: false,
         location: 'top',
         offset: [0, 2],
-        onClose: () => { overlayIdRef.current = null; },
+        onClose: () => {
+          overlayIdRef.current = null;
+        },
       }).id;
     }
   }, [toasts, overlay, dismiss]);
