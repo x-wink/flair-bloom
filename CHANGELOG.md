@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-26
+
 ### 新功能
 
 - **三档输入模式**：将原「驱动增强 开/关」开关重构为可选模式列表，新增 **究极HID**（基于 ddxoft DD 虚拟键鼠 SDK 的 HID-Class 驱动），覆盖 Interception 兼容性不足的少数 Raw Input 类游戏（如剑网三）
