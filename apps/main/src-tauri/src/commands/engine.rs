@@ -36,26 +36,28 @@ pub fn set_rules(state: State<EngineState>, rules: Vec<BurstRule>) -> Result<(),
         }
     }
 
-    // DD 模式下要求 target_key 与 trigger_key/stop_key 不同
+    // DD-HID 模式仅 Toggle 模式要求 target_key 与 trigger_key/stop_key 不同；
+    // Hold 模式靠 input.rs 的注入事件队列识别 sim 事件，允许 trigger == target
     #[cfg(windows)]
     {
         let mode = crate::engine::input::current_mode();
-        if mode.requires_distinct_target() {
-            for rule in rules.iter().filter(|r| r.enabled) {
+        if mode.requires_distinct_target_for_toggle() {
+            for rule in rules
+                .iter()
+                .filter(|r| r.enabled && matches!(r.mode, qzh_format::profile::BurstMode::Toggle))
+            {
                 if rule.target_key == rule.trigger_key {
                     return Err(format!(
-                        "究极HID 模式下，规则「{}」的目标键不可与触发键相同",
+                        "究极HID 模式下，切换连发规则「{}」的目标键不可与启动热键相同",
                         rule.id
                     ));
                 }
-                if matches!(rule.mode, qzh_format::profile::BurstMode::Toggle) {
-                    let stop = rule.stop_key.unwrap_or(rule.trigger_key);
-                    if rule.target_key == stop {
-                        return Err(format!(
-                            "究极HID 模式下，规则「{}」的目标键不可与停止键相同",
-                            rule.id
-                        ));
-                    }
+                let stop = rule.stop_key.unwrap_or(rule.trigger_key);
+                if rule.target_key == stop {
+                    return Err(format!(
+                        "究极HID 模式下，切换连发规则「{}」的目标键不可与停止热键相同",
+                        rule.id
+                    ));
                 }
             }
         }
@@ -101,24 +103,25 @@ pub fn set_input_mode(
             return Err("究极HID 模式需要管理员权限，请先以管理员身份重启应用".to_string());
         }
 
-        // 切到 DD 系列前先用新规则约束做静态校验（即使引擎此刻还是旧模式）
-        if input_mode.requires_distinct_target() {
+        // 切到 DD-HID 前用新规则约束做静态校验：仅 Toggle 模式要求 target 与 trigger/stop 互异
+        if input_mode.requires_distinct_target_for_toggle() {
             let rules = state.0.get_rules();
-            for rule in rules.iter().filter(|r| r.enabled) {
+            for rule in rules
+                .iter()
+                .filter(|r| r.enabled && matches!(r.mode, qzh_format::profile::BurstMode::Toggle))
+            {
                 if rule.target_key == rule.trigger_key {
                     return Err(format!(
-                        "切换失败：规则「{}」的目标键与触发键相同。\n究极HID 模式下，目标键不可与触发键/停止键相同。请修改后再切换。",
+                        "切换失败：切换连发规则「{}」的目标键与启动热键相同。\n究极HID 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
                         rule.id
                     ));
                 }
-                if matches!(rule.mode, qzh_format::profile::BurstMode::Toggle) {
-                    let stop = rule.stop_key.unwrap_or(rule.trigger_key);
-                    if rule.target_key == stop {
-                        return Err(format!(
-                            "切换失败：规则「{}」的目标键与停止键相同。\n究极HID 模式下，目标键不可与触发键/停止键相同。请修改后再切换。",
-                            rule.id
-                        ));
-                    }
+                let stop = rule.stop_key.unwrap_or(rule.trigger_key);
+                if rule.target_key == stop {
+                    return Err(format!(
+                        "切换失败：切换连发规则「{}」的目标键与停止热键相同。\n究极HID 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
+                        rule.id
+                    ));
                 }
             }
         }
@@ -394,8 +397,7 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
         let _ = crate::engine::input::InputMode::from_str(&mode)
             .ok_or_else(|| format!("未知输入模式: {}", mode))?;
 
-        let exe = std::env::current_exe()
-            .map_err(|e| format!("无法定位当前可执行文件: {}", e))?;
+        let exe = std::env::current_exe().map_err(|e| format!("无法定位当前可执行文件: {}", e))?;
         let path_wide: Vec<u16> = exe
             .as_os_str()
             .encode_wide()

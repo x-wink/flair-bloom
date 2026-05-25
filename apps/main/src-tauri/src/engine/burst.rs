@@ -1,5 +1,7 @@
 #[cfg(windows)]
 use super::input::SIM_MARKER;
+#[cfg(windows)]
+use super::input::{clear_pending_injections, try_consume_injection};
 use super::input::{key_down, key_up};
 use qzh_format::profile::{BurstMode, BurstRule};
 #[cfg(windows)]
@@ -60,6 +62,8 @@ impl BurstEngine {
         }
         loops.clear();
         self.toggle_states.lock().unwrap().clear();
+        #[cfg(windows)]
+        clear_pending_injections();
         *self.rules.lock().unwrap() = rules;
         // loops 在此 drop，持锁直到 rules 更新完毕，消除 TOCTOU 窗口
     }
@@ -242,6 +246,8 @@ impl Drop for BurstEngine {
                 key_up(target_key);
             }
         }
+        #[cfg(windows)]
+        clear_pending_injections();
     }
 }
 
@@ -255,8 +261,20 @@ const LLKHF_REPEAT: u32 = 0x40;
 unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> isize {
     if ncode >= 0 {
         let kb = &*(lparam as *const KBDLLHOOKSTRUCT);
-        // 通过 dwExtraInfo 精确过滤 SendInput 模拟事件，无竞态
-        if kb.dwExtraInfo != SIM_MARKER {
+        // SendInput / Interception：通过 dwExtraInfo 精确过滤自身注入；
+        // DD-HID：dwExtraInfo 由驱动端置位，无法控制，转用 PENDING_INJECTIONS 队列匹配
+        let is_sim_marker = kb.dwExtraInfo == SIM_MARKER;
+        if !is_sim_marker {
+            let is_up = matches!(wparam as u32, WM_KEYUP | WM_SYSKEYUP);
+            let is_down_or_up = matches!(
+                wparam as u32,
+                WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP
+            );
+            // 仅对 down/up 主事件调用消费，避免无关 wparam 误吃记录
+            if is_down_or_up && try_consume_injection(kb.vkCode, is_up) {
+                return CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam);
+            }
+
             let engine = ENGINE_HOOK
                 .read()
                 .unwrap()

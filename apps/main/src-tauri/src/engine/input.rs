@@ -3,11 +3,15 @@ use super::ddhid::DdHidBackend;
 #[cfg(windows)]
 use super::interception::InterceptionBackend;
 #[cfg(windows)]
+use std::collections::{HashMap, VecDeque};
+#[cfg(windows)]
 use std::path::PathBuf;
 #[cfg(windows)]
 use std::sync::atomic::AtomicBool;
 #[cfg(windows)]
 use std::sync::{Mutex, OnceLock};
+#[cfg(windows)]
+use std::time::{Duration, Instant};
 #[cfg(windows)]
 use tracing::{info, warn};
 #[cfg(windows)]
@@ -18,8 +22,67 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
 
 /// 写入 SendInput 的 dwExtraInfo，hook 据此过滤程序自身模拟的按键，消除竞态。
 /// Interception 后端会把 `information` 字段透传到 `KBDLLHOOKSTRUCT.dwExtraInfo`。
-/// DD 后端无法控制此字段，因此 DD 模式下需在校验层禁止「触发键 == 目标键」。
+/// DD-HID 后端无法控制此字段，改用应用层注入事件队列（PENDING_INJECTIONS）作为
+/// SIM_MARKER 的等价机制。
 pub const SIM_MARKER: usize = 0x5148_5844;
+
+/// DD-HID 模式下注入事件的存活窗口。注入到 LL 钩子的真实延迟为 μs 级，50ms 留出
+/// 几个数量级余量；超过即视为该 sim 事件被外部钩子吞掉，避免 PENDING 永不归零
+/// 把后续物理事件错认成 sim。
+#[cfg(windows)]
+const SIM_TTL: Duration = Duration::from_millis(50);
+
+/// `(vk, is_up) -> Instant 队列`：记录 DD-HID 后端注入的每次 down/up，hook 收到对应
+/// 事件时按 FIFO 配对消费。down 与 up 分桶避免计数串扰。
+#[cfg(windows)]
+type PendingMap = HashMap<(u32, bool), VecDeque<Instant>>;
+#[cfg(windows)]
+static PENDING_INJECTIONS: OnceLock<Mutex<PendingMap>> = OnceLock::new();
+
+#[cfg(windows)]
+fn pending_map() -> &'static Mutex<PendingMap> {
+    PENDING_INJECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(windows)]
+fn drop_expired(queue: &mut VecDeque<Instant>, now: Instant) {
+    while let Some(&front) = queue.front() {
+        if now.duration_since(front) > SIM_TTL {
+            queue.pop_front();
+        } else {
+            break;
+        }
+    }
+}
+
+#[cfg(windows)]
+fn record_injection(vk: u32, is_up: bool) {
+    let mut map = pending_map().lock().unwrap();
+    let queue = map.entry((vk, is_up)).or_default();
+    let now = Instant::now();
+    drop_expired(queue, now);
+    queue.push_back(now);
+}
+
+/// hook 端调用：若该 (vk, is_up) 对应有未过期的 sim 记录，pop 一条并返回 true
+/// 表示这是程序自身注入的事件，应该被过滤掉。
+#[cfg(windows)]
+pub fn try_consume_injection(vk: u32, is_up: bool) -> bool {
+    let mut map = pending_map().lock().unwrap();
+    let Some(queue) = map.get_mut(&(vk, is_up)) else {
+        return false;
+    };
+    drop_expired(queue, Instant::now());
+    queue.pop_front().is_some()
+}
+
+/// 引擎重新设置规则、关闭全局开关或析构时清空，避免遗留记录把首个物理事件吞掉。
+#[cfg(windows)]
+pub fn clear_pending_injections() {
+    if let Some(lock) = PENDING_INJECTIONS.get() {
+        lock.lock().unwrap().clear();
+    }
+}
 
 #[cfg(windows)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -50,9 +113,10 @@ impl InputMode {
         }
     }
 
-    /// DD-HID 模式无法用 dwExtraInfo 过滤自身注入，需在校验层禁止
-    /// 「目标键 == 触发键 / 停止键」的组合。
-    pub fn requires_distinct_target(&self) -> bool {
+    /// DD-HID 模式无法用 dwExtraInfo 过滤自身注入，但 Hold 模式靠 PENDING_INJECTIONS
+    /// 队列识别 sim 事件，已经允许「目标键 == 触发键」。Toggle 模式则因为 sim KEYDOWN
+    /// 必然要让 hook 处理（toggle 的本意），无法过滤自身，故仍禁止 target == trigger/stop。
+    pub fn requires_distinct_target_for_toggle(&self) -> bool {
         matches!(self, Self::DdHid)
     }
 
@@ -172,7 +236,7 @@ pub enum InputMode {
 
 #[cfg(not(windows))]
 impl InputMode {
-    pub fn requires_distinct_target(&self) -> bool {
+    pub fn requires_distinct_target_for_toggle(&self) -> bool {
         false
     }
 }
@@ -229,6 +293,8 @@ pub fn key_down(vk: u32) {
                         if !DD_KEY_DOWN_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                             info!("key_down 路由到 DD-HID 后端（vk={:#x}）", vk);
                         }
+                        // 注入前登记，hook 端按 FIFO 消费以过滤自循环
+                        record_injection(vk, false);
                         backend.send_key(vk, false);
                         return;
                     }
@@ -267,6 +333,7 @@ pub fn key_up(vk: u32) {
                         if !DD_KEY_UP_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                             info!("key_up 路由到 DD-HID 后端（vk={:#x}）", vk);
                         }
+                        record_injection(vk, true);
                         backend.send_key(vk, true);
                         return;
                     }

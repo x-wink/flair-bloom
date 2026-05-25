@@ -91,11 +91,12 @@ impl Profile {
         self.validate_for_mode(false)
     }
 
-    /// `distinct_target = true` 时启用 DD 模式专属约束：
-    /// 因为 DD 后端无法在 dwExtraInfo 中写入过滤标记，注入事件会被自身 LL 钩子
-    /// 误判为物理按键。规则：
-    /// - 任何模式：`target_key != trigger_key`
-    /// - Toggle 模式：`target_key != stop_key`（默认 `stop_key = trigger_key`）
+    /// `distinct_target = true` 时启用 DD-HID 模式专属约束：
+    /// DD 后端无法在 dwExtraInfo 中写入过滤标记，但 Hold 模式靠应用层注入事件队列识别
+    /// 自身注入，已允许「触发键 == 目标键」（连发 CD 类典型用法）。Toggle 模式因 sim
+    /// KEYDOWN 必须被 hook 处理（toggle 的本意），无法过滤自身，故仍要求：
+    /// - `target_key != trigger_key`
+    /// - `target_key != stop_key`（默认 `stop_key = trigger_key`）
     pub fn validate_for_mode(&self, distinct_target: bool) -> Result<(), ProfileError> {
         if self.rules.len() > MAX_RULES {
             return Err(ProfileError::TooManyRules);
@@ -105,15 +106,13 @@ impl Profile {
             if !(10..=10000).contains(&i) {
                 return Err(ProfileError::InvalidInterval(i));
             }
-            if distinct_target && rule.enabled {
+            if distinct_target && rule.enabled && rule.mode == BurstMode::Toggle {
                 if rule.target_key == rule.trigger_key {
                     return Err(ProfileError::DdTargetEqualsTrigger(rule.id.clone()));
                 }
-                if rule.mode == BurstMode::Toggle {
-                    let stop = rule.stop_key.unwrap_or(rule.trigger_key);
-                    if rule.target_key == stop {
-                        return Err(ProfileError::DdTargetEqualsStop(rule.id.clone()));
-                    }
+                let stop = rule.stop_key.unwrap_or(rule.trigger_key);
+                if rule.target_key == stop {
+                    return Err(ProfileError::DdTargetEqualsStop(rule.id.clone()));
                 }
             }
         }
