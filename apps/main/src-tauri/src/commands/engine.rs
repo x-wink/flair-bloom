@@ -246,11 +246,37 @@ async fn run_elevated_exe(
 
 #[cfg(windows)]
 fn resource_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
-    Ok(app
+    let raw = app
         .path()
         .resource_dir()
         .map_err(|e| format!("无法获取资源目录: {}", e))?
-        .join("resources"))
+        .join("resources");
+    // Tauri 的 resource_dir 在 Windows 上返回 \\?\<drive>:\... 形式的 verbatim 路径。
+    // 直接用作 ShellExecuteEx 的 lpDirectory 时，被启动进程（如 ddc.exe）再 spawn cmd
+    // 会因「UNC 路径不受支持」回退到 C:\Windows\，导致 INF/SYS 找不到、驱动安装失败。
+    Ok(strip_verbatim(raw))
+}
+
+/// 去掉 Windows verbatim 路径前缀（`\\?\<drive>:\...` → `<drive>:\...`），
+/// 保留真正的 UNC 路径（`\\?\UNC\server\share\...` → `\\server\share\...`）。
+#[cfg(windows)]
+fn strip_verbatim(path: std::path::PathBuf) -> std::path::PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+        return std::path::PathBuf::from(format!(r"\\{}", rest));
+    }
+    if let Some(rest) = s.strip_prefix(r"\\?\") {
+        // 仅当剥离后形如 "<letter>:\..." 时认为是普通本地路径
+        let bytes = rest.as_bytes();
+        if bytes.len() >= 3
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && (bytes[2] == b'\\' || bytes[2] == b'/')
+        {
+            return std::path::PathBuf::from(rest);
+        }
+    }
+    path
 }
 
 #[tauri::command]
