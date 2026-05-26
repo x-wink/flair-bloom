@@ -19,3 +19,7 @@ fn migrate_step(_data: Value, from_version: u32) -> Result<Value, MigrateError> 
     // v1 is the initial version — no migrations needed yet
     Err(MigrateError::UnknownVersion(from_version))
 }
+
+#[cfg(test)]
+#[path = "migrate_tests.rs"]
+mod tests;
