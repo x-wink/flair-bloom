@@ -1,3 +1,4 @@
+import './dialog-base.css';
 import './UpdateNoticeDialog.css';
 
 export interface UpdateNoticeInfo {

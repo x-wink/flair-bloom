@@ -9,6 +9,7 @@ import {
   useState,
 } from 'react';
 import { useOverlay } from './Overlay';
+import './Toast.css';
 
 export type ToastTone = 'info' | 'success' | 'warning' | 'error';
 

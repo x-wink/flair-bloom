@@ -1,4 +1,5 @@
 import { APP_NAME } from '../../../constants';
+import './dialog-base.css';
 import './AboutDialog.css';
 
 interface Props {

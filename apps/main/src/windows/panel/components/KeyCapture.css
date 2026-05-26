@@ -1,0 +1,29 @@
+.key-capture {
+  min-width: 56px;
+  padding: 5px 10px;
+  border: 1px solid #d6d6d6;
+  border-radius: 6px;
+  background: #fafafa;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+  white-space: nowrap;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.key-capture:hover {
+  border-color: #b8a6ed;
+}
+
+.key-capture.capturing {
+  border-color: #6c4de6;
+  background: #f0ecfd;
+  outline: none;
+}
+
+.key-capture:focus {
+  outline: none;
+  border-color: #6c4de6;
+}

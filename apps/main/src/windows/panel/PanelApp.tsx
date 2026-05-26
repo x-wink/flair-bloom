@@ -9,7 +9,7 @@ import bgUrl from '../../assets/icon.png';
 import { APP_NAME } from '../../constants';
 import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
 import { useConfirm } from './components/ConfirmDialog';
-import ContextMenu from './components/ContextMenu';
+import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/icons';
 import KeyCapture from './components/KeyCapture';
 import Overlay from './components/Overlay';
@@ -847,20 +847,18 @@ export default function PanelApp() {
         target={modeBtnRef}
         location="bottom-left"
         items={INPUT_MODE_LIST.map((m) => ({
-          label:
-            (inputMode === m ? '✓ ' : '   ') +
-            INPUT_MODE_LABELS[m] +
-            (m === 'sendinput'
-              ? '（最稳定，但很多游戏不响应）'
+          label: INPUT_MODE_LABELS[m],
+          subtitle:
+            m === 'sendinput'
+              ? '最稳定，但很多游戏不响应'
               : m === 'interception'
                 ? interceptionInstalled
-                  ? '（兼容多数游戏）'
-                  : '（点击安装驱动）'
-                : m === 'dd_hid'
-                  ? ddHidInstalled
-                    ? '（极致兼容，HVCI 友好）'
-                    : '（点击安装驱动）'
-                  : '（高级兼容，需管理员）'),
+                  ? '兼容多数游戏'
+                  : '点击安装驱动'
+                : ddHidInstalled
+                  ? '极致兼容，HVCI 友好'
+                  : '点击安装驱动',
+          active: inputMode === m,
           onClick: () => void selectInputMode(m),
         }))}
       />
@@ -872,17 +870,38 @@ export default function PanelApp() {
         items={[
           { label: '检查更新', onClick: handleCheckUpdate },
           {
-            label: updateNotice ? '更新公告 ●' : '更新公告',
+            label: '更新公告',
+            appendIcon: updateNotice ? (
+              <span
+                aria-hidden="true"
+                style={{ width: 6, height: 6, borderRadius: '50%', background: '#6c4de6' }}
+              />
+            ) : undefined,
             onClick: handleShowUpdateNotice,
           },
           { label: '查看日志', onClick: handleOpenLogDir },
           { label: '用户协议', onClick: handleShowAgreement },
           { label: '关于', onClick: handleShowAbout },
+          ...(interceptionInstalled || ddHidInstalled
+            ? ([{ type: 'divider' }] as ContextMenuItem[])
+            : []),
           ...(interceptionInstalled
-            ? [{ label: '卸载游戏模式驱动', onClick: handleUninstallDriver, danger: true }]
+            ? [
+                {
+                  label: '卸载游戏模式驱动',
+                  onClick: handleUninstallDriver,
+                  danger: true,
+                } as ContextMenuItem,
+              ]
             : []),
           ...(ddHidInstalled
-            ? [{ label: '卸载究极HID 驱动', onClick: handleUninstallDdHid, danger: true }]
+            ? [
+                {
+                  label: '卸载究极HID 驱动',
+                  onClick: handleUninstallDdHid,
+                  danger: true,
+                } as ContextMenuItem,
+              ]
             : []),
         ]}
       />

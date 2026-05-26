@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import eulaText from '../../../assets/EULA.md?raw';
+import './dialog-base.css';
 import './AgreementDialog.css';
 
 interface Props {

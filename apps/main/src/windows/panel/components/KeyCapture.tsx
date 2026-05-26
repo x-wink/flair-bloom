@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import './KeyCapture.css';
 
 const KEY_NAMES: Record<number, string> = {
   0x41: 'A',

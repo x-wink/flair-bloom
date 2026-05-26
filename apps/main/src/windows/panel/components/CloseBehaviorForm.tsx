@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import './CloseBehaviorForm.css';
 
 export type CloseBehavior = 'minimize' | 'exit';
 

@@ -1,4 +1,5 @@
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef } from 'react';
+import '../dialogs/dialog-base.css';
 import { useOverlay } from './Overlay';
 
 export type ConfirmTone = 'default' | 'danger';
