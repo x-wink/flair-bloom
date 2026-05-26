@@ -9,7 +9,7 @@ import bgUrl from '../../assets/icon.png';
 import { APP_NAME } from '../../constants';
 import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
 import { useConfirm } from './components/ConfirmDialog';
-import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
+import ContextMenu from './components/ContextMenu';
 import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/icons';
 import KeyCapture from './components/KeyCapture';
 import Overlay from './components/Overlay';
@@ -882,27 +882,26 @@ export default function PanelApp() {
           { label: '查看日志', onClick: handleOpenLogDir },
           { label: '用户协议', onClick: handleShowAgreement },
           { label: '关于', onClick: handleShowAbout },
-          ...(interceptionInstalled || ddHidInstalled
-            ? ([{ type: 'divider' }] as ContextMenuItem[])
-            : []),
-          ...(interceptionInstalled
-            ? [
-                {
-                  label: '卸载游戏模式驱动',
-                  onClick: handleUninstallDriver,
-                  danger: true,
-                } as ContextMenuItem,
-              ]
-            : []),
-          ...(ddHidInstalled
-            ? [
-                {
-                  label: '卸载究极HID 驱动',
-                  onClick: handleUninstallDdHid,
-                  danger: true,
-                } as ContextMenuItem,
-              ]
-            : []),
+          { type: 'divider' },
+          {
+            label: '卸载驱动',
+            danger: true,
+            disabled: !interceptionInstalled && !ddHidInstalled,
+            children: [
+              {
+                label: '游戏模式驱动',
+                onClick: handleUninstallDriver,
+                danger: true,
+                disabled: !interceptionInstalled,
+              },
+              {
+                label: '究极HID 驱动',
+                onClick: handleUninstallDdHid,
+                danger: true,
+                disabled: !ddHidInstalled,
+              },
+            ],
+          },
         ]}
       />
 

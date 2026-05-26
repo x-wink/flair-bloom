@@ -149,3 +149,35 @@
   margin: 4px 6px;
   background: #ececf5;
 }
+
+.ctx-menu-row {
+  position: relative;
+}
+
+.ctx-menu-arrow {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 16px;
+  margin-left: auto;
+  font-size: 16px;
+  line-height: 1;
+  color: #b0b0bb;
+}
+
+.ctx-menu-item--has-children .ctx-menu-arrow {
+  color: inherit;
+  opacity: 0.7;
+}
+
+.ctx-menu-item--sub-open:not(:hover):not(:focus-visible) {
+  background: #f5f3ff;
+  color: #6c4de6;
+}
+
+.ctx-menu-item--sub-open.ctx-menu-item--danger:not(:hover):not(:focus-visible) {
+  background: #fff0f0;
+  color: #d14343;
+}

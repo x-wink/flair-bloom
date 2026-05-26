@@ -22,7 +22,11 @@ export type Location =
   | 'top-left'
   | 'top-right'
   | 'bottom-left'
-  | 'bottom-right';
+  | 'bottom-right'
+  | 'right-start'
+  | 'right-end'
+  | 'left-start'
+  | 'left-end';
 
 export type AttachTarget = HTMLElement | 'body' | 'parent';
 
@@ -252,6 +256,10 @@ function computePos(
       'bottom-right': () => ({ left: tl + tw - self.w + ox, top: tt + th + GAP + oy }),
       'top-left': () => ({ left: tl + ox, top: tt - self.h - GAP + oy }),
       'top-right': () => ({ left: tl + tw - self.w + ox, top: tt - self.h - GAP + oy }),
+      'right-start': () => ({ left: tl + tw + GAP + ox, top: tt + oy }),
+      'right-end': () => ({ left: tl + tw + GAP + ox, top: tt + th - self.h + oy }),
+      'left-start': () => ({ left: tl - self.w - GAP + ox, top: tt + oy }),
+      'left-end': () => ({ left: tl - self.w - GAP + ox, top: tt + th - self.h + oy }),
     };
     return clampPos((map[l] ?? map['bottom'])(), self);
   }
