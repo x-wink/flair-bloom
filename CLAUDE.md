@@ -35,14 +35,23 @@ git config core.hooksPath .githooks
 
 ```
 apps/main/src-tauri/src/        # Tauri 后端（Rust）
+  lib.rs / main.rs              # 应用入口、窗口创建、事件注册
+  tray.rs                       # 系统托盘
+  commands/                     # 前端 invoke 入口
+    app.rs / engine.rs / log.rs / profile.rs / mod.rs
+  engine/                       # 按键注入引擎（见下文「连发引擎」）
+    burst.rs                    # 连发线程编排
+    input.rs                    # SendInput 通道（默认）
+    dd_common.rs / ddhid.rs     # DD 驱动通道（Windows）
+    interception.rs             # Interception 驱动通道（Windows）
 apps/main/src/windows/panel/    # 面板窗口（React）
   main.tsx                      # 入口，挂载 Provider
   PanelApp.tsx / .css           # 根组件
+  theme.css                     # 设计 Token（颜色/间距/字号变量）
   components/                   # UI 基础组件（Overlay、Toast、ConfirmDialog、ContextMenu、KeyCapture、SvgIcon、icons、CloseBehaviorForm）
   dialogs/                      # 弹窗内容组件（AboutDialog、AgreementDialog、UpdateNoticeDialog）
 apps/main/src/assets/icons/     # SVG 图标源文件（currentColor / 1em 尺寸）
 apps/keygen/                    # 兑换码生成 CLI
-apps/release-server/            # 落地页（Axum，待实现）
 packages/crypto/src/
   aes.rs                        # AES-256-GCM encrypt/decrypt
   license.rs                    # Ed25519 verify_license + LicensePayload
@@ -50,6 +59,7 @@ packages/migrate/src/lib.rs     # run_migrations() 泛型迁移运行器
 packages/qzh-format/src/
   header.rs                     # FileHeader（Magic/Version/Flags/Nonce）
   profile.rs                    # Profile / BurstRule 数据结构 + validate()
+  macro_seq.rs                  # MacroSequence / MacroStep + MAX_STEPS=256（亲友功能）
   migrate.rs                    # migrate_profile()，调用 packages/migrate
 ```
 
@@ -63,17 +73,23 @@ packages/qzh-format/src/
 
 **许可证**：Ed25519 离线校验。私钥仅在 `apps/keygen` 使用，不进主应用二进制。兑换码 `QZHUA-XXXXX-XXXXX-XXXXX-XXXXX`（Base32：64 字节签名 + JSON payload）。payload 含 `issue_time`（防时钟回拨）+ `expiry` + `features u32`（位掩码，见 `license.rs::feature_bits`）。公钥当前为全零占位，发布前替换。
 
-**连发引擎**：`windows_sys` `WH_KEYBOARD_LL` 全局键盘 Hook 监听物理按键，`SendInput` + `KEYEVENTF_SCANCODE`（`MapVirtualKeyW(MAPVK_VK_TO_VSC_EX)`）模拟扫描码输入使游戏可识别。`dwExtraInfo = SIM_MARKER` 标记自身注入事件防循环。引擎线程用 `catch_unwind` 包裹，并发连发用 `AtomicBool cancel + thread::park_timeout`，`Drop` 时先 signal 再 join 确保按键不卡住。非 Windows 平台提供空实现（`cfg(windows)` 隔离）。
+**连发引擎**：`windows_sys` `WH_KEYBOARD_LL` 全局键盘 Hook 监听物理按键。按键注入分三档通道，按用户在设置中选择的优先级生效：
+
+- **SendInput 默认**（`engine/input.rs`）：`SendInput` + `KEYEVENTF_SCANCODE`（`MapVirtualKeyW(MAPVK_VK_TO_VSC_EX)`），`dwExtraInfo = SIM_MARKER` 标记自身注入事件防循环。
+- **DD 驱动**（`engine/dd_common.rs` + `engine/ddhid.rs`）：动态加载 DD 驱动 DLL，绕过部分游戏的 SendInput 过滤。
+- **Interception 驱动**（`engine/interception.rs`）：通过 Interception 驱动注入，覆盖更深的反作弊场景。
+
+`burst.rs` 负责线程编排：用 `catch_unwind` 包裹引擎线程，并发连发用 `AtomicBool cancel + thread::park_timeout`，`Drop` 时先 signal 再 join 确保按键不卡住。非 Windows 平台提供空实现（`cfg(windows)` 隔离）。
 
 **数据存储路径**：`{app_data_dir}/profiles/`（.qzh）、`{app_data_dir}/settings.json`（plugin-store）、`{app_local_data_dir}/pending_update/`（下载待安装更新包）、`{app_log_dir}/`（rolling logs）。由 Tauri `PathResolver` 跨平台解析。
 
-## 输入约束（在 `profile.rs::validate()` 执行）
+## 输入约束
 
-| 参数         | 范围           |
-| ------------ | -------------- |
-| 连发间隔     | 10ms – 10000ms |
-| 单配置规则数 | ≤ 64           |
-| 宏序列步骤数 | ≤ 256          |
+| 参数         | 范围           | 执行位置                                    |
+| ------------ | -------------- | ------------------------------------------- |
+| 连发间隔     | 10ms – 10000ms | `qzh-format/src/profile.rs::validate()`     |
+| 单配置规则数 | ≤ 64           | `qzh-format/src/profile.rs::validate()`     |
+| 宏序列步骤数 | ≤ 256          | `qzh-format/src/macro_seq.rs::MAX_STEPS`    |
 
 ## 功能分层
 
@@ -102,6 +118,8 @@ packages/qzh-format/src/
 type：`feat` | `fix` | `docs` | `style` | `refactor` | `test` | `chore` | `ci` | `build` | `perf` | `revert`
 
 **pre-commit**：暂存 `.rs` → `cargo fmt --check` + `cargo clippy -D warnings`；暂存 `.ts/.tsx` → `oxlint` + `oxfmt --check`。
+
+**Workspace lints**：根 `Cargo.toml` 的 `[workspace.lints.clippy]` 是统一 lint 源（当前含 `uninlined_format_args = "warn"`）。新增 crate 的 `Cargo.toml` 必须加 `[lints] workspace = true` 继承，否则 clippy 规则不会生效。
 
 - 全程使用中文。
 
