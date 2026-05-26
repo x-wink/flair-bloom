@@ -107,10 +107,11 @@ packages/qzh-format/src/
 
 **发版步骤**：
 1. 在 `CHANGELOG.md` 的 `[Unreleased]` 节填写本次更新内容
-2. 运行 `pnpm bump-version X.X.X`，自动同步三处版本号并将 `[Unreleased]` 重命名为 `[X.X.X] - 日期`（脚本：`scripts/bump-version.ts`）
-3. 提交：`chore(release): bump version to X.X.X`
-4. 打 tag：`git tag vX.X.X && git push origin main && git push origin vX.X.X`
-5. tag 推送后 CI 自动构建、提取 changelog、发布 Draft Release，审查后手动发布
+2. 同步更新 `README.md`（面向用户的使用说明书）：核对界面示意图、操作步骤、新增 / 变更功能的描述，确保与新版本实际行为一致
+3. 运行 `pnpm bump-version X.X.X`，自动同步三处版本号并将 `[Unreleased]` 重命名为 `[X.X.X] - 日期`（脚本：`scripts/bump-version.ts`）
+4. 提交：`chore(release): bump version to X.X.X`
+5. 打 tag：`git tag vX.X.X && git push origin main && git push origin vX.X.X`
+6. tag 推送后 CI 自动构建、提取 changelog、发布 Draft Release，审查后手动发布
 
 ## 协作规范
 
