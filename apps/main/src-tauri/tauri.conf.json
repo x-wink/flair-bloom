@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "FlairBloom",
+  "productName": "气质花按键助手",
   "version": "0.1.7",
   "identifier": "fun.xwink.flairbloom",
   "build": {
@@ -40,7 +40,7 @@
     "windows": [
       {
         "label": "panel",
-        "title": "FlairBloom",
+        "title": "气质花按键助手",
         "url": "/panel.html",
         "width": 405,
         "height": 720,
