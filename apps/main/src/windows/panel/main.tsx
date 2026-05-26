@@ -5,6 +5,7 @@ import { ConfirmProvider } from './components/ConfirmDialog';
 import { OverlayRoot } from './components/Overlay';
 import PanelApp from './PanelApp';
 import { ToastProvider } from './components/Toast';
+import './theme.css';
 import './PanelApp.css';
 
 window.addEventListener('contextmenu', (e) => e.preventDefault());

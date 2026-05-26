@@ -2,12 +2,9 @@
   position: absolute;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
-  border-radius: 14px;
-  z-index: 99990;
-  animation: overlay-enter 0.15s ease;
-}
-
-.overlay-mask--static {
+  border-radius: var(--fb-radius-3xl);
+  z-index: var(--fb-z-overlay-mask);
+  animation: overlay-enter var(--fb-duration-base) ease;
 }
 
 .overlay-center {
@@ -16,8 +13,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 14px;
-  z-index: 99999;
+  border-radius: var(--fb-radius-3xl);
+  z-index: var(--fb-z-overlay-content);
   pointer-events: none;
 }
 
@@ -27,7 +24,7 @@
 
 .overlay-anchored {
   position: absolute;
-  z-index: 99999;
+  z-index: var(--fb-z-overlay-content);
   will-change: transform;
 }
 

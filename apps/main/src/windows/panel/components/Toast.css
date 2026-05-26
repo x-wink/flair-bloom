@@ -1,7 +1,7 @@
 .toast-stack {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--fb-space-4);
   pointer-events: none;
   width: calc(100vw - 40px);
   max-width: 360px;
@@ -10,32 +10,54 @@
 .toast {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 10px 8px 12px;
-  border-radius: 8px;
-  font-size: 12px;
+  gap: var(--fb-space-4);
+  padding: var(--fb-space-4) var(--fb-space-5) var(--fb-space-4) var(--fb-space-6);
+  border-radius: var(--fb-radius-lg);
+  font-size: var(--fb-fs-sm);
   background: rgba(45, 45, 45, 0.95);
   color: #fff;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--fb-shadow-toast);
   pointer-events: auto;
-  animation: toast-in 0.18s ease;
+  animation: toast-in var(--fb-duration-slow) ease;
+}
+
+.toast.toast-success {
+  background: #2c6a0e;
+}
+
+.toast.toast-warning {
+  background: #8c5e15;
+}
+
+.toast.toast-error {
+  background: #a84545;
+}
+
+.toast.toast-info .toast-icon {
+  background: var(--fb-color-primary);
+}
+
+.toast.toast-success .toast-icon,
+.toast.toast-warning .toast-icon,
+.toast.toast-error .toast-icon {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .toast-icon {
   flex-shrink: 0;
   width: 18px;
   height: 18px;
-  border-radius: 50%;
+  border-radius: var(--fb-radius-circle);
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--fb-fs-xs);
+  font-weight: var(--fb-fw-bold);
 }
 
 .toast-message {
   flex: 1;
-  line-height: 1.4;
+  line-height: var(--fb-lh-normal);
   user-select: text;
   cursor: text;
 }
@@ -45,41 +67,16 @@
   width: 22px;
   height: 22px;
   border: none;
-  border-radius: 4px;
+  border-radius: var(--fb-radius-xs);
   background: transparent;
   color: rgba(255, 255, 255, 0.6);
-  font-size: 11px;
+  font-size: var(--fb-fs-xs);
   cursor: pointer;
 }
 
 .toast-close:hover {
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
-}
-
-.toast-info .toast-icon {
-  background: #4a90e2;
-}
-
-.toast-success {
-  background: rgba(36, 122, 73, 0.95);
-}
-.toast-success .toast-icon {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.toast-warning {
-  background: rgba(180, 110, 25, 0.95);
-}
-.toast-warning .toast-icon {
-  background: rgba(255, 255, 255, 0.2);
-}
-
-.toast-error {
-  background: rgba(176, 50, 50, 0.95);
-}
-.toast-error .toast-icon {
-  background: rgba(255, 255, 255, 0.2);
 }
 
 @keyframes toast-in {

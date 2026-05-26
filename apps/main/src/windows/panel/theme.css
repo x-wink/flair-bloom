@@ -1,0 +1,112 @@
+/* 全局设计 Token —— 所有组件应通过这些变量取色/取尺寸 */
+
+:root {
+  /* ── Tone 基色 ────────────────────────────────────────── */
+  --fb-color-primary: #6c4de6;
+  --fb-color-neutral: #6e6e76;
+  --fb-color-danger: #e05c5c;
+  --fb-color-success: #52c41a;
+  --fb-color-warning: #f5a623;
+
+  /* ── Tone 派生（预先计算，WebView2 不支持 color-mix）── */
+  --fb-color-primary-hover: #5f44ca;
+  --fb-color-primary-active: #543cb3;
+  --fb-color-primary-soft: rgba(108, 77, 230, 0.1);
+  --fb-color-primary-soft-hover: rgba(108, 77, 230, 0.18);
+
+  --fb-color-neutral-hover: #616168;
+  --fb-color-neutral-active: #56565c;
+  --fb-color-neutral-soft: rgba(110, 110, 118, 0.1);
+  --fb-color-neutral-soft-hover: rgba(110, 110, 118, 0.18);
+
+  --fb-color-danger-hover: #c55151;
+  --fb-color-danger-active: #af4848;
+  --fb-color-danger-soft: rgba(224, 92, 92, 0.1);
+  --fb-color-danger-soft-hover: rgba(224, 92, 92, 0.18);
+
+  --fb-color-success-hover: #48ac17;
+  --fb-color-success-active: #409914;
+  --fb-color-success-soft: rgba(82, 196, 26, 0.1);
+  --fb-color-success-soft-hover: rgba(82, 196, 26, 0.18);
+
+  --fb-color-warning-hover: #d8921f;
+  --fb-color-warning-active: #bf811b;
+  --fb-color-warning-soft: rgba(245, 166, 35, 0.1);
+  --fb-color-warning-soft-hover: rgba(245, 166, 35, 0.18);
+
+  /* ── 文本灰阶 ─────────────────────────────────────────── */
+  --fb-text-strong: #2d2d2d;
+  --fb-text-regular: #555;
+  --fb-text-weak: #888;
+  --fb-text-faint: #aaa;
+  --fb-text-disabled: #b8b8c0;
+
+  /* ── 边框 / 分隔 ──────────────────────────────────────── */
+  --fb-border: #d6d6d6;
+  --fb-border-soft: #e8e8e8;
+  --fb-divider: rgba(0, 0, 0, 0.06);
+
+  /* ── 表面（背景层）──────────────────────────────────── */
+  --fb-surface: #fff;
+  --fb-surface-soft: #fafafa;
+  --fb-surface-muted: #f4f4f6;
+
+  /* ── 间距阶梯（4 的倍数）─────────────────────────────── */
+  --fb-space-1: 2px;
+  --fb-space-2: 4px;
+  --fb-space-3: 6px;
+  --fb-space-4: 8px;
+  --fb-space-5: 10px;
+  --fb-space-6: 12px;
+  --fb-space-7: 14px;
+  --fb-space-8: 16px;
+  --fb-space-10: 20px;
+  --fb-space-12: 24px;
+
+  /* ── 圆角 ────────────────────────────────────────────── */
+  --fb-radius-xs: 4px;
+  --fb-radius-sm: 5px;
+  --fb-radius-md: 6px;
+  --fb-radius-lg: 8px;
+  --fb-radius-xl: 10px;
+  --fb-radius-2xl: 12px;
+  --fb-radius-3xl: 14px;
+  --fb-radius-pill: 999px;
+  --fb-radius-circle: 50%;
+
+  /* ── 字号阶梯 ─────────────────────────────────────────── */
+  --fb-fs-xs: 11px;
+  --fb-fs-sm: 12px;
+  --fb-fs-md: 13px;
+  --fb-fs-lg: 14px;
+  --fb-fs-xl: 15px;
+  --fb-fs-2xl: 16px;
+
+  /* ── 字重 ────────────────────────────────────────────── */
+  --fb-fw-regular: 400;
+  --fb-fw-medium: 500;
+  --fb-fw-semibold: 600;
+  --fb-fw-bold: 700;
+
+  /* ── 行高 ────────────────────────────────────────────── */
+  --fb-lh-tight: 1.2;
+  --fb-lh-snug: 1.3;
+  --fb-lh-normal: 1.4;
+  --fb-lh-relaxed: 1.6;
+  --fb-lh-loose: 1.75;
+
+  /* ── 阴影 ────────────────────────────────────────────── */
+  --fb-shadow-popover: 0 12px 32px rgba(60, 40, 120, 0.16), 0 2px 6px rgba(0, 0, 0, 0.05);
+  --fb-shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.25);
+  --fb-shadow-toast: 0 6px 20px rgba(0, 0, 0, 0.25);
+
+  /* ── 动画时长 ─────────────────────────────────────────── */
+  --fb-duration-fast: 0.12s;
+  --fb-duration-base: 0.15s;
+  --fb-duration-slow: 0.18s;
+
+  /* ── 层级 z-index ────────────────────────────────────── */
+  --fb-z-modal: 100;
+  --fb-z-overlay-mask: 99990;
+  --fb-z-overlay-content: 99999;
+}

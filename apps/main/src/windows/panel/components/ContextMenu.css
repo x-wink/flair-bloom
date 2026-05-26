@@ -1,13 +1,14 @@
 .ctx-menu {
+  --ctx-primary: var(--fb-color-primary);
+  --ctx-danger: var(--fb-color-danger);
+
   min-width: 200px;
   max-width: 320px;
-  background: #fff;
-  border: 1px solid #e8e6f3;
-  border-radius: 10px;
-  box-shadow:
-    0 12px 32px rgba(60, 40, 120, 0.16),
-    0 2px 6px rgba(0, 0, 0, 0.05);
-  padding: 6px;
+  background: var(--fb-surface);
+  border: 1px solid var(--fb-border-soft);
+  border-radius: var(--fb-radius-xl);
+  box-shadow: var(--fb-shadow-popover);
+  padding: var(--fb-space-3);
   animation: ctx-menu-pop 0.14s cubic-bezier(0.2, 0.8, 0.2, 1);
   transform-origin: top center;
 }
@@ -26,56 +27,66 @@
 .ctx-menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--fb-space-5);
   width: 100%;
-  padding: 8px 12px;
+  padding: var(--fb-space-4) var(--fb-space-6);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--fb-radius-md);
   background: transparent;
-  font-size: 13px;
-  color: #2d2d2d;
+  font-size: var(--fb-fs-md);
+  color: var(--fb-text-strong);
   text-align: left;
   cursor: pointer;
   transition:
-    background 0.12s ease,
-    color 0.12s ease;
+    background var(--fb-duration-fast) ease,
+    color var(--fb-duration-fast) ease;
   outline: none;
 }
 
 .ctx-menu-item:hover,
 .ctx-menu-item:focus-visible {
-  background: #f5f3ff;
-  color: #6c4de6;
+  background: var(--fb-color-primary-soft);
+  color: var(--ctx-primary);
 }
 
-.ctx-menu-item--active {
-  color: #6c4de6;
-  font-weight: 500;
+.ctx-menu-item.ctx-menu-item--active {
+  color: var(--ctx-primary);
+  font-weight: var(--fb-fw-medium);
 }
 
-.ctx-menu-item--active:not(:hover):not(:focus-visible) {
-  background: #faf8ff;
+.ctx-menu-item.ctx-menu-item--active:not(:hover):not(:focus-visible) {
+  background: rgba(108, 77, 230, 0.04);
 }
 
-.ctx-menu-item--danger {
-  color: #d14343;
+.ctx-menu-item.ctx-menu-item--danger {
+  color: var(--ctx-danger);
 }
 
-.ctx-menu-item--danger:hover,
-.ctx-menu-item--danger:focus-visible {
-  background: #fff0f0;
-  color: #d14343;
+.ctx-menu-item.ctx-menu-item--danger:hover,
+.ctx-menu-item.ctx-menu-item--danger:focus-visible {
+  background: var(--fb-color-danger-soft);
+  color: var(--ctx-danger);
 }
 
-.ctx-menu-item--disabled {
-  color: #b8b8c0;
+.ctx-menu-item.ctx-menu-item--disabled {
+  color: var(--fb-text-disabled);
   cursor: not-allowed;
 }
 
-.ctx-menu-item--disabled:hover,
-.ctx-menu-item--disabled:focus-visible {
+.ctx-menu-item.ctx-menu-item--disabled:hover,
+.ctx-menu-item.ctx-menu-item--disabled:focus-visible {
   background: transparent;
-  color: #b8b8c0;
+  color: var(--fb-text-disabled);
+}
+
+.ctx-menu-item.ctx-menu-item--sub-open:not(:hover):not(:focus-visible) {
+  background: var(--fb-color-primary-soft);
+  color: var(--ctx-primary);
+}
+
+.ctx-menu-item.ctx-menu-item--sub-open.ctx-menu-item--danger:not(:hover):not(:focus-visible) {
+  background: var(--fb-color-danger-soft);
+  color: var(--ctx-danger);
 }
 
 .ctx-menu-icon {
@@ -85,12 +96,12 @@
   flex: none;
   width: 16px;
   height: 16px;
-  font-size: 14px;
+  font-size: var(--fb-fs-lg);
   color: inherit;
   opacity: 0.85;
 }
 
-.ctx-menu-icon--append {
+.ctx-menu-icon.ctx-menu-icon--append {
   margin-left: auto;
 }
 
@@ -99,20 +110,20 @@
   flex-direction: column;
   flex: 1;
   min-width: 0;
-  gap: 2px;
+  gap: var(--fb-space-1);
 }
 
 .ctx-menu-label {
-  line-height: 1.3;
+  line-height: var(--fb-lh-snug);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .ctx-menu-subtitle {
-  font-size: 11px;
-  line-height: 1.3;
-  color: #8a8a93;
+  font-size: var(--fb-fs-xs);
+  line-height: var(--fb-lh-snug);
+  color: var(--fb-text-weak);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -120,12 +131,12 @@
 
 .ctx-menu-item:hover .ctx-menu-subtitle,
 .ctx-menu-item:focus-visible .ctx-menu-subtitle {
-  color: #9a8ad3;
+  color: #b3a4f0;
 }
 
 .ctx-menu-item--danger:hover .ctx-menu-subtitle,
 .ctx-menu-item--danger:focus-visible .ctx-menu-subtitle {
-  color: #d99494;
+  color: #eea5a5;
 }
 
 .ctx-menu-item--disabled .ctx-menu-subtitle {
@@ -140,14 +151,14 @@
   width: 16px;
   height: 16px;
   margin-left: auto;
-  color: #6c4de6;
-  font-size: 13px;
+  color: var(--ctx-primary);
+  font-size: var(--fb-fs-md);
 }
 
 .ctx-menu-divider {
   height: 1px;
-  margin: 4px 6px;
-  background: #ececf5;
+  margin: var(--fb-space-2) var(--fb-space-3);
+  background: var(--fb-divider);
 }
 
 .ctx-menu-row {
@@ -162,22 +173,12 @@
   width: 14px;
   height: 16px;
   margin-left: auto;
-  font-size: 16px;
+  font-size: var(--fb-fs-2xl);
   line-height: 1;
-  color: #b0b0bb;
+  color: var(--fb-text-faint);
 }
 
 .ctx-menu-item--has-children .ctx-menu-arrow {
   color: inherit;
   opacity: 0.7;
-}
-
-.ctx-menu-item--sub-open:not(:hover):not(:focus-visible) {
-  background: #f5f3ff;
-  color: #6c4de6;
-}
-
-.ctx-menu-item--sub-open.ctx-menu-item--danger:not(:hover):not(:focus-visible) {
-  background: #fff0f0;
-  color: #d14343;
 }
