@@ -690,11 +690,11 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **日志与崩溃**
 
-- [ ] `tracing` + `tracing-appender`，按天滚动日志（保留 7 天）
-- [ ] `std::panic::set_hook` 捕获崩溃，写独立崩溃日志
-- [ ] 崩溃提示窗口（打开日志文件夹 / 复制路径 / 关闭）
-- [ ] 前端 JS 错误转发到 Rust logger
-- [ ] 设置页"查看日志文件夹"入口
+- [x] `tracing` + `tracing-appender`，按天滚动日志（保留 7 天，`cleanup_old_logs` 负责清理）
+- [x] `std::panic::set_hook` 捕获崩溃，写独立崩溃日志（`crash-{ts}.log`）
+- [ ] 崩溃提示窗口（打开日志文件夹 / 复制路径 / 关闭）— 当前仅写日志，未弹窗
+- [x] 前端 JS 错误转发到 Rust logger（`log_from_frontend` command）
+- [x] 设置页"查看日志文件夹"入口（`PanelApp.tsx` 调 `open_log_dir`）
 
 **设置面板**
 
@@ -706,21 +706,23 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **完整配置管理**
 
-- [ ] 多配置文件：新建 / 重命名 / 删除
+- [x] 后端命令骨架：`save_profile` / `load_profile` / `list_profiles` / `init_default_profile` / `get_active_profile_path`（`commands/profile.rs`）
+- [ ] 多配置文件 UI：新建 / 重命名 / 删除（缺 `rename_profile` / `delete_profile` 后端命令 + 面板 UI）
 - [ ] 配置文件下拉快速切换
 - [ ] 导入 / 导出 `.qzh` 文件
 - [ ] `notify` 监听配置文件变更自动 reload；失效时定时轮询兜底
 
 **托盘完善**
 
-- [ ] 开机自启选项（`tauri-plugin-autostart`）
-- [ ] 托盘菜单：切换配置文件 / 打开面板 / 退出
+- [x] 开机自启选项（`tauri-plugin-autostart` 已挂载）
+- [ ] 托盘菜单：切换配置文件（动态菜单项）
+- [x] 托盘菜单：打开面板 / 退出
 
 **面板完善**
 
 - [x] 更新提示弹窗（含更新说明）
 - [ ] 热键冲突检测与提示
-- [ ] 规则启用/禁用开关（不删除规则）
+- [x] 规则启用/禁用开关（`BurstRule.enabled` 字段已就位）
 - [ ] 连发间隔滑块 + 数值输入
 
 **连发引擎稳定性**

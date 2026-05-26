@@ -1,0 +1,18 @@
+.profile-name-input {
+  width: 100%;
+  padding: var(--fb-space-4) var(--fb-space-5);
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-md);
+  font-size: var(--fb-fs-md);
+  background: var(--fb-surface);
+  color: var(--fb-text-strong);
+  outline: none;
+  transition:
+    border-color var(--fb-duration-fast),
+    box-shadow var(--fb-duration-fast);
+}
+
+.profile-name-input:focus {
+  border-color: var(--fb-color-primary);
+  box-shadow: 0 0 0 2px rgba(108, 77, 230, 0.18);
+}

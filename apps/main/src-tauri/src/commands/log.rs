@@ -13,7 +13,7 @@ pub fn log_from_frontend(level: String, message: String) {
 #[tauri::command]
 pub fn open_log_dir() -> Result<(), String> {
     let dir = log_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建日志目录: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建日志目录: {e}"))?;
     #[cfg(target_os = "windows")]
     {
         std::process::Command::new("explorer")
@@ -26,7 +26,7 @@ pub fn open_log_dir() -> Result<(), String> {
         std::process::Command::new("open")
             .arg(&dir)
             .spawn()
-            .map_err(|e| format!("无法打开日志文件夹: {}", e))?;
+            .map_err(|e| format!("无法打开日志文件夹: {e}"))?;
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {

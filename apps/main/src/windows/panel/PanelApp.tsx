@@ -9,10 +9,11 @@ import bgUrl from '../../assets/icon.png';
 import { APP_NAME } from '../../constants';
 import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
 import { useConfirm } from './components/ConfirmDialog';
-import ContextMenu from './components/ContextMenu';
+import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/icons';
 import KeyCapture from './components/KeyCapture';
 import Overlay from './components/Overlay';
+import ProfileNameForm from './components/ProfileNameForm';
 import { useToast } from './components/Toast';
 import Button from './components/Button';
 import AboutDialog from './dialogs/AboutDialog';
@@ -23,6 +24,7 @@ import './PanelApp.css';
 const settingsStore = new LazyStore('settings.json');
 const CLOSE_BEHAVIOR_KEY = 'closeBehavior';
 const ACTIVE_TAB_KEY = 'activeTab';
+const DEFAULT_PROFILE_NAME = 'defults';
 
 type BurstMode = 'hold' | 'toggle';
 type InputMode = 'sendinput' | 'interception' | 'dd_hid';
@@ -59,6 +61,16 @@ interface Profile {
   advanced: { log_level: string };
 }
 
+interface ProfileEntry {
+  meta: ProfileMeta;
+  path: string;
+}
+
+interface ForkResult {
+  profile: Profile;
+  path: string;
+}
+
 function newRule(mode: BurstMode = 'hold'): BurstRule {
   const isHold = mode === 'hold';
   const vk = isHold ? 0x51 : 0x46;
@@ -75,6 +87,40 @@ function newRule(mode: BurstMode = 'hold'): BurstRule {
 
 function defaultRules(): BurstRule[] {
   return [newRule('hold'), newRule('toggle')];
+}
+
+function buildProfileMenu(args: {
+  profiles: ProfileEntry[];
+  activeName: string;
+  isDefault: boolean;
+  onSwitch: (path: string) => void;
+  onCreate: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}): ContextMenuItem[] {
+  const { profiles, activeName, isDefault, onSwitch, onCreate, onRename, onDelete } = args;
+  const items: ContextMenuItem[] = profiles.map((p) => ({
+    label: p.meta.name === DEFAULT_PROFILE_NAME ? '默认配置' : p.meta.name,
+    subtitle: p.meta.name === DEFAULT_PROFILE_NAME ? '出厂预设，修改时自动新建' : undefined,
+    active: p.meta.name === activeName,
+    onClick: () => onSwitch(p.path),
+  }));
+  if (items.length > 0) items.push({ type: 'divider' });
+  items.push({ label: '新建配置…', onClick: onCreate });
+  items.push({
+    label: '重命名当前配置…',
+    disabled: isDefault,
+    subtitle: isDefault ? '默认配置不可重命名' : undefined,
+    onClick: onRename,
+  });
+  items.push({
+    label: '删除当前配置',
+    danger: true,
+    disabled: isDefault,
+    subtitle: isDefault ? '默认配置不可删除' : undefined,
+    onClick: onDelete,
+  });
+  return items;
 }
 
 export default function PanelApp() {
@@ -97,6 +143,9 @@ export default function PanelApp() {
   const [rules, setRules] = useState<BurstRule[]>([]);
   const [activeRuleIds, setActiveRuleIds] = useState<Set<string>>(new Set());
   const [profileName, setProfileName] = useState('defults');
+  const [profileList, setProfileList] = useState<ProfileEntry[]>([]);
+  const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const profileBtnRef = useRef<HTMLButtonElement>(null);
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<BurstMode>('toggle');
   const confirm = useConfirm();
@@ -104,6 +153,7 @@ export default function PanelApp() {
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
   const initialLoadDone = useRef(false);
   const profileNameRef = useRef(profileName);
+  const isDefaultProfile = profileName === DEFAULT_PROFILE_NAME;
 
   useEffect(() => {
     return () => {
@@ -148,42 +198,47 @@ export default function PanelApp() {
       .then(setElevated)
       .catch(() => {});
 
-    // 引擎已在启动时从 .qzh 加载了规则，直接读取
-    invoke<BurstRule[]>('get_rules')
-      .then((loaded) => {
-        if (loaded.length === 0) {
-          // 首次启动，初始化默认配置
-          invoke<Profile>('init_default_profile')
-            .then((profile) => {
-              setRules(profile.rules);
-              setProfileName(profile.meta.name);
-              queueMicrotask(() => {
-                initialLoadDone.current = true;
-              });
-            })
-            .catch(() => {
-              toast.error('初始化默认配置失败');
-              setRules(defaultRules());
-              invoke('set_rules', { rules: defaultRules() }).catch(() => {});
-              queueMicrotask(() => {
-                initialLoadDone.current = true;
-              });
-            });
-        } else {
-          setRules(loaded);
-          queueMicrotask(() => {
-            initialLoadDone.current = true;
-          });
+    // 启动期：以「activeProfilePath → load_profile」为唯一来源；
+    // 没路径或加载失败则回退到 init_default_profile。
+    void (async () => {
+      const refreshList = async () => {
+        try {
+          const list = await invoke<ProfileEntry[]>('list_profiles');
+          setProfileList(list);
+        } catch {
+          /* 启动时静默失败，后续操作再提示 */
         }
-      })
-      .catch(() => {
-        toast.error('读取规则失败，已加载默认配置');
+      };
+      try {
+        const activePath = await invoke<string | null>('get_active_profile_path');
+        if (activePath) {
+          try {
+            const profile = await invoke<Profile>('load_profile', { path: activePath });
+            setRules(profile.rules);
+            setProfileName(profile.meta.name);
+            await refreshList();
+            queueMicrotask(() => {
+              initialLoadDone.current = true;
+            });
+            return;
+          } catch {
+            toast.warning('加载配置失败，已切换为默认配置');
+          }
+        }
+        const profile = await invoke<Profile>('init_default_profile');
+        setRules(profile.rules);
+        setProfileName(profile.meta.name);
+        await refreshList();
+      } catch {
+        toast.error('初始化默认配置失败');
         setRules(defaultRules());
         invoke('set_rules', { rules: defaultRules() }).catch(() => {});
+      } finally {
         queueMicrotask(() => {
           initialLoadDone.current = true;
         });
-      });
+      }
+    })();
 
     const unlistenAgreement = listen<string>('show-agreement', () => {
       setShowAgreement(true);
@@ -223,6 +278,16 @@ export default function PanelApp() {
 
   // 规则变更后防抖自动保存到 .qzh
   profileNameRef.current = profileName;
+
+  const refreshProfileList = useCallback(async () => {
+    try {
+      const list = await invoke<ProfileEntry[]>('list_profiles');
+      setProfileList(list);
+    } catch {
+      toast.warning('读取配置列表失败');
+    }
+  }, [toast]);
+
   const saveRules = useCallback((r: BurstRule[]) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
@@ -404,6 +469,8 @@ export default function PanelApp() {
     }
   }
 
+  const forkingRef = useRef(false);
+
   function pushRules(updater: (prev: BurstRule[]) => BurstRule[]) {
     const next = updater(rules);
     setRules(next);
@@ -416,6 +483,30 @@ export default function PanelApp() {
         setRules(defaultRules());
       }
     });
+
+    // 修改默认配置时，自动 fork 一份新的「我的配置」并切换为活跃配置。
+    // 防抖保存（saveRules）此时仍在排队，因 profileNameRef 在 setProfileName
+    // 后才更新，因此先取消已排队的 saveTimer，避免把新规则写到 default。
+    if (profileNameRef.current === DEFAULT_PROFILE_NAME && !forkingRef.current) {
+      forkingRef.current = true;
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = undefined;
+      }
+      void invoke<ForkResult>('fork_active_profile', { suggestedName: '我的配置' })
+        .then(async (res) => {
+          setProfileName(res.profile.meta.name);
+          profileNameRef.current = res.profile.meta.name;
+          await refreshProfileList();
+          toast.success(`已为你创建新配置「${res.profile.meta.name}」`);
+        })
+        .catch((e) => {
+          toast.error(`创建新配置失败：${e}`);
+        })
+        .finally(() => {
+          forkingRef.current = false;
+        });
+    }
   }
 
   function addRule(mode: BurstMode = 'hold') {
@@ -444,16 +535,144 @@ export default function PanelApp() {
     if (ok) removeRule(id);
   }
 
-  async function handleRestoreDefaults() {
+  async function switchToProfile(path: string) {
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = undefined;
+    }
+    initialLoadDone.current = false;
+    try {
+      const profile = await invoke<Profile>('load_profile', { path });
+      setRules(profile.rules);
+      setProfileName(profile.meta.name);
+      profileNameRef.current = profile.meta.name;
+      setAdvancedOpen({});
+      await refreshProfileList();
+    } catch (e) {
+      toast.error(`切换配置失败：${e}`);
+    } finally {
+      queueMicrotask(() => {
+        initialLoadDone.current = true;
+      });
+    }
+  }
+
+  async function handleCreateProfile() {
+    let name = '';
     const ok = await confirm({
-      title: '恢复默认配置',
-      description: '将清空当前所有规则并重置为默认配置，确认继续？',
-      confirmText: '恢复默认',
+      title: '新建配置',
+      description: '请输入新配置的名称：',
+      confirmText: '创建',
+      body: (
+        <ProfileNameForm
+          placeholder="例如：刺客 / 法师 / 测试用"
+          onChange={(v) => {
+            name = v;
+          }}
+        />
+      ),
+    });
+    if (!ok) return;
+    const trimmed = name.trim();
+    if (!trimmed) {
+      toast.warning('配置名不能为空');
+      return;
+    }
+    if (trimmed === DEFAULT_PROFILE_NAME) {
+      toast.warning('不能使用默认配置名');
+      return;
+    }
+    if (profileList.some((p) => p.meta.name === trimmed)) {
+      toast.warning('已存在同名配置');
+      return;
+    }
+    // 复用 fork：会基于「当前激活配置」创建副本，名字冲突由后端 pick_unique_name 兜底
+    try {
+      const res = await invoke<ForkResult>('fork_active_profile', { suggestedName: trimmed });
+      setRules(res.profile.rules);
+      setProfileName(res.profile.meta.name);
+      profileNameRef.current = res.profile.meta.name;
+      setAdvancedOpen({});
+      await refreshProfileList();
+      toast.success(`已创建配置「${res.profile.meta.name}」`);
+    } catch (e) {
+      toast.error(`创建失败：${e}`);
+    }
+  }
+
+  async function handleRenameProfile() {
+    if (isDefaultProfile) {
+      toast.warning('默认配置不可重命名');
+      return;
+    }
+    let name = profileName;
+    const ok = await confirm({
+      title: '重命名配置',
+      description: `当前配置「${profileName}」的新名称：`,
+      confirmText: '重命名',
+      body: (
+        <ProfileNameForm
+          defaultValue={profileName}
+          onChange={(v) => {
+            name = v;
+          }}
+        />
+      ),
+    });
+    if (!ok) return;
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === profileName) return;
+    if (trimmed === DEFAULT_PROFILE_NAME) {
+      toast.warning('不能使用默认配置名');
+      return;
+    }
+    try {
+      await invoke<string>('rename_profile', {
+        oldName: profileName,
+        newName: trimmed,
+      });
+      setProfileName(trimmed);
+      profileNameRef.current = trimmed;
+      await refreshProfileList();
+      toast.success(`已重命名为「${trimmed}」`);
+    } catch (e) {
+      toast.error(`重命名失败：${e}`);
+    }
+  }
+
+  async function handleDeleteProfile() {
+    if (isDefaultProfile) {
+      toast.warning('默认配置不可删除');
+      return;
+    }
+    const ok = await confirm({
+      title: '删除配置',
+      description: `确定删除配置「${profileName}」？删除后将自动切换为默认配置。`,
+      confirmText: '删除',
       tone: 'danger',
     });
-    if (ok) {
-      pushRules(() => defaultRules());
-      setAdvancedOpen({});
+    if (!ok) return;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = undefined;
+    }
+    initialLoadDone.current = false;
+    try {
+      const fallback = await invoke<Profile | null>('delete_profile', { name: profileName });
+      if (fallback) {
+        setRules(fallback.rules);
+        setProfileName(fallback.meta.name);
+        profileNameRef.current = fallback.meta.name;
+        setAdvancedOpen({});
+      }
+      await refreshProfileList();
+      toast.success('配置已删除');
+    } catch (e) {
+      toast.error(`删除失败：${e}`);
+    } finally {
+      queueMicrotask(() => {
+        initialLoadDone.current = true;
+      });
     }
   }
 
@@ -598,22 +817,7 @@ export default function PanelApp() {
   }
 
   function handleAgreed() {
-    invoke<BurstRule[]>('get_rules').then((loaded) => {
-      if (loaded.length === 0) {
-        invoke<Profile>('init_default_profile')
-          .then((profile) => {
-            setRules(profile.rules);
-            setProfileName(profile.meta.name);
-          })
-          .catch(() => {
-            setRules(defaultRules());
-            invoke('set_rules', { rules: defaultRules() }).catch(() => {});
-          });
-      } else {
-        setRules(loaded);
-      }
-      setShowAgreement(false);
-    });
+    setShowAgreement(false);
   }
 
   return (
@@ -819,13 +1023,15 @@ export default function PanelApp() {
 
       <footer className="panel-footer">
         <Button
+          ref={profileBtnRef}
           variant="outline"
           tone="neutral"
           size="sm"
-          onClick={handleRestoreDefaults}
-          title="恢复默认配置"
+          appendIcon={<ChevronIcon size={10} />}
+          onClick={() => setProfileMenuOpen((v) => !v)}
+          title={isDefaultProfile ? '默认配置（修改后将自动新建）' : `当前配置：${profileName}`}
         >
-          恢复默认
+          {isDefaultProfile ? '默认配置' : profileName}
         </Button>
         <div className="footer-controls">
           <div className="footer-control">
@@ -858,6 +1064,22 @@ export default function PanelApp() {
           </div>
         </div>
       </footer>
+
+      <ContextMenu
+        open={profileMenuOpen}
+        onClose={() => setProfileMenuOpen(false)}
+        target={profileBtnRef}
+        location="bottom-left"
+        items={buildProfileMenu({
+          profiles: profileList,
+          activeName: profileName,
+          isDefault: isDefaultProfile,
+          onSwitch: switchToProfile,
+          onCreate: handleCreateProfile,
+          onRename: handleRenameProfile,
+          onDelete: handleDeleteProfile,
+        })}
+      />
 
       <ContextMenu
         open={modePickerOpen}

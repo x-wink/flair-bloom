@@ -18,11 +18,18 @@ use super::engine::EngineState;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
+/// 默认配置名（同时是文件名 stem）。受保护：不能改名也不能删除，
+/// 用户对它的修改会触发自动 fork（见 [`fork_active_profile`]）。
+pub const DEFAULT_PROFILE_NAME: &str = "defults";
+
+/// store 中存储「当前激活配置文件绝对路径」的键名。
+pub const ACTIVE_PATH_KEY: &str = "activeProfilePath";
+
 fn profiles_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map(|p| p.join("profiles"))
-        .map_err(|e| format!("无法获取应用数据目录: {}", e))
+        .map_err(|e| format!("无法获取应用数据目录: {e}"))
 }
 
 fn now_secs() -> u64 {
@@ -50,7 +57,7 @@ fn compute_aad() -> Vec<u8> {
 }
 
 fn write_profile_file_to_path(file_path: &Path, profile: &Profile) -> Result<String, String> {
-    let json = serde_json::to_vec(profile).map_err(|e| format!("序列化失败: {}", e))?;
+    let json = serde_json::to_vec(profile).map_err(|e| format!("序列化失败: {e}"))?;
     let aad = compute_aad();
     let (ciphertext, nonce) = aes::encrypt(&json, &aad).map_err(|e| e.to_string())?;
     let header = FileHeader::new(nonce);
@@ -59,8 +66,8 @@ fn write_profile_file_to_path(file_path: &Path, profile: &Profile) -> Result<Str
     data.extend_from_slice(&ciphertext);
 
     let tmp_path = file_path.with_extension("qzh.tmp");
-    std::fs::write(&tmp_path, &data).map_err(|e| format!("写入临时文件失败: {}", e))?;
-    std::fs::rename(&tmp_path, file_path).map_err(|e| format!("替换配置文件失败: {}", e))?;
+    std::fs::write(&tmp_path, &data).map_err(|e| format!("写入临时文件失败: {e}"))?;
+    std::fs::rename(&tmp_path, file_path).map_err(|e| format!("替换配置文件失败: {e}"))?;
     Ok(file_path.to_string_lossy().to_string())
 }
 
@@ -74,6 +81,47 @@ fn load_meta_from_file(file_path: &Path) -> Option<ProfileMeta> {
     serde_json::from_value::<ProfileMeta>(value.get("meta")?.clone()).ok()
 }
 
+/// 读取并完整解密一个 .qzh 文件，返回带迁移与校验的 [`Profile`]。
+/// 与 [`load_profile`] 命令的差别：不触发 engine.set_rules，也不更新 active path，
+/// 适合 rename/fork/delete 等内部流程消费。
+fn read_profile_from_file(file_path: &Path) -> Result<Profile, String> {
+    let data = std::fs::read(file_path).map_err(|e| format!("读取文件失败: {e}"))?;
+    let header = FileHeader::from_bytes(&data).ok_or("文件格式无效，可能已损坏")?;
+    let aad = header.aad();
+    let ciphertext = &data[FileHeader::SIZE..];
+    let plaintext = aes::decrypt(ciphertext, &header.nonce, &aad).map_err(|e| e.to_string())?;
+    let value: serde_json::Value =
+        serde_json::from_slice(&plaintext).map_err(|e| format!("解析失败: {e}"))?;
+    let version = value
+        .get("schema_version")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(CURRENT_SCHEMA_VERSION as u64) as u32;
+    let value = if version < CURRENT_SCHEMA_VERSION {
+        migrate_profile(value, version).map_err(|e| format!("配置迁移失败: {e}"))?
+    } else if version > CURRENT_SCHEMA_VERSION {
+        return Err(format!(
+            "配置版本 {version} 高于当前支持的版本 {CURRENT_SCHEMA_VERSION}，请升级应用"
+        ));
+    } else {
+        value
+    };
+    let profile: Profile =
+        serde_json::from_value(value).map_err(|e| format!("反序列化失败: {e}"))?;
+    profile.validate().map_err(|e| e.to_string())?;
+    Ok(profile)
+}
+
+fn profile_path_for_name(dir: &Path, name: &str) -> PathBuf {
+    dir.join(format!("{}.qzh", sanitize_filename(name)))
+}
+
+fn set_active_path(app: &AppHandle, path: &str) {
+    if let Ok(store) = app.store(crate::STORE_PATH) {
+        store.set(ACTIVE_PATH_KEY, serde_json::json!(path));
+        let _ = store.save();
+    }
+}
+
 #[tauri::command]
 pub fn save_profile(
     app: AppHandle,
@@ -85,7 +133,7 @@ pub fn save_profile(
 
     let now = now_secs();
     let dir = profiles_dir(&app)?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建配置目录: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建配置目录: {e}"))?;
 
     let file_path = dir.join(format!("{}.qzh", sanitize_filename(&name)));
 
@@ -105,8 +153,8 @@ pub fn save_profile(
     let path = write_profile_file_to_path(&file_path, &profile)?;
 
     // 更新 store 中记录的活跃配置路径
-    if let Ok(store) = app.store("settings.json") {
-        store.set("activeProfilePath", serde_json::json!(path));
+    if let Ok(store) = app.store(crate::STORE_PATH) {
+        store.set(ACTIVE_PATH_KEY, serde_json::json!(path));
         let _ = store.save();
     }
 
@@ -128,7 +176,7 @@ pub fn load_profile(
         .to_string_lossy();
     let safe_path = dir.join(sanitize_filename(&file_name));
 
-    let data = std::fs::read(&safe_path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let data = std::fs::read(&safe_path).map_err(|e| format!("读取文件失败: {e}"))?;
 
     let header = FileHeader::from_bytes(&data).ok_or("文件格式无效，可能已损坏")?;
     let aad = header.aad();
@@ -137,7 +185,7 @@ pub fn load_profile(
     let plaintext = aes::decrypt(ciphertext, &header.nonce, &aad).map_err(|e| e.to_string())?;
 
     let value: serde_json::Value =
-        serde_json::from_slice(&plaintext).map_err(|e| format!("解析失败: {}", e))?;
+        serde_json::from_slice(&plaintext).map_err(|e| format!("解析失败: {e}"))?;
 
     let version = value
         .get("schema_version")
@@ -145,33 +193,33 @@ pub fn load_profile(
         .unwrap_or(CURRENT_SCHEMA_VERSION as u64) as u32;
 
     let value = if version < CURRENT_SCHEMA_VERSION {
-        migrate_profile(value, version).map_err(|e| format!("配置迁移失败: {}", e))?
+        migrate_profile(value, version).map_err(|e| format!("配置迁移失败: {e}"))?
     } else if version > CURRENT_SCHEMA_VERSION {
         return Err(format!(
-            "配置版本 {} 高于当前支持的版本 {}，请升级应用",
-            version, CURRENT_SCHEMA_VERSION
+            "配置版本 {version} 高于当前支持的版本 {CURRENT_SCHEMA_VERSION}，请升级应用"
         ));
     } else {
         value
     };
 
     let profile: Profile =
-        serde_json::from_value(value).map_err(|e| format!("反序列化失败: {}", e))?;
+        serde_json::from_value(value).map_err(|e| format!("反序列化失败: {e}"))?;
     profile.validate().map_err(|e| e.to_string())?;
 
     state.0.set_rules(profile.rules.clone());
+    set_active_path(&app, &safe_path.to_string_lossy());
     Ok(profile)
 }
 
 #[tauri::command]
-pub fn list_profiles(app: AppHandle) -> Result<Vec<ProfileMeta>, String> {
+pub fn list_profiles(app: AppHandle) -> Result<Vec<ProfileEntry>, String> {
     let dir = profiles_dir(&app)?;
     if !dir.exists() {
         return Ok(Vec::new());
     }
-    let mut metas = Vec::new();
-    let entries = std::fs::read_dir(&dir).map_err(|e| format!("无法读取配置目录: {}", e))?;
-    for entry in entries.flatten() {
+    let mut entries = Vec::new();
+    let read = std::fs::read_dir(&dir).map_err(|e| format!("无法读取配置目录: {e}"))?;
+    for entry in read.flatten() {
         let path = entry.path();
         if path.extension().is_none_or(|e| e != "qzh") {
             continue;
@@ -189,7 +237,10 @@ pub fn list_profiles(app: AppHandle) -> Result<Vec<ProfileMeta>, String> {
                                 )
                             })
                         {
-                            metas.push(meta);
+                            entries.push(ProfileEntry {
+                                meta,
+                                path: path.to_string_lossy().to_string(),
+                            });
                         }
                     }
                 }
@@ -199,8 +250,39 @@ pub fn list_profiles(app: AppHandle) -> Result<Vec<ProfileMeta>, String> {
             }
         }
     }
-    metas.sort_by_key(|b| std::cmp::Reverse(b.updated_at));
-    Ok(metas)
+    entries.sort_by_key(|e| std::cmp::Reverse(e.meta.updated_at));
+    Ok(entries)
+}
+
+#[derive(serde::Serialize)]
+pub struct ProfileEntry {
+    pub meta: ProfileMeta,
+    pub path: String,
+}
+
+/// 出厂默认规则（不含 id，调用方负责注入）。抽出此函数避免与
+/// [`create_default_profile`] 漂移。
+fn factory_default_rules() -> Vec<BurstRule> {
+    vec![
+        BurstRule {
+            id: make_id(),
+            enabled: false,
+            trigger_key: 0x51, // Q
+            target_key: 0x51,
+            mode: BurstMode::Hold,
+            stop_key: None,
+            interval_ms: 10,
+        },
+        BurstRule {
+            id: make_id(),
+            enabled: false,
+            trigger_key: 0x46, // F
+            target_key: 0x46,
+            mode: BurstMode::Toggle,
+            stop_key: None,
+            interval_ms: 10,
+        },
+    ]
 }
 
 /// 创建并落盘默认配置。供 Tauri command (`init_default_profile`) 与启动时
@@ -214,45 +296,26 @@ pub(crate) fn create_default_profile(
     let profile = Profile {
         schema_version: CURRENT_SCHEMA_VERSION,
         meta: ProfileMeta {
-            name: "defults".to_string(),
+            name: DEFAULT_PROFILE_NAME.to_string(),
             created_at: now,
             updated_at: now,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
         },
-        rules: vec![
-            BurstRule {
-                id: make_id(),
-                enabled: false,
-                trigger_key: 0x51, // Q
-                target_key: 0x51,
-                mode: BurstMode::Hold,
-                stop_key: None,
-                interval_ms: 10,
-            },
-            BurstRule {
-                id: make_id(),
-                enabled: false,
-                trigger_key: 0x46, // F
-                target_key: 0x46,
-                mode: BurstMode::Toggle,
-                stop_key: None,
-                interval_ms: 10,
-            },
-        ],
+        rules: factory_default_rules(),
         hotkeys: Hotkeys::default(),
         advanced: Advanced::default(),
     };
 
     let dir = profiles_dir(app)?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建配置目录: {}", e))?;
-    let file_path = dir.join("defults.qzh");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建配置目录: {e}"))?;
+    let file_path = dir.join(format!("{DEFAULT_PROFILE_NAME}.qzh"));
 
     let rules = profile.rules.clone();
     let path = write_profile_file_to_path(&file_path, &profile)?;
     engine.set_rules(rules);
 
     if let Ok(store) = app.store(crate::STORE_PATH) {
-        store.set("activeProfilePath", serde_json::json!(path));
+        store.set(ACTIVE_PATH_KEY, serde_json::json!(path));
         let _ = store.save();
     }
 
@@ -267,11 +330,185 @@ pub fn init_default_profile(app: AppHandle, state: State<EngineState>) -> Result
 #[tauri::command]
 pub fn get_active_profile_path(app: AppHandle) -> Result<Option<String>, String> {
     let store = app
-        .store("settings.json")
-        .map_err(|e| format!("无法读取存储: {}", e))?;
+        .store(crate::STORE_PATH)
+        .map_err(|e| format!("无法读取存储: {e}"))?;
     Ok(store
-        .get("activeProfilePath")
+        .get(ACTIVE_PATH_KEY)
         .and_then(|v| v.as_str().map(|s| s.to_string())))
+}
+
+/// 重命名一个配置文件：sanitize 新名 → 改 meta.name 重写新文件 → 删除旧文件 →
+/// 如改的是当前激活配置则同步 `activeProfilePath`。返回新文件绝对路径。
+#[tauri::command]
+pub fn rename_profile(
+    app: AppHandle,
+    old_name: String,
+    new_name: String,
+) -> Result<String, String> {
+    if old_name == DEFAULT_PROFILE_NAME {
+        return Err("默认配置不可重命名".into());
+    }
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("配置名不能为空".into());
+    }
+    if trimmed == DEFAULT_PROFILE_NAME {
+        return Err("不能使用默认配置名".into());
+    }
+    let dir = profiles_dir(&app)?;
+    let old_path = profile_path_for_name(&dir, &old_name);
+    let new_path = profile_path_for_name(&dir, trimmed);
+
+    if !old_path.exists() {
+        return Err(format!("配置不存在：{old_name}"));
+    }
+    if old_path != new_path && new_path.exists() {
+        return Err(format!("已存在同名配置：{trimmed}"));
+    }
+
+    let mut profile = read_profile_from_file(&old_path)?;
+    profile.meta.name = trimmed.to_string();
+    profile.meta.updated_at = now_secs();
+    profile.meta.app_version = env!("CARGO_PKG_VERSION").to_string();
+
+    let saved_path = write_profile_file_to_path(&new_path, &profile)?;
+    if old_path != new_path {
+        std::fs::remove_file(&old_path).map_err(|e| format!("删除旧文件失败: {e}"))?;
+    }
+
+    // 如果改的是当前激活配置，同步 store
+    let was_active = app
+        .store(crate::STORE_PATH)
+        .ok()
+        .and_then(|s| {
+            s.get(ACTIVE_PATH_KEY)
+                .and_then(|v| v.as_str().map(String::from))
+        })
+        .map(|p| Path::new(&p) == old_path)
+        .unwrap_or(false);
+    if was_active {
+        set_active_path(&app, &saved_path);
+    }
+    Ok(saved_path)
+}
+
+/// 删除指定配置文件；如删的是当前激活配置，回退到默认配置（必要时重新创建）。
+/// 返回删除后引擎应当装载的 [`Profile`]（仅当删的是激活配置时返回 Some，
+/// 前端据此刷新 UI；否则返回 None）。
+#[tauri::command]
+pub fn delete_profile(
+    app: AppHandle,
+    state: State<EngineState>,
+    name: String,
+) -> Result<Option<Profile>, String> {
+    if name == DEFAULT_PROFILE_NAME {
+        return Err("默认配置不可删除".into());
+    }
+    let dir = profiles_dir(&app)?;
+    let target_path = profile_path_for_name(&dir, &name);
+    if !target_path.exists() {
+        return Err(format!("配置不存在：{name}"));
+    }
+
+    let active_path = app.store(crate::STORE_PATH).ok().and_then(|s| {
+        s.get(ACTIVE_PATH_KEY)
+            .and_then(|v| v.as_str().map(String::from))
+    });
+    let was_active = active_path
+        .as_deref()
+        .map(|p| Path::new(p) == target_path)
+        .unwrap_or(false);
+
+    std::fs::remove_file(&target_path).map_err(|e| format!("删除配置失败: {e}"))?;
+
+    if !was_active {
+        return Ok(None);
+    }
+
+    // 删的是激活配置：加载默认配置；若不存在或损坏则重建
+    let default_path = dir.join(format!("{DEFAULT_PROFILE_NAME}.qzh"));
+    let profile = match read_profile_from_file(&default_path) {
+        Ok(p) => {
+            state.0.set_rules(p.rules.clone());
+            set_active_path(&app, &default_path.to_string_lossy());
+            p
+        }
+        Err(e) => {
+            if default_path.exists() {
+                warn!("默认配置损坏将重建: {}", e);
+            }
+            // create_default_profile 内部会 set_rules + set_active_path
+            create_default_profile(&app, &state.0)?
+        }
+    };
+    Ok(Some(profile))
+}
+
+/// 基于当前激活配置 fork 出一份副本：选一个不冲突的名字，落盘新文件，
+/// 把 `activeProfilePath` 切到新文件。返回新 [`Profile`] 与新路径。
+/// 用于「修改默认配置时自动新建一份」的 fork-on-edit 流程。
+#[tauri::command]
+pub fn fork_active_profile(app: AppHandle, suggested_name: String) -> Result<ForkResult, String> {
+    let dir = profiles_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建配置目录: {e}"))?;
+
+    let active_path_str = app
+        .store(crate::STORE_PATH)
+        .ok()
+        .and_then(|s| {
+            s.get(ACTIVE_PATH_KEY)
+                .and_then(|v| v.as_str().map(String::from))
+        })
+        .ok_or("当前没有激活配置")?;
+    let active_path = Path::new(&active_path_str);
+    let mut profile = read_profile_from_file(active_path)?;
+
+    let base = {
+        let trimmed = suggested_name.trim();
+        if trimmed.is_empty() || trimmed == DEFAULT_PROFILE_NAME {
+            "我的配置"
+        } else {
+            trimmed
+        }
+    };
+    let (final_name, final_path) = pick_unique_name(&dir, base);
+
+    let now = now_secs();
+    profile.meta.name = final_name.clone();
+    profile.meta.created_at = now;
+    profile.meta.updated_at = now;
+    profile.meta.app_version = env!("CARGO_PKG_VERSION").to_string();
+    profile.schema_version = CURRENT_SCHEMA_VERSION;
+
+    let saved_path = write_profile_file_to_path(&final_path, &profile)?;
+    set_active_path(&app, &saved_path);
+
+    Ok(ForkResult {
+        profile,
+        path: saved_path,
+    })
+}
+
+#[derive(serde::Serialize)]
+pub struct ForkResult {
+    pub profile: Profile,
+    pub path: String,
+}
+
+/// 在 `dir` 下挑一个不冲突的文件名：base、base 2、base 3 ...
+fn pick_unique_name(dir: &Path, base: &str) -> (String, PathBuf) {
+    let first = profile_path_for_name(dir, base);
+    if !first.exists() {
+        return (base.to_string(), first);
+    }
+    for i in 2.. {
+        let candidate = format!("{base} {i}");
+        let path = profile_path_for_name(dir, &candidate);
+        if !path.exists() {
+            return (candidate, path);
+        }
+    }
+    unreachable!()
 }
 
 fn sanitize_filename(name: &str) -> String {
@@ -285,47 +522,5 @@ fn sanitize_filename(name: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sanitize_replaces_windows_reserved_chars() {
-        assert_eq!(
-            sanitize_filename(r#"a<b>c:d"e/f\g|h?i*j"#),
-            "a_b_c_d_e_f_g_h_i_j"
-        );
-    }
-
-    #[test]
-    fn sanitize_replaces_ascii_control_chars() {
-        // 包含 NUL, \n, \t 等控制字符必须被替换
-        assert_eq!(sanitize_filename("a\nb\tc\x00d"), "a_b_c_d");
-    }
-
-    #[test]
-    fn sanitize_preserves_chinese_and_normal_chars() {
-        // 防止越来越严的过滤误伤合法文件名
-        assert_eq!(sanitize_filename("默认配置-v2"), "默认配置-v2");
-    }
-
-    #[test]
-    fn sanitize_blocks_path_traversal_via_separators() {
-        // ../../etc/passwd 类形态:斜杠 / 反斜杠都会被替换
-        assert_eq!(sanitize_filename("../../etc/passwd"), "..__..__etc_passwd");
-        assert_eq!(
-            sanitize_filename(r"..\..\windows\system32"),
-            "..__..__windows_system32"
-        );
-    }
-
-    #[test]
-    fn sanitize_keeps_dots_and_dashes() {
-        // . 和 - 是合法文件名字符
-        assert_eq!(sanitize_filename("my.profile-1"), "my.profile-1");
-    }
-
-    #[test]
-    fn sanitize_handles_empty_string() {
-        assert_eq!(sanitize_filename(""), "");
-    }
-}
+#[path = "profile_tests.rs"]
+mod tests;

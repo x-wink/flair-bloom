@@ -31,7 +31,7 @@ impl Drop for UpdateGuard<'_> {
 pub fn needs_agreement(app: AppHandle) -> Result<bool, String> {
     let store = app
         .store(STORE_PATH)
-        .map_err(|e| format!("无法读取存储: {}", e))?;
+        .map_err(|e| format!("无法读取存储: {e}"))?;
     let agreed = store
         .get("agreed")
         .and_then(|v| v.as_bool())
@@ -46,7 +46,7 @@ pub fn needs_agreement(app: AppHandle) -> Result<bool, String> {
 pub fn agree_license(app: AppHandle) -> Result<(), String> {
     let store = app
         .store(STORE_PATH)
-        .map_err(|e| format!("无法读取存储: {}", e))?;
+        .map_err(|e| format!("无法读取存储: {e}"))?;
     store.set("agreed", serde_json::json!(true));
     store.set("agreed_at", serde_json::json!(now_secs()));
     store.set("agreement_version", serde_json::json!(AGREEMENT_VERSION));
@@ -56,7 +56,7 @@ pub fn agree_license(app: AppHandle) -> Result<(), String> {
     );
     store
         .save()
-        .map_err(|e| format!("保存协议状态失败: {}", e))?;
+        .map_err(|e| format!("保存协议状态失败: {e}"))?;
     Ok(())
 }
 
@@ -74,7 +74,7 @@ pub async fn check_update(app: AppHandle, lock: State<'_, UpdateLock>) -> Result
 async fn do_check_update(app: &AppHandle) -> Result<(), String> {
     let updater = app
         .updater()
-        .map_err(|e| format!("更新模块不可用: {}", e))?;
+        .map_err(|e| format!("更新模块不可用: {e}"))?;
     let update = match updater.check().await {
         Ok(Some(u)) => u,
         Ok(None) => {
@@ -83,7 +83,7 @@ async fn do_check_update(app: &AppHandle) -> Result<(), String> {
         }
         Err(e) => {
             warn!("update check failed: {}", e);
-            return Err(format!("检查更新失败: {}", e));
+            return Err(format!("检查更新失败: {e}"));
         }
     };
 
@@ -102,7 +102,7 @@ async fn do_check_update(app: &AppHandle) -> Result<(), String> {
         .await
         .map_err(|e| {
             warn!("update download failed: {}", e);
-            format!("下载更新失败: {}", e)
+            format!("下载更新失败: {e}")
         })?;
 
     save_pending_update(app, &version, &bytes)?;
@@ -118,11 +118,11 @@ fn save_pending_update(app: &AppHandle, version: &str, bytes: &[u8]) -> Result<(
     let dir = app
         .path()
         .app_local_data_dir()
-        .map_err(|e| format!("无法获取应用数据目录: {}", e))?
+        .map_err(|e| format!("无法获取应用数据目录: {e}"))?
         .join(PENDING_UPDATE_DIR);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建更新目录: {}", e))?;
-    std::fs::write(dir.join("installer"), bytes).map_err(|e| format!("保存安装包失败: {}", e))?;
-    std::fs::write(dir.join("version"), version).map_err(|e| format!("保存版本信息失败: {}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建更新目录: {e}"))?;
+    std::fs::write(dir.join("installer"), bytes).map_err(|e| format!("保存安装包失败: {e}"))?;
+    std::fs::write(dir.join("version"), version).map_err(|e| format!("保存版本信息失败: {e}"))?;
     Ok(())
 }
 

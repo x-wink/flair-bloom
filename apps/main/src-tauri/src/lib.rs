@@ -23,7 +23,8 @@ use commands::{
     },
     log::{log_from_frontend, open_log_dir},
     profile::{
-        get_active_profile_path, init_default_profile, list_profiles, load_profile, save_profile,
+        delete_profile, fork_active_profile, get_active_profile_path, init_default_profile,
+        list_profiles, load_profile, rename_profile, save_profile,
     },
 };
 use engine::{burst::start_listener, BurstEngine};
@@ -103,14 +104,14 @@ pub fn run() {
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let crash_file = crash_dir.join(format!("crash-{}.log", ts));
+        let crash_file = crash_dir.join(format!("crash-{ts}.log"));
         let msg = format!(
             "{}\n\nBacktrace:\n{:?}",
             info,
             std::backtrace::Backtrace::force_capture()
         );
         let _ = std::fs::write(&crash_file, &msg);
-        eprintln!("PANIC: {}", info);
+        eprintln!("PANIC: {info}");
         prev_hook(info);
     }));
 
@@ -152,6 +153,9 @@ pub fn run() {
             list_profiles,
             init_default_profile,
             get_active_profile_path,
+            rename_profile,
+            delete_profile,
+            fork_active_profile,
             needs_agreement,
             agree_license,
             check_update,
@@ -210,7 +214,7 @@ fn check_agreement(app: &tauri::AppHandle) -> bool {
 fn load_or_init_profile(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
     let active_path: Option<String> = app.store(STORE_PATH).ok().and_then(|store| {
         store
-            .get("activeProfilePath")
+            .get(commands::profile::ACTIVE_PATH_KEY)
             .and_then(|v| v.as_str().map(|s| s.to_string()))
     });
 
@@ -252,7 +256,7 @@ fn load_profile_from_path(
         .ok_or("无效文件路径")?
         .to_string_lossy();
     let safe_path = profiles_dir.join(file_name.as_ref());
-    let data = std::fs::read(&safe_path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let data = std::fs::read(&safe_path).map_err(|e| format!("读取文件失败: {e}"))?;
     let header = qzh_format::header::FileHeader::from_bytes(&data).ok_or("文件格式无效")?;
     let aad = header.aad();
     let ciphertext = &data[qzh_format::header::FileHeader::SIZE..];
@@ -260,7 +264,7 @@ fn load_profile_from_path(
         crypto::aes::decrypt(ciphertext, &header.nonce, &aad).map_err(|e| e.to_string())?;
 
     let value: serde_json::Value =
-        serde_json::from_slice(&plaintext).map_err(|e| format!("解析失败: {}", e))?;
+        serde_json::from_slice(&plaintext).map_err(|e| format!("解析失败: {e}"))?;
     let version = value
         .get("schema_version")
         .and_then(|v| v.as_u64())
@@ -268,7 +272,7 @@ fn load_profile_from_path(
 
     let value = if version < qzh_format::profile::CURRENT_SCHEMA_VERSION {
         qzh_format::migrate::migrate_profile(value, version)
-            .map_err(|e| format!("配置迁移失败: {}", e))?
+            .map_err(|e| format!("配置迁移失败: {e}"))?
     } else if version > qzh_format::profile::CURRENT_SCHEMA_VERSION {
         return Err(format!(
             "配置版本 {} 高于当前支持的版本 {}，请升级应用",
@@ -280,7 +284,7 @@ fn load_profile_from_path(
     };
 
     let profile: qzh_format::profile::Profile =
-        serde_json::from_value(value).map_err(|e| format!("反序列化失败: {}", e))?;
+        serde_json::from_value(value).map_err(|e| format!("反序列化失败: {e}"))?;
     profile.validate().map_err(|e| e.to_string())?;
     Ok(profile)
 }
@@ -306,14 +310,14 @@ async fn check_for_updates(app: tauri::AppHandle) {
 async fn do_silent_update(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri_plugin_updater::UpdaterExt;
 
-    let updater = app.updater().map_err(|e| format!("{}", e))?;
+    let updater = app.updater().map_err(|e| format!("{e}"))?;
     let update = match updater.check().await {
         Ok(Some(u)) => u,
         Ok(None) => {
             info!("app is up to date");
             return Ok(());
         }
-        Err(e) => return Err(format!("update check failed: {}", e)),
+        Err(e) => return Err(format!("update check failed: {e}")),
     };
 
     let version = update.version.clone();
@@ -324,17 +328,17 @@ async fn do_silent_update(app: &tauri::AppHandle) -> Result<(), String> {
     let bytes = update
         .download(|_, _| {}, || {})
         .await
-        .map_err(|e| format!("download failed: {}", e))?;
+        .map_err(|e| format!("download failed: {e}"))?;
 
     let dir = app
         .path()
         .app_local_data_dir()
         .map(|d| d.join("pending_update"))
-        .map_err(|e| format!("can't get data dir: {}", e))?;
+        .map_err(|e| format!("can't get data dir: {e}"))?;
 
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}", e))?;
-    std::fs::write(dir.join("installer"), &bytes).map_err(|e| format!("{}", e))?;
-    std::fs::write(dir.join("version"), &version).map_err(|e| format!("{}", e))?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{e}"))?;
+    std::fs::write(dir.join("installer"), &bytes).map_err(|e| format!("{e}"))?;
+    std::fs::write(dir.join("version"), &version).map_err(|e| format!("{e}"))?;
 
     let _ = app.emit(
         "update-ready",
