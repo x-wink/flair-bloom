@@ -37,3 +37,6 @@ windows-sys = { version = "0.59", features = [
     "Win32_Security",
 ] }
 interception-sys = "0.1.3"
+
+[lints]
+workspace = true

@@ -24,7 +24,11 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>, engine: Arc<BurstEngine>) -> t
     let engine_clone = engine.clone();
 
     TrayIconBuilder::with_id("main")
-        .icon(app.default_window_icon().unwrap().clone())
+        .icon(
+            app.default_window_icon()
+                .expect("默认窗口图标必须在 tauri.conf.json 的 bundle.icon 中配置")
+                .clone(),
+        )
         .menu(&menu)
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "toggle" => {

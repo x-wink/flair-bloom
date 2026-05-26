@@ -96,6 +96,9 @@ pub fn run() {
     let crash_dir = dir.clone();
     let prev_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // panic hook 内绝不能再 panic，故此处必须容忍时钟异常：
+        // 时钟早于 UNIX epoch 时退化为 crash-0.log（可能覆盖旧崩溃日志，
+        // 但保住 hook 自身不再二次 panic 是更高优先级）。
         let ts = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .unwrap_or_default()
@@ -227,13 +230,13 @@ fn load_or_init_profile(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
             }
             Err(e) => {
                 warn!("加载配置失败 ({}): {}，回退到默认配置", path, e);
-                if let Err(e2) = init_and_save_default(app, engine) {
+                if let Err(e2) = commands::profile::create_default_profile(app, engine) {
                     error!("回退默认配置也失败: {}", e2);
                 }
             }
         },
         None => {
-            if let Err(e) = init_and_save_default(app, engine) {
+            if let Err(e) = commands::profile::create_default_profile(app, engine) {
                 error!("初始化默认配置失败: {}", e);
             }
         }
@@ -280,100 +283,6 @@ fn load_profile_from_path(
         serde_json::from_value(value).map_err(|e| format!("反序列化失败: {}", e))?;
     profile.validate().map_err(|e| e.to_string())?;
     Ok(profile)
-}
-
-fn init_and_save_default(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) -> Result<(), String> {
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    let profile = qzh_format::profile::Profile {
-        schema_version: qzh_format::profile::CURRENT_SCHEMA_VERSION,
-        meta: qzh_format::profile::ProfileMeta {
-            name: "defults".to_string(),
-            created_at: now,
-            updated_at: now,
-            app_version: env!("CARGO_PKG_VERSION").to_string(),
-        },
-        rules: vec![
-            qzh_format::profile::BurstRule {
-                id: "default-hold".to_string(),
-                enabled: false,
-                trigger_key: 0x51,
-                target_key: 0x51,
-                mode: qzh_format::profile::BurstMode::Hold,
-                stop_key: None,
-                interval_ms: 10,
-            },
-            qzh_format::profile::BurstRule {
-                id: "default-toggle".to_string(),
-                enabled: false,
-                trigger_key: 0x46,
-                target_key: 0x46,
-                mode: qzh_format::profile::BurstMode::Toggle,
-                stop_key: None,
-                interval_ms: 10,
-            },
-        ],
-        hotkeys: qzh_format::profile::Hotkeys::default(),
-        advanced: qzh_format::profile::Advanced::default(),
-    };
-
-    let dir = match app.path().app_data_dir() {
-        Ok(d) => d.join("profiles"),
-        Err(e) => {
-            return Err(format!("无法获取应用数据目录: {}", e));
-        }
-    };
-
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        return Err(format!("无法创建配置目录: {}", e));
-    }
-
-    let json = match serde_json::to_vec(&profile) {
-        Ok(j) => j,
-        Err(e) => {
-            return Err(format!("序列化失败: {}", e));
-        }
-    };
-
-    let mut aad = Vec::with_capacity(7);
-    aad.extend_from_slice(qzh_format::header::MAGIC);
-    aad.push(qzh_format::header::VERSION);
-    aad.extend_from_slice(&0u16.to_le_bytes());
-    let (ciphertext, nonce) = match crypto::aes::encrypt(&json, &aad) {
-        Ok(c) => c,
-        Err(e) => {
-            return Err(format!("加密失败: {}", e));
-        }
-    };
-
-    let header = qzh_format::header::FileHeader::new(nonce);
-    let file_path = dir.join("defults.qzh");
-    let tmp_path = file_path.with_extension("qzh.tmp");
-    let mut data = header.to_bytes();
-    data.extend_from_slice(&ciphertext);
-
-    if let Err(e) = std::fs::write(&tmp_path, &data) {
-        return Err(format!("写入临时文件失败: {}", e));
-    }
-    if let Err(e) = std::fs::rename(&tmp_path, &file_path) {
-        return Err(format!("替换配置文件失败: {}", e));
-    }
-
-    let path_str = file_path.to_string_lossy().to_string();
-
-    if let Ok(store) = app.store(STORE_PATH) {
-        store.set("activeProfilePath", serde_json::json!(path_str));
-        if let Err(e) = store.save() {
-            warn!("保存存储失败: {}", e);
-        }
-    }
-
-    engine.set_rules(profile.rules);
-    info!("默认配置已创建: {}", path_str);
-    Ok(())
 }
 
 async fn check_for_updates(app: tauri::AppHandle) {

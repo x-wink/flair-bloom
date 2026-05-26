@@ -9,11 +9,16 @@ pub struct InterceptionBackend {
     keyboard_device: InterceptionDevice,
 }
 
+// SAFETY: InterceptionContext 是 Interception DLL 内部分配的不透明指针,
+// 文档允许跨线程使用;keyboard_device 是数值 ID。本结构无可变全局状态,
+// interception_send 内部对 IOCTL 串行化,故跨线程发送/共享安全。
 unsafe impl Send for InterceptionBackend {}
+// SAFETY: 同上
 unsafe impl Sync for InterceptionBackend {}
 
 impl InterceptionBackend {
     pub fn new() -> Option<Self> {
+        // SAFETY: interception_create_context 文档允许无参调用,失败返回 null
         let ctx = unsafe { interception_create_context() };
         if ctx.is_null() {
             return None;
@@ -27,6 +32,7 @@ impl InterceptionBackend {
     }
 
     pub fn send_key(&self, vk: u32, is_up: bool) {
+        // SAFETY: MapVirtualKeyW 对任意 u32 都安全,无效 VK 返回 0
         let scan_ex = unsafe { MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX) };
         let scan = (scan_ex & 0xFF) as u16;
         if scan == 0 {
@@ -50,6 +56,9 @@ impl InterceptionBackend {
             information: SIM_MARKER as c_uint,
         };
 
+        // SAFETY: ctx 是构造时已校验的有效 context;keyboard_device 来自
+        // find_keyboard 校验;stroke 在调用期间存活于本栈帧;
+        // InterceptionKeyStroke 与 InterceptionStroke 内存布局兼容（FFI 文档约定）
         unsafe {
             interception_send(
                 self.ctx,
@@ -63,6 +72,8 @@ impl InterceptionBackend {
 
 impl Drop for InterceptionBackend {
     fn drop(&mut self) {
+        // SAFETY: ctx 是 new() 中 create_context 返回的有效指针,
+        // Drop 是它唯一的释放路径
         unsafe { interception_destroy_context(self.ctx) };
         info!("Interception context 已销毁");
     }
@@ -70,6 +81,7 @@ impl Drop for InterceptionBackend {
 
 fn find_keyboard() -> Option<InterceptionDevice> {
     for device in 1..=(INTERCEPTION_MAX_KEYBOARD as InterceptionDevice) {
+        // SAFETY: device 在文档定义的有效范围内,interception_is_keyboard 仅做查询
         if unsafe { interception_is_keyboard(device) } != 0 {
             return Some(device);
         }
@@ -80,10 +92,12 @@ fn find_keyboard() -> Option<InterceptionDevice> {
 
 /// 检测 Interception 驱动是否已安装（尝试创建 context）
 pub fn is_driver_installed() -> bool {
+    // SAFETY: interception_create_context 文档允许无参调用,失败返回 null
     let ctx = unsafe { interception_create_context() };
     if ctx.is_null() {
         return false;
     }
+    // SAFETY: ctx 是上面 create_context 返回的有效指针
     unsafe { interception_destroy_context(ctx) };
     true
 }

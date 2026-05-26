@@ -197,6 +197,7 @@ async fn run_elevated_exe(
         .collect();
 
     tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        // SAFETY: SHELLEXECUTEINFOW 是 POD,全 0 初始化合法,后续逐字段填写
         let mut sei: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
         sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
         sei.fMask = SEE_MASK_NOCLOSEPROCESS;
@@ -206,8 +207,10 @@ async fn run_elevated_exe(
         sei.lpDirectory = working_dir.as_ptr();
         sei.nShow = 1;
 
+        // SAFETY: 所有指针字段所指向的 Vec 在闭包结束前都存活,且都是 NUL 结尾的宽串
         let ok = unsafe { ShellExecuteExW(&mut sei) };
         if ok == 0 {
+            // SAFETY: GetLastError 无参,任意线程任意时刻调用安全
             let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
             return if err == ERROR_CANCELLED {
                 Err("已取消管理员授权".to_string())
@@ -220,14 +223,19 @@ async fn run_elevated_exe(
             return Err("无法获取进程句柄".to_string());
         }
 
+        // SAFETY: hProcess 是上面 ShellExecuteExW 在 SEE_MASK_NOCLOSEPROCESS
+        // 模式下返回的有效进程句柄,INFINITE 是合法等待时长
         let wait = unsafe { WaitForSingleObject(sei.hProcess, INFINITE) };
         if wait != WAIT_OBJECT_0 {
+            // SAFETY: hProcess 仍是上面返回的有效句柄
             unsafe { CloseHandle(sei.hProcess) };
             return Err("等待程序结束时出错".to_string());
         }
 
         let mut exit_code: u32 = 0;
+        // SAFETY: hProcess 仍有效;exit_code 是栈上 u32,&mut 在调用期间有效
         let got = unsafe { GetExitCodeProcess(sei.hProcess, &mut exit_code) };
+        // SAFETY: hProcess 是上面返回的有效句柄,函数返回前 hProcess 不再被读
         unsafe { CloseHandle(sei.hProcess) };
 
         if got == 0 {
@@ -383,12 +391,16 @@ fn is_process_elevated() -> bool {
 
     const TOKEN_QUERY: u32 = 0x0008;
     let mut token: HANDLE = std::ptr::null_mut();
+    // SAFETY: GetCurrentProcess 返回伪句柄无需释放;OpenProcessToken 写入 token 出参
     let ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
     if ok == 0 {
         return false;
     }
+    // SAFETY: TOKEN_ELEVATION 是 POD,全 0 初始化合法
     let mut elev: TOKEN_ELEVATION = unsafe { mem::zeroed() };
     let mut ret_len: u32 = 0;
+    // SAFETY: token 来自上面 OpenProcessToken 成功调用;elev 是栈上 POD,
+    // 大小由 size_of 提供;ret_len 是栈上 u32 出参
     let got = unsafe {
         GetTokenInformation(
             token,
@@ -398,6 +410,7 @@ fn is_process_elevated() -> bool {
             &mut ret_len,
         )
     };
+    // SAFETY: token 是上面 OpenProcessToken 返回的有效句柄
     unsafe { CloseHandle(token) };
     got != 0 && elev.TokenIsElevated != 0
 }
@@ -440,6 +453,7 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
             .collect();
 
         let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+            // SAFETY: SHELLEXECUTEINFOW 是 POD,全 0 初始化合法,后续逐字段填写
             let mut sei: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
             sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
             sei.lpVerb = verb.as_ptr();
@@ -447,8 +461,10 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
             sei.lpParameters = params.as_ptr();
             sei.nShow = 1;
 
+            // SAFETY: verb / path_wide / params 都是 NUL 结尾的宽串,Vec 在闭包内存活
             let ok = unsafe { ShellExecuteExW(&mut sei) };
             if ok == 0 {
+                // SAFETY: GetLastError 无参,任意线程任意时刻调用安全
                 let err = unsafe { windows_sys::Win32::Foundation::GetLastError() };
                 return if err == ERROR_CANCELLED {
                     Err("已取消管理员授权".to_string())
@@ -475,5 +491,49 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
     {
         let _ = (app, mode);
         Err("仅 Windows 平台支持提权重启".to_string())
+    }
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn strip_verbatim_removes_drive_prefix() {
+        let p = PathBuf::from(r"\\?\C:\Windows\System32");
+        assert_eq!(strip_verbatim(p), PathBuf::from(r"C:\Windows\System32"));
+    }
+
+    #[test]
+    fn strip_verbatim_handles_lowercase_drive() {
+        let p = PathBuf::from(r"\\?\d:\foo\bar");
+        assert_eq!(strip_verbatim(p), PathBuf::from(r"d:\foo\bar"));
+    }
+
+    #[test]
+    fn strip_verbatim_converts_unc_back_to_double_slash() {
+        let p = PathBuf::from(r"\\?\UNC\server\share\dir");
+        assert_eq!(strip_verbatim(p), PathBuf::from(r"\\server\share\dir"));
+    }
+
+    #[test]
+    fn strip_verbatim_keeps_non_verbatim_unchanged() {
+        let p = PathBuf::from(r"C:\Users\me");
+        assert_eq!(strip_verbatim(p.clone()), p);
+    }
+
+    #[test]
+    fn strip_verbatim_keeps_unrecognized_verbatim_form() {
+        // \\?\Volume{GUID}\... 类形式不是 drive,也不是 UNC,应保持原样
+        let p = PathBuf::from(r"\\?\Volume{12345}\foo");
+        assert_eq!(strip_verbatim(p.clone()), p);
+    }
+
+    #[test]
+    fn strip_verbatim_handles_normal_unc() {
+        // \\server\share 已经是 UNC,无 verbatim 前缀,保持不变
+        let p = PathBuf::from(r"\\server\share\file");
+        assert_eq!(strip_verbatim(p.clone()), p);
     }
 }

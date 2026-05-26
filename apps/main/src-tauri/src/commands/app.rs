@@ -221,9 +221,11 @@ pub async fn try_apply_pending_update(app: &AppHandle) -> bool {
 }
 
 fn now_secs() -> u64 {
+    // 与 commands/profile.rs::now_secs 同理：时钟早于 UNIX epoch 是 invariant 违反，
+    // 静默返回 0 会污染 agreed_at 等合规留痕字段，宁可显式 panic 留现场。
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
+        .expect("系统时钟早于 UNIX epoch")
         .as_secs()
 }
 

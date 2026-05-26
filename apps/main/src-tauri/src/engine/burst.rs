@@ -35,6 +35,13 @@ static ENGINE_HOOK: RwLock<Option<Weak<BurstEngine>>> = RwLock::new(None);
 type ActiveLoops =
     Arc<Mutex<HashMap<String, (Arc<AtomicBool>, thread::Thread, u32, thread::JoinHandle<()>)>>>;
 
+/// 关键路径锁兜底：若前一持锁者 panic 导致 Mutex 中毒,强行复活并继续。
+/// 按键工具最差故障是键盘卡死,值得给一层硬兜底；连发线程已被 catch_unwind
+/// 包裹,持锁期间也仅做 HashMap/Vec 操作,正常路径不会中毒。
+fn revive<T>(r: std::sync::LockResult<T>) -> T {
+    r.unwrap_or_else(|e| e.into_inner())
+}
+
 pub struct BurstEngine {
     pub global_enabled: Arc<AtomicBool>,
     rules: Arc<Mutex<Vec<BurstRule>>>,
@@ -54,35 +61,35 @@ impl BurstEngine {
     }
 
     pub fn set_rules(&self, rules: Vec<BurstRule>) {
-        let mut loops = self.active_loops.lock().unwrap();
+        let mut loops = revive(self.active_loops.lock());
         for (cancel, thread_handle, _, _) in loops.values() {
             cancel.store(true, Ordering::SeqCst);
             thread_handle.unpark();
             thread_handle.unpark();
         }
         loops.clear();
-        self.toggle_states.lock().unwrap().clear();
+        revive(self.toggle_states.lock()).clear();
         #[cfg(windows)]
         clear_pending_injections();
-        *self.rules.lock().unwrap() = rules;
+        *revive(self.rules.lock()) = rules;
         // loops 在此 drop，持锁直到 rules 更新完毕，消除 TOCTOU 窗口
     }
 
     pub fn get_rules(&self) -> Vec<BurstRule> {
-        self.rules.lock().unwrap().clone()
+        revive(self.rules.lock()).clone()
     }
 
     /// 当前正在执行连发的规则 ID 集合：hold 模式表示触发键被按住，toggle 模式表示已开启。
     /// 用于前端轮询展示激活态视觉反馈。
     pub fn get_active_ids(&self) -> Vec<String> {
-        self.active_loops.lock().unwrap().keys().cloned().collect()
+        revive(self.active_loops.lock()).keys().cloned().collect()
     }
 
     pub fn on_key_press(&self, vk: u32) {
         if !self.global_enabled.load(Ordering::SeqCst) {
             return;
         }
-        let rules = self.rules.lock().unwrap().clone();
+        let rules = revive(self.rules.lock()).clone();
         for rule in rules.iter().filter(|r| r.enabled) {
             match rule.mode {
                 BurstMode::Hold => {
@@ -93,10 +100,7 @@ impl BurstEngine {
                 BurstMode::Toggle => {
                     let stop = rule.stop_key.unwrap_or(rule.trigger_key);
                     if rule.trigger_key == vk || stop == vk {
-                        let started = self
-                            .toggle_states
-                            .lock()
-                            .unwrap()
+                        let started = revive(self.toggle_states.lock())
                             .get(&rule.id)
                             .copied()
                             .unwrap_or(false);
@@ -114,7 +118,7 @@ impl BurstEngine {
     }
 
     pub fn on_key_release(&self, vk: u32) {
-        let rules = self.rules.lock().unwrap().clone();
+        let rules = revive(self.rules.lock()).clone();
         for rule in rules
             .iter()
             .filter(|r| r.enabled && r.trigger_key == vk && r.mode == BurstMode::Hold)
@@ -124,7 +128,7 @@ impl BurstEngine {
     }
 
     fn start_hold_burst(&self, rule: &BurstRule) {
-        if self.active_loops.lock().unwrap().contains_key(&rule.id) {
+        if revive(self.active_loops.lock()).contains_key(&rule.id) {
             return;
         }
         let cancel = Arc::new(AtomicBool::new(false));
@@ -152,7 +156,7 @@ impl BurstEngine {
                 key_up(target_key);
             }
         });
-        let mut loops = self.active_loops.lock().unwrap();
+        let mut loops = revive(self.active_loops.lock());
         if loops.contains_key(&rule.id) {
             // spawn 后极罕见的并发插入：取消刚启动的线程
             cancel.store(true, Ordering::SeqCst);
@@ -166,7 +170,7 @@ impl BurstEngine {
     }
 
     fn handle_toggle_press(&self, rule: &BurstRule) {
-        let mut states = self.toggle_states.lock().unwrap();
+        let mut states = revive(self.toggle_states.lock());
         let active = states.entry(rule.id.clone()).or_insert(false);
         if *active {
             *active = false;
@@ -180,7 +184,7 @@ impl BurstEngine {
     }
 
     fn start_toggle_burst(&self, rule: &BurstRule) {
-        if self.active_loops.lock().unwrap().contains_key(&rule.id) {
+        if revive(self.active_loops.lock()).contains_key(&rule.id) {
             return;
         }
         let cancel = Arc::new(AtomicBool::new(false));
@@ -207,7 +211,7 @@ impl BurstEngine {
                 key_up(target_key);
             }
         });
-        let mut loops = self.active_loops.lock().unwrap();
+        let mut loops = revive(self.active_loops.lock());
         if loops.contains_key(&rule.id) {
             cancel.store(true, Ordering::SeqCst);
             handle.thread().unpark();
@@ -221,7 +225,7 @@ impl BurstEngine {
 
     fn stop_burst(&self, rule_id: &str) {
         if let Some((cancel, thread_handle, _, _join)) =
-            self.active_loops.lock().unwrap().remove(rule_id)
+            revive(self.active_loops.lock()).remove(rule_id)
         {
             cancel.store(true, Ordering::SeqCst);
             // 调用两次覆盖 hold_ms 和 rest_ms 两个 park 点：
@@ -236,7 +240,7 @@ impl BurstEngine {
 impl Drop for BurstEngine {
     fn drop(&mut self) {
         let entries: Vec<_> = {
-            let mut loops = self.active_loops.lock().unwrap();
+            let mut loops = revive(self.active_loops.lock());
             loops.drain().map(|(_, v)| v).collect()
         };
         // 先全部发出取消信号
@@ -262,10 +266,18 @@ impl Drop for BurstEngine {
 #[cfg(windows)]
 const LLKHF_REPEAT: u32 = 0x40;
 
-/// WH_KEYBOARD_LL 低级键盘钩子回调；运行在安装 hook 的线程（消息循环线程）上
+/// WH_KEYBOARD_LL 低级键盘钩子回调；运行在安装 hook 的线程（消息循环线程）上。
+///
+/// # Safety
+///
+/// 由 Windows 调用,调用方契约：当 `ncode >= 0` 时 `lparam` 指向 Windows 维护的
+/// 有效 `KBDLLHOOKSTRUCT`,生命周期覆盖本次回调返回前。函数内不持有该指针的延长引用,
+/// 也不跨线程发送借用。
 #[cfg(windows)]
 unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> isize {
     if ncode >= 0 {
+        // SAFETY: 上文 # Safety 契约保证 ncode>=0 时 lparam 是有效的
+        // KBDLLHOOKSTRUCT 指针,借用 kb 不存活到回调返回之后
         let kb = &*(lparam as *const KBDLLHOOKSTRUCT);
         // SendInput / Interception：通过 dwExtraInfo 精确过滤自身注入；
         // DD-HID：dwExtraInfo 由驱动端置位，无法控制，转用 PENDING_INJECTIONS 队列匹配
@@ -278,6 +290,7 @@ unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
             );
             // 仅对 down/up 主事件调用消费，避免无关 wparam 误吃记录
             if is_down_or_up && try_consume_injection(kb.vkCode, is_up) {
+                // SAFETY: WH_KEYBOARD_LL 文档允许传入 null hhk,Windows 会沿钩链向后传递
                 return CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam);
             }
 
@@ -298,6 +311,7 @@ unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
             }
         }
     }
+    // SAFETY: 同上,fall-through 路径必须把事件继续传递给后续钩子,否则会吞掉键盘输入
     CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam)
 }
 
@@ -313,6 +327,8 @@ pub fn start_listener(engine: Arc<BurstEngine>) {
     }
     thread::spawn(move || {
         let hook =
+            // SAFETY: WH_KEYBOARD_LL 全局钩子允许 hmod=null + dwThreadId=0,Windows
+            // 会自行加载本进程模块作为 hook owner;hook_proc 满足 # Safety 契约
             unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), std::ptr::null_mut(), 0) };
         if hook.is_null() {
             error!("安装键盘 hook 失败");
@@ -320,17 +336,22 @@ pub fn start_listener(engine: Arc<BurstEngine>) {
         }
         info!("键盘 hook 已安装");
         // WH_KEYBOARD_LL 要求安装线程持续运行消息循环，否则 Windows 会在超时后移除 hook
+        // SAFETY: MSG 是 POD 结构,全 0 是合法初值,GetMessageW 会写入有效字段
         let mut msg = unsafe { std::mem::zeroed::<MSG>() };
         loop {
+            // SAFETY: msg 来自上面 zeroed,后续 GetMessageW/Translate/Dispatch
+            // 都按 Win32 文档以可变指针写入或只读消费,生命周期不超出本作用域
             let ret = unsafe { GetMessageW(&mut msg, std::ptr::null_mut(), 0, 0) };
             if ret == 0 || ret == -1 {
                 break;
             }
+            // SAFETY: msg 是上一步 GetMessageW 写入的合法消息
             unsafe {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
         }
+        // SAFETY: hook 是上面 SetWindowsHookExW 返回的非空有效句柄
         unsafe { UnhookWindowsHookEx(hook) };
         info!("键盘 hook 已卸载");
     });

@@ -26,9 +26,12 @@ fn profiles_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn now_secs() -> u64 {
+    // 时钟早于 UNIX epoch 是 invariant 违反（比 1970 还早或被恶意回拨），
+    // 静默返回 0 会导致 created_at/updated_at 错乱、list_profiles 排序失真，
+    // 故选择显式 panic 让上层 panic hook 记录现场。
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
+        .expect("系统时钟早于 UNIX epoch")
         .as_secs()
 }
 
@@ -200,8 +203,12 @@ pub fn list_profiles(app: AppHandle) -> Result<Vec<ProfileMeta>, String> {
     Ok(metas)
 }
 
-#[tauri::command]
-pub fn init_default_profile(app: AppHandle, state: State<EngineState>) -> Result<Profile, String> {
+/// 创建并落盘默认配置。供 Tauri command (`init_default_profile`) 与启动时
+/// 兜底初始化（`lib.rs` 中加载失败/首启动）共享，避免双份 Profile 字面量与加密落盘代码漂移。
+pub(crate) fn create_default_profile(
+    app: &AppHandle,
+    engine: &crate::engine::BurstEngine,
+) -> Result<Profile, String> {
     let now = now_secs();
 
     let profile = Profile {
@@ -236,20 +243,25 @@ pub fn init_default_profile(app: AppHandle, state: State<EngineState>) -> Result
         advanced: Advanced::default(),
     };
 
-    let dir = profiles_dir(&app)?;
+    let dir = profiles_dir(app)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建配置目录: {}", e))?;
     let file_path = dir.join("defults.qzh");
 
     let rules = profile.rules.clone();
     let path = write_profile_file_to_path(&file_path, &profile)?;
-    state.0.set_rules(rules);
+    engine.set_rules(rules);
 
-    if let Ok(store) = app.store("settings.json") {
+    if let Ok(store) = app.store(crate::STORE_PATH) {
         store.set("activeProfilePath", serde_json::json!(path));
         let _ = store.save();
     }
 
     Ok(profile)
+}
+
+#[tauri::command]
+pub fn init_default_profile(app: AppHandle, state: State<EngineState>) -> Result<Profile, String> {
+    create_default_profile(&app, &state.0)
 }
 
 #[tauri::command]
@@ -270,4 +282,50 @@ fn sanitize_filename(name: &str) -> String {
             _ => c,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_replaces_windows_reserved_chars() {
+        assert_eq!(
+            sanitize_filename(r#"a<b>c:d"e/f\g|h?i*j"#),
+            "a_b_c_d_e_f_g_h_i_j"
+        );
+    }
+
+    #[test]
+    fn sanitize_replaces_ascii_control_chars() {
+        // 包含 NUL, \n, \t 等控制字符必须被替换
+        assert_eq!(sanitize_filename("a\nb\tc\x00d"), "a_b_c_d");
+    }
+
+    #[test]
+    fn sanitize_preserves_chinese_and_normal_chars() {
+        // 防止越来越严的过滤误伤合法文件名
+        assert_eq!(sanitize_filename("默认配置-v2"), "默认配置-v2");
+    }
+
+    #[test]
+    fn sanitize_blocks_path_traversal_via_separators() {
+        // ../../etc/passwd 类形态:斜杠 / 反斜杠都会被替换
+        assert_eq!(sanitize_filename("../../etc/passwd"), "..__..__etc_passwd");
+        assert_eq!(
+            sanitize_filename(r"..\..\windows\system32"),
+            "..__..__windows_system32"
+        );
+    }
+
+    #[test]
+    fn sanitize_keeps_dots_and_dashes() {
+        // . 和 - 是合法文件名字符
+        assert_eq!(sanitize_filename("my.profile-1"), "my.profile-1");
+    }
+
+    #[test]
+    fn sanitize_handles_empty_string() {
+        assert_eq!(sanitize_filename(""), "");
+    }
 }

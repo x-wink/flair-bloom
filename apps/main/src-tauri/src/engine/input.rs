@@ -44,6 +44,14 @@ fn pending_map() -> &'static Mutex<PendingMap> {
     PENDING_INJECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// 关键路径（hook 回调 + 连发线程）的锁兜底：若前一持锁者 panic 导致 Mutex
+/// 中毒,强行复活并继续。按键工具最差故障是键盘卡死,值得给一层硬兜底；
+/// 实际上当前所有持锁期间仅执行 HashMap/Option 操作,正常路径下不会中毒。
+#[cfg(windows)]
+fn revive<T>(r: std::sync::LockResult<T>) -> T {
+    r.unwrap_or_else(|e| e.into_inner())
+}
+
 #[cfg(windows)]
 fn drop_expired(queue: &mut VecDeque<Instant>, now: Instant) {
     while let Some(&front) = queue.front() {
@@ -57,7 +65,7 @@ fn drop_expired(queue: &mut VecDeque<Instant>, now: Instant) {
 
 #[cfg(windows)]
 fn record_injection(vk: u32, is_up: bool) {
-    let mut map = pending_map().lock().unwrap();
+    let mut map = revive(pending_map().lock());
     let queue = map.entry((vk, is_up)).or_default();
     let now = Instant::now();
     drop_expired(queue, now);
@@ -68,7 +76,7 @@ fn record_injection(vk: u32, is_up: bool) {
 /// 表示这是程序自身注入的事件，应该被过滤掉。
 #[cfg(windows)]
 pub fn try_consume_injection(vk: u32, is_up: bool) -> bool {
-    let mut map = pending_map().lock().unwrap();
+    let mut map = revive(pending_map().lock());
     let Some(queue) = map.get_mut(&(vk, is_up)) else {
         return false;
     };
@@ -80,7 +88,7 @@ pub fn try_consume_injection(vk: u32, is_up: bool) -> bool {
 #[cfg(windows)]
 pub fn clear_pending_injections() {
     if let Some(lock) = PENDING_INJECTIONS.get() {
-        lock.lock().unwrap().clear();
+        revive(lock.lock()).clear();
     }
 }
 
@@ -180,7 +188,7 @@ pub fn init_backend(mode: InputMode) {
         InputMode::Interception => {
             let backend_cell =
                 INTERCEPTION_BACKEND.get_or_init(|| Mutex::new(InterceptionBackend::new()));
-            let mut guard = backend_cell.lock().unwrap();
+            let mut guard = revive(backend_cell.lock());
             if guard.is_none() {
                 *guard = InterceptionBackend::new();
             }
@@ -199,7 +207,7 @@ pub fn init_backend(mode: InputMode) {
                 return;
             };
             let cell = DD_HID_BACKEND.get_or_init(|| Mutex::new(DdHidBackend::new(dir)));
-            let mut guard = cell.lock().unwrap();
+            let mut guard = revive(cell.lock());
             if guard.is_none() {
                 *guard = DdHidBackend::new(dir);
             }
@@ -242,7 +250,15 @@ impl InputMode {
 }
 
 #[cfg(windows)]
+/// 通过 `SendInput` 发送一个键盘事件,自动从 VK 推导扩展扫描码与 E0 前缀。
+///
+/// # Safety
+///
+/// `vk` 必须是 Win32 文档允许的虚拟键码;`flags` 必须是 `KEYBDINPUT.dwFlags`
+/// 合法位的子集（KEYEVENTF_KEYUP 等）。本函数仅写本地栈上的 `INPUT` 然后
+/// 调用 `SendInput`,不持有任何外部指针。
 unsafe fn send_via_sendinput(vk: u32, flags: u32) {
+    // SAFETY: MapVirtualKeyW 对任意 u32 都安全,无效 VK 返回 0
     let scan_ex = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX);
     let scan = (scan_ex & 0xFF) as u16;
     let prefix = (scan_ex >> 8) & 0xFF;
@@ -268,6 +284,8 @@ unsafe fn send_via_sendinput(vk: u32, flags: u32) {
             },
         },
     };
+    // SAFETY: input 是栈上初始化完整的 INPUT_KEYBOARD,&input 在调用期间有效;
+    // size_of::<INPUT>() 与 SendInput 的 cbSize 参数语义匹配
     SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
 }
 
@@ -281,7 +299,7 @@ pub fn key_down(vk: u32) {
         match mode {
             MODE_INTERCEPTION => {
                 if let Some(lock) = INTERCEPTION_BACKEND.get() {
-                    if let Some(backend) = lock.lock().unwrap().as_ref() {
+                    if let Some(backend) = revive(lock.lock()).as_ref() {
                         backend.send_key(vk, false);
                         return;
                     }
@@ -289,7 +307,7 @@ pub fn key_down(vk: u32) {
             }
             MODE_DD_HID => {
                 if let Some(lock) = DD_HID_BACKEND.get() {
-                    if let Some(backend) = lock.lock().unwrap().as_ref() {
+                    if let Some(backend) = revive(lock.lock()).as_ref() {
                         if !DD_KEY_DOWN_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                             info!("key_down 路由到 DD-HID 后端（vk={:#x}）", vk);
                         }
@@ -305,6 +323,8 @@ pub fn key_down(vk: u32) {
             }
             _ => {}
         }
+        // SAFETY: send_via_sendinput 的 # Safety 契约对 (vk, 0) 成立——
+        // vk 来自上层规则配置,0 是 KEYBDINPUT.dwFlags 的合法值（按下事件）
         unsafe { send_via_sendinput(vk, 0) };
     }
     #[cfg(not(windows))]
@@ -321,7 +341,7 @@ pub fn key_up(vk: u32) {
         match mode {
             MODE_INTERCEPTION => {
                 if let Some(lock) = INTERCEPTION_BACKEND.get() {
-                    if let Some(backend) = lock.lock().unwrap().as_ref() {
+                    if let Some(backend) = revive(lock.lock()).as_ref() {
                         backend.send_key(vk, true);
                         return;
                     }
@@ -329,7 +349,7 @@ pub fn key_up(vk: u32) {
             }
             MODE_DD_HID => {
                 if let Some(lock) = DD_HID_BACKEND.get() {
-                    if let Some(backend) = lock.lock().unwrap().as_ref() {
+                    if let Some(backend) = revive(lock.lock()).as_ref() {
                         if !DD_KEY_UP_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                             info!("key_up 路由到 DD-HID 后端（vk={:#x}）", vk);
                         }
@@ -341,6 +361,7 @@ pub fn key_up(vk: u32) {
             }
             _ => {}
         }
+        // SAFETY: send_via_sendinput 的 # Safety 契约对 (vk, KEYEVENTF_KEYUP) 成立
         unsafe { send_via_sendinput(vk, KEYEVENTF_KEYUP) };
     }
     #[cfg(not(windows))]
