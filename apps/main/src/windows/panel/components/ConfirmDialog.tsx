@@ -1,5 +1,6 @@
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useRef } from 'react';
 import '../dialogs/dialog-base.css';
+import Button from './Button';
 import { useOverlay } from './Overlay';
 
 export type ConfirmTone = 'default' | 'danger';
@@ -50,15 +51,16 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             {opts.description && <p className="modal-desc">{opts.description}</p>}
             {opts.body}
             <div className="modal-actions">
-              <button className="btn-ghost" onClick={() => close(false)}>
+              <Button variant="outline" tone="neutral" onClick={() => close(false)}>
                 {opts.cancelText ?? '取消'}
-              </button>
-              <button
-                className={opts.tone === 'danger' ? 'btn-danger' : 'btn-primary'}
+              </Button>
+              <Button
+                variant="solid"
+                tone={opts.tone === 'danger' ? 'danger' : 'primary'}
                 onClick={() => close(true)}
               >
                 {opts.confirmText ?? '确定'}
-              </button>
+              </Button>
             </div>
           </div>
         );

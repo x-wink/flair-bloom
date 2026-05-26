@@ -1,3 +1,4 @@
+import Button from '../components/Button';
 import './dialog-base.css';
 import './UpdateNoticeDialog.css';
 
@@ -30,9 +31,9 @@ export default function UpdateNoticeDialog({ info, onClose }: Props) {
       )}
 
       <div className="update-notice-actions">
-        <button className="btn-primary update-notice-close" onClick={onClose}>
+        <Button className="update-notice-close" onClick={onClose}>
           知道了
-        </button>
+        </Button>
       </div>
     </div>
   );

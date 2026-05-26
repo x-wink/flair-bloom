@@ -14,6 +14,7 @@ import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/ico
 import KeyCapture from './components/KeyCapture';
 import Overlay from './components/Overlay';
 import { useToast } from './components/Toast';
+import Button from './components/Button';
 import AboutDialog from './dialogs/AboutDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
 import UpdateNoticeDialog, { type UpdateNoticeInfo } from './dialogs/UpdateNoticeDialog';
@@ -802,41 +803,58 @@ export default function PanelApp() {
                   );
                 })}
               </div>
-              <button className="add-btn" onClick={() => addRule(mode)}>
+              <Button
+                className="add-btn"
+                variant="dashed"
+                tone="primary"
+                block
+                onClick={() => addRule(mode)}
+              >
                 + 添加{title}规则
-              </button>
+              </Button>
             </div>
           );
         })}
       </section>
 
       <footer className="panel-footer">
-        <button className="reset-btn" onClick={handleRestoreDefaults} title="恢复默认配置">
+        <Button
+          variant="outline"
+          tone="neutral"
+          size="sm"
+          onClick={handleRestoreDefaults}
+          title="恢复默认配置"
+        >
           恢复默认
-        </button>
+        </Button>
         <div className="footer-controls">
           <div className="footer-control">
             <span className="footer-label">输入模式</span>
-            <button
+            <Button
               ref={modeBtnRef}
-              className={`toggle-btn mini${inputMode !== 'sendinput' ? ' active' : ''}`}
+              variant="outline"
+              tone={inputMode !== 'sendinput' ? 'primary' : 'neutral'}
+              size="sm"
+              loading={switchingMode}
+              appendIcon={<ChevronIcon size={10} />}
               onClick={() => setModePickerOpen((v) => !v)}
-              disabled={switchingMode}
               title="点击选择输入模式"
             >
-              {switchingMode ? '…' : INPUT_MODE_LABELS[inputMode]}
+              {INPUT_MODE_LABELS[inputMode]}
               {elevated && inputMode === 'dd_hid' ? ' ★' : ''}
-            </button>
+            </Button>
           </div>
           <div className="footer-control">
             <span className="footer-label">全局开关</span>
-            <button
-              className={`toggle-btn${globalEnabled ? ' active' : ''}`}
+            <Button
+              variant="solid"
+              tone={globalEnabled ? 'primary' : 'neutral'}
+              size="sm"
+              loading={togglingGlobal}
               onClick={toggleGlobal}
-              disabled={togglingGlobal}
             >
-              {togglingGlobal ? '切换中…' : globalEnabled ? '已启用' : '已禁用'}
-            </button>
+              {globalEnabled ? '已启用' : '已禁用'}
+            </Button>
           </div>
         </div>
       </footer>

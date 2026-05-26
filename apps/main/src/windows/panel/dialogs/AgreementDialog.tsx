@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import eulaText from '../../../assets/EULA.md?raw';
+import Button from '../components/Button';
 import './dialog-base.css';
 import './AgreementDialog.css';
 
@@ -56,16 +57,22 @@ export default function AgreementPage({ onAgreed }: Props) {
         {agreeError || (scrolledToBottom ? '已阅读完毕' : '请滚动阅读协议全文')}
       </div>
       <div className="agreement-actions">
-        <button className="agree-btn reject" onClick={handleReject}>
+        <Button
+          variant="outline"
+          tone="neutral"
+          className="agreement-action"
+          onClick={handleReject}
+        >
           不同意并退出
-        </button>
-        <button
-          className="agree-btn accept"
-          disabled={!scrolledToBottom || agreeing}
+        </Button>
+        <Button
+          className="agreement-action"
+          loading={agreeing}
+          disabled={!scrolledToBottom}
           onClick={handleAgree}
         >
           {agreeing ? '处理中…' : '同意并继续'}
-        </button>
+        </Button>
       </div>
     </div>
   );

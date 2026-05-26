@@ -160,24 +160,6 @@ body {
   color: #fff;
 }
 
-.toggle-btn {
-  padding: 6px 16px;
-  border: none;
-  border-radius: 20px;
-  font-size: 13px;
-  cursor: pointer;
-  background: #d0d0d0;
-  color: #555;
-  transition:
-    background 0.15s,
-    color 0.15s;
-}
-
-.toggle-btn.active {
-  background: #6c4de6;
-  color: #fff;
-}
-
 .rules-section {
   flex: 1 1 auto;
   display: flex;
@@ -268,75 +250,37 @@ body {
 
 .add-btn {
   flex-shrink: 0;
-  padding: 8px 12px;
-  border: 1px dashed #6c4de6;
-  border-radius: 6px;
-  background: transparent;
-  color: #6c4de6;
-  font-size: 13px;
-  cursor: pointer;
-  width: 100%;
-}
-
-.add-btn:hover {
-  background: #6c4de6;
-  color: #fff;
 }
 
 .panel-footer {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 12px 20px;
+  gap: 8px;
+  padding: 10px 14px;
   background: rgba(255, 255, 255, 0.5);
   backdrop-filter: blur(8px);
   border-top: 1px solid rgba(0, 0, 0, 0.06);
   flex-shrink: 0;
 }
 
-.reset-btn {
-  padding: 6px 12px;
-  border: 1px solid #d8d8d8;
-  border-radius: 6px;
-  background: transparent;
-  color: #666;
-  font-size: 12px;
-  cursor: pointer;
-  transition:
-    border-color 0.15s,
-    color 0.15s,
-    background 0.15s;
-}
-
-.reset-btn:hover {
-  border-color: #6c4de6;
-  color: #6c4de6;
-  background: rgba(108, 77, 230, 0.06);
-}
-
 .footer-label {
   font-size: 12px;
   font-weight: 500;
   color: #555;
+  white-space: nowrap;
 }
 
 .footer-controls {
   margin-left: auto;
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
 }
 
 .footer-control {
   display: flex;
   align-items: center;
   gap: 6px;
-}
-
-.toggle-btn.mini {
-  min-width: 32px;
-  padding: 4px 8px;
-  font-size: 11px;
 }
 
 .empty {

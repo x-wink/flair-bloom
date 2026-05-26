@@ -1,0 +1,320 @@
+/* Button base */
+.fb-btn {
+  --fb-btn-color: #6c4de6;
+  --fb-btn-color-hover: #5a3dd1;
+  --fb-btn-color-active: #4d33b8;
+  --fb-btn-fg-on-solid: #fff;
+  --fb-btn-soft-bg: rgba(108, 77, 230, 0.08);
+  --fb-btn-soft-bg-hover: rgba(108, 77, 230, 0.16);
+
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  background: transparent;
+  color: inherit;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.fb-btn__content {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.fb-btn--loading .fb-btn__content {
+  visibility: hidden;
+}
+
+.fb-btn:focus-visible {
+  outline: 2px solid var(--fb-btn-color);
+  outline-offset: 2px;
+}
+
+.fb-btn:disabled,
+.fb-btn[aria-busy='true'] {
+  cursor: not-allowed;
+}
+
+.fb-btn:disabled:not([aria-busy='true']) {
+  opacity: 0.45;
+}
+
+/* Tones (CSS vars only) */
+.fb-btn--primary {
+  --fb-btn-color: #6c4de6;
+  --fb-btn-color-hover: #5a3dd1;
+  --fb-btn-color-active: #4d33b8;
+  --fb-btn-soft-bg: rgba(108, 77, 230, 0.1);
+  --fb-btn-soft-bg-hover: rgba(108, 77, 230, 0.18);
+}
+
+.fb-btn--neutral {
+  --fb-btn-color: #6e6e76;
+  --fb-btn-color-hover: #4d4d54;
+  --fb-btn-color-active: #38383d;
+  --fb-btn-soft-bg: rgba(0, 0, 0, 0.05);
+  --fb-btn-soft-bg-hover: rgba(0, 0, 0, 0.08);
+}
+
+.fb-btn--danger {
+  --fb-btn-color: #e05c5c;
+  --fb-btn-color-hover: #c94848;
+  --fb-btn-color-active: #b03b3b;
+  --fb-btn-soft-bg: rgba(224, 92, 92, 0.1);
+  --fb-btn-soft-bg-hover: rgba(224, 92, 92, 0.18);
+}
+
+.fb-btn--success {
+  --fb-btn-color: #52c41a;
+  --fb-btn-color-hover: #3fa314;
+  --fb-btn-color-active: #338710;
+  --fb-btn-soft-bg: rgba(82, 196, 26, 0.1);
+  --fb-btn-soft-bg-hover: rgba(82, 196, 26, 0.2);
+}
+
+.fb-btn--warning {
+  --fb-btn-color: #f5a623;
+  --fb-btn-color-hover: #db8f15;
+  --fb-btn-color-active: #b8770f;
+  --fb-btn-soft-bg: rgba(245, 166, 35, 0.12);
+  --fb-btn-soft-bg-hover: rgba(245, 166, 35, 0.22);
+}
+
+/* Variants */
+.fb-btn--solid {
+  background: var(--fb-btn-color);
+  color: var(--fb-btn-fg-on-solid);
+  border-color: var(--fb-btn-color);
+}
+
+.fb-btn--solid:hover:not(:disabled) {
+  background: var(--fb-btn-color-hover);
+  border-color: var(--fb-btn-color-hover);
+}
+
+.fb-btn--solid:active:not(:disabled) {
+  background: var(--fb-btn-color-active);
+  border-color: var(--fb-btn-color-active);
+}
+
+.fb-btn--outline {
+  background: transparent;
+  color: var(--fb-btn-color);
+  border-color: var(--fb-btn-color);
+}
+
+.fb-btn--outline:hover:not(:disabled) {
+  background: var(--fb-btn-soft-bg);
+  color: var(--fb-btn-color-hover);
+  border-color: var(--fb-btn-color-hover);
+}
+
+.fb-btn--outline:active:not(:disabled) {
+  background: var(--fb-btn-soft-bg-hover);
+  color: var(--fb-btn-color-active);
+  border-color: var(--fb-btn-color-active);
+}
+
+.fb-btn--ghost {
+  background: transparent;
+  color: var(--fb-btn-color);
+}
+
+.fb-btn--ghost:hover:not(:disabled) {
+  background: var(--fb-btn-soft-bg);
+  color: var(--fb-btn-color-hover);
+}
+
+.fb-btn--ghost:active:not(:disabled) {
+  background: var(--fb-btn-soft-bg-hover);
+  color: var(--fb-btn-color-active);
+}
+
+.fb-btn--dashed {
+  background: transparent;
+  color: var(--fb-btn-color);
+  border-color: var(--fb-btn-color);
+  border-style: dashed;
+}
+
+.fb-btn--dashed:hover:not(:disabled) {
+  background: var(--fb-btn-color-hover);
+  border-color: var(--fb-btn-color-hover);
+  color: var(--fb-btn-fg-on-solid);
+}
+
+.fb-btn--dashed:active:not(:disabled) {
+  background: var(--fb-btn-color-active);
+  border-color: var(--fb-btn-color-active);
+  color: var(--fb-btn-fg-on-solid);
+}
+
+.fb-btn--link {
+  padding-left: 0;
+  padding-right: 0;
+  background: transparent;
+  color: var(--fb-btn-color);
+  border-color: transparent;
+}
+
+.fb-btn--link:hover:not(:disabled) {
+  color: var(--fb-btn-color-hover);
+  text-decoration: underline;
+}
+
+.fb-btn--link:active:not(:disabled) {
+  color: var(--fb-btn-color-active);
+  text-decoration: underline;
+}
+
+.fb-btn--text {
+  background: transparent;
+  color: inherit;
+  border-color: transparent;
+}
+
+.fb-btn--text:hover:not(:disabled) {
+  background: var(--fb-btn-soft-bg);
+  color: var(--fb-btn-color);
+}
+
+.fb-btn--text:active:not(:disabled) {
+  background: var(--fb-btn-soft-bg-hover);
+  color: var(--fb-btn-color-active);
+}
+
+/* Sizes */
+.fb-btn--sm {
+  padding: 4px 10px;
+  font-size: 12px;
+  border-radius: 5px;
+}
+
+.fb-btn--md {
+  padding: 6px 14px;
+  font-size: 13px;
+  border-radius: 6px;
+}
+
+.fb-btn--lg {
+  padding: 9px 18px;
+  font-size: 14px;
+  border-radius: 8px;
+}
+
+/* Shapes (override radius) */
+.fb-btn--rounded {
+  /* uses size's default radius */
+}
+
+.fb-btn--square {
+  border-radius: 0;
+}
+
+.fb-btn--pill {
+  border-radius: 999px;
+}
+
+.fb-btn--circle {
+  border-radius: 50%;
+  padding: 0;
+}
+
+/* Block layout */
+.fb-btn--block {
+  display: flex;
+  width: 100%;
+}
+
+/* Icon-only / Circle: square footprint per size */
+.fb-btn--icon-only,
+.fb-btn--circle {
+  padding: 0;
+  gap: 0;
+}
+
+.fb-btn--icon-only.fb-btn--sm,
+.fb-btn--circle.fb-btn--sm {
+  width: 24px;
+  height: 24px;
+}
+
+.fb-btn--icon-only.fb-btn--md,
+.fb-btn--circle.fb-btn--md {
+  width: 30px;
+  height: 30px;
+}
+
+.fb-btn--icon-only.fb-btn--lg,
+.fb-btn--circle.fb-btn--lg {
+  width: 36px;
+  height: 36px;
+}
+
+/* Slots */
+.fb-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  font-size: 1em;
+}
+
+.fb-btn__label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* Spinner */
+.fb-btn__spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1em;
+  height: 1em;
+  margin: -0.5em 0 0 -0.5em;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: fb-btn-spin 0.75s linear infinite;
+  opacity: 0.85;
+}
+
+.fb-btn--loading {
+  opacity: 0.85;
+}
+
+.fb-btn--loading.fb-btn--solid .fb-btn__spinner {
+  border-color: var(--fb-btn-fg-on-solid);
+  border-top-color: transparent;
+}
+
+@keyframes fb-btn-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fb-btn__spinner {
+    animation-duration: 1.6s;
+  }
+}
