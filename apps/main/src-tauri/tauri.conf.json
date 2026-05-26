@@ -13,20 +13,6 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
-    "resources": [
-      "resources/install-interception.exe",
-      "resources/interception.dll",
-      "resources/ddhid.63340.dll",
-      "resources/ddhid-driver/ddc.exe",
-      "resources/ddhid-driver/ddhid63340.sys",
-      "resources/ddhid-driver/ddhid63340.cat",
-      "resources/ddhid-driver/ddhid63340.inf"
-    ],
-    "windows": {
-      "nsis": {
-        "installerHooks": "./installer.nsh"
-      }
-    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

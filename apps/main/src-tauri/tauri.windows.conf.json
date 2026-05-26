@@ -1,0 +1,19 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": [
+      "resources/install-interception.exe",
+      "resources/interception.dll",
+      "resources/ddhid.63340.dll",
+      "resources/ddhid-driver/ddc.exe",
+      "resources/ddhid-driver/ddhid63340.sys",
+      "resources/ddhid-driver/ddhid63340.cat",
+      "resources/ddhid-driver/ddhid63340.inf"
+    ],
+    "windows": {
+      "nsis": {
+        "installerHooks": "./installer.nsh"
+      }
+    }
+  }
+}
