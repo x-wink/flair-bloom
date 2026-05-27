@@ -29,11 +29,12 @@ const DEFAULT_PROFILE_NAME = 'defults';
 
 type BurstMode = 'hold' | 'toggle';
 type InputMode = 'sendinput' | 'interception' | 'dd_hid';
+type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
 
 interface AppStatus {
   elevated: boolean;
-  interception_installed: boolean;
-  dd_hid_installed: boolean;
+  interception_installed: DriverStatus;
+  dd_hid_installed: DriverStatus;
   input_mode: string;
   platform: string;
   os_family: string;
@@ -157,8 +158,8 @@ export default function PanelApp() {
   const [globalEnabled, setGlobalEnabled] = useState(false);
   const [togglingGlobal, setTogglingGlobal] = useState(false);
   const [inputMode, setInputMode] = useState<InputMode>('sendinput');
-  const [interceptionInstalled, setInterceptionInstalled] = useState(false);
-  const [ddHidInstalled, setDdHidInstalled] = useState(false);
+  const [interceptionInstalled, setInterceptionInstalled] = useState<DriverStatus>('not_installed');
+  const [ddHidInstalled, setDdHidInstalled] = useState<DriverStatus>('not_installed');
   const [elevated, setElevated] = useState(false);
   const [sysInfo, setSysInfo] = useState<{
     platform: string;
@@ -435,7 +436,21 @@ export default function PanelApp() {
     setSwitchingMode(true);
     try {
       // Interception 驱动：未安装则先安装并退出（要求重启电脑）
-      if (target === 'interception' && !interceptionInstalled) {
+      if (target === 'interception' && interceptionInstalled !== 'installed') {
+        if (interceptionInstalled === 'pending_reboot') {
+          await confirm({
+            title: '请重启电脑',
+            description: (
+              <>
+                检测到游戏模式驱动处于「待重启」状态——上次安装或卸载尚未完成，
+                必须重启电脑后才能切换到此模式。
+              </>
+            ),
+            confirmText: '我已知晓',
+            cancelText: '稍后处理',
+          });
+          return;
+        }
         const ok = await confirm({
           title: '安装驱动',
           description: (
@@ -468,7 +483,21 @@ export default function PanelApp() {
       }
 
       // DD-HID：未安装则先 PnP 安装（无需重启）
-      if (target === 'dd_hid' && !ddHidInstalled) {
+      if (target === 'dd_hid' && ddHidInstalled !== 'installed') {
+        if (ddHidInstalled === 'pending_reboot') {
+          await confirm({
+            title: '请重启电脑',
+            description: (
+              <>
+                检测到究极HID 驱动处于「待重启」状态——上次卸载尚未由 PnP 完成清理。
+                请重启电脑后再尝试切换到此模式。
+              </>
+            ),
+            confirmText: '我已知晓',
+            cancelText: '稍后处理',
+          });
+          return;
+        }
         const ok = await confirm({
           title: '安装究极HID 驱动',
           description: (
@@ -1153,12 +1182,16 @@ export default function PanelApp() {
             m === 'sendinput'
               ? '最稳定，但很多游戏不响应'
               : m === 'interception'
-                ? interceptionInstalled
+                ? interceptionInstalled === 'installed'
                   ? '兼容多数游戏'
-                  : '点击安装驱动'
-                : ddHidInstalled
+                  : interceptionInstalled === 'pending_reboot'
+                    ? '驱动待重启生效'
+                    : '点击安装驱动'
+                : ddHidInstalled === 'installed'
                   ? '极致兼容，HVCI 友好'
-                  : '点击安装驱动',
+                  : ddHidInstalled === 'pending_reboot'
+                    ? '驱动待重启清理'
+                    : '点击安装驱动',
           active: inputMode === m,
           onClick: () => void selectInputMode(m),
         }))}

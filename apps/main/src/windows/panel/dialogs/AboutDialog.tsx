@@ -4,11 +4,13 @@ import Button from '../components/Button';
 import './dialog-base.css';
 import './AboutDialog.css';
 
+type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
+
 export interface AboutDialogInfo {
   appVersion: string;
   elevated: boolean;
-  interception_installed: boolean;
-  dd_hid_installed: boolean;
+  interception_installed: DriverStatus;
+  dd_hid_installed: DriverStatus;
   input_mode: string;
   platform: string;
   os_family: string;
@@ -54,6 +56,19 @@ function YesNo({ value, yes = '是', no = '否' }: { value: boolean; yes?: strin
       {value ? yes : no}
     </span>
   );
+}
+
+function DriverFlag({ status }: { status: DriverStatus }) {
+  // 待重启用 warn 色：既非"已生效"，也非"完全没装"，提醒用户重启而不是再点一次安装
+  const cls =
+    status === 'installed'
+      ? 'about-flag--on'
+      : status === 'pending_reboot'
+        ? 'about-flag--warn'
+        : 'about-flag--off';
+  const label =
+    status === 'installed' ? '已安装' : status === 'pending_reboot' ? '待重启' : '未安装';
+  return <span className={`about-flag ${cls}`}>{label}</span>;
 }
 
 export default function AboutDialog({
@@ -211,8 +226,8 @@ export default function AboutDialog({
             <li>
               <span className="about-key">游戏模式驱动</span>
               <span className="about-value about-value--with-action">
-                <YesNo value={info.interception_installed} yes="已安装" no="未安装" />
-                {info.interception_installed && (
+                <DriverFlag status={info.interception_installed} />
+                {info.interception_installed === 'installed' && (
                   <Button
                     size="sm"
                     variant="outline"
@@ -227,8 +242,8 @@ export default function AboutDialog({
             <li>
               <span className="about-key">究极HID 驱动</span>
               <span className="about-value about-value--with-action">
-                <YesNo value={info.dd_hid_installed} yes="已安装" no="未安装" />
-                {info.dd_hid_installed && (
+                <DriverFlag status={info.dd_hid_installed} />
+                {info.dd_hid_installed === 'installed' && (
                   <Button size="sm" variant="outline" tone="danger" onClick={onUninstallDdHid}>
                     卸载
                   </Button>

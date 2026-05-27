@@ -1,12 +1,15 @@
 //! 环境诊断与修复。
 //!
-//! 解决用户在卸载 / 强删驱动文件后陷入"半卸载"状态：
+//! 解决用户在卸载 / 强删驱动文件后陷入"半卸载"状态，以及全新装机环境下
+//! 因 Windows 安全策略 / 杀软拦截导致驱动首次安装失败的问题：
 //! - DD-HID：sys 没了但 PnP 服务键 / OEM INF 残留 → 重装报 install error
 //! - Interception：服务键残留但 sys 缺失 → 安装器复装失败
 //! - .qzh 损坏：AES Tag 校验失败时启动会回退默认配置，但损坏文件还在原地占位
+//! - 安装前置环境：HVCI 阻断内核驱动加载、SAC 阻断未知信誉 exe、
+//!   Defender 实时保护拦截 ddc.exe / ddhid63340.sys、待重启的 PnP 事务等
 //!
 //! 模块对外暴露三类入口：
-//! 1. [`diagnose_environment`]：只读，不提权，列出所有可疑残留
+//! 1. [`diagnose_environment`]：只读，不提权，列出所有可疑残留与安装前置异常
 //! 2. `repair_*`：每类问题一个修复命令，全部走现有 `run_elevated_exe_capture`
 //! 3. 修复前自动 `Export-WindowsDriver` / `reg export` 到
 //!    `{app_local_data_dir}/repair_backup/<timestamp>/`，留回滚余地
@@ -160,6 +163,7 @@ pub async fn diagnose_environment(app: AppHandle) -> Result<RepairReport, String
 
     #[cfg(windows)]
     {
+        items.extend(diagnose_install_prerequisites(&app).await);
         items.extend(diagnose_dd_hid(&app));
         items.extend(diagnose_interception(&app));
     }
@@ -176,6 +180,501 @@ pub async fn diagnose_environment(app: AppHandle) -> Result<RepairReport, String
     })
 }
 
+// ===== 安装前置检查（Windows 安全策略 / 杀软 / 资源 / 架构）=====
+
+/// HVCI / 内存完整性是否启用。
+///
+/// 注册表里 `Enabled=1` 表示策略要求启用；但 Windows 重启后 HVCI 才真正激活，
+/// 因此还要看 `RunningEnforcement` 状态。两个都为 1 才是"已生效"。
+/// 任何一个非 0 就要给用户提示——它会拒绝加载非 HVCI 兼容的内核驱动。
+#[cfg(windows)]
+fn detect_hvci_active() -> Option<bool> {
+    let policy = read_hklm_dword(
+        "SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity",
+        "Enabled",
+    );
+    let running = read_hklm_dword(
+        "SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity",
+        "RunningEnforcement",
+    );
+    match (policy, running) {
+        (None, None) => None,
+        (p, r) => Some(p.unwrap_or(0) == 1 || r.unwrap_or(0) == 1),
+    }
+}
+
+/// Smart App Control 状态。
+///
+/// `VerifiedAndReputablePolicyState` 取值：
+///   0 = Off, 1 = Enforce, 2 = Evaluation
+/// Enforce / Evaluation 都会阻止 ddc.exe 这类无强信誉的可执行文件运行。
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SacState {
+    Off,
+    Enforce,
+    Evaluation,
+    Unknown,
+}
+
+#[cfg(windows)]
+fn detect_sac_state() -> SacState {
+    match read_hklm_dword(
+        "SYSTEM\\CurrentControlSet\\Control\\CI\\Policy",
+        "VerifiedAndReputablePolicyState",
+    ) {
+        Some(0) => SacState::Off,
+        Some(1) => SacState::Enforce,
+        Some(2) => SacState::Evaluation,
+        Some(_) => SacState::Unknown,
+        None => SacState::Off, // 多数设备不存在该键 = 未启用
+    }
+}
+
+/// 系统是否有挂起的重启请求。
+///
+/// 任何一个常见标记命中即视为 pending：
+/// - `PendingFileRenameOperations` (SessionManager)
+/// - `RebootPending` 子键（Component Based Servicing）
+/// - `RebootRequired` 子键（WindowsUpdate / AutoUpdate）
+///
+/// 这种状态下任何 PnP 安装事务都会被推迟到下次开机，重装驱动必然失败。
+#[cfg(windows)]
+fn detect_pending_reboot() -> bool {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
+    };
+    // 1. PendingFileRenameOperations（REG_MULTI_SZ，存在即代表有 pending 文件改名）
+    let mut sm: HKEY = std::ptr::null_mut();
+    let path = wide("SYSTEM\\CurrentControlSet\\Control\\Session Manager");
+    // SAFETY: path NUL 结尾；sm 是栈上出参指针
+    let r = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, path.as_ptr(), 0, KEY_READ, &mut sm) };
+    if r == 0 {
+        let name = wide("PendingFileRenameOperations");
+        let mut ty: u32 = 0;
+        let mut len: u32 = 0;
+        // SAFETY: sm 已 open；data 传 null 仅探测大小
+        let q = unsafe {
+            RegQueryValueExW(
+                sm,
+                name.as_ptr(),
+                std::ptr::null_mut(),
+                &mut ty,
+                std::ptr::null_mut(),
+                &mut len,
+            )
+        };
+        // SAFETY: sm 上面 open 成功
+        unsafe { RegCloseKey(sm) };
+        if q == 0 && len > 2 {
+            return true;
+        }
+    }
+    // 2. CBS / WindowsUpdate 的 RebootPending 子键
+    if hklm_subkey_present(
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending",
+    ) {
+        return true;
+    }
+    if hklm_subkey_present(
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired",
+    ) {
+        return true;
+    }
+    false
+}
+
+/// 用 `Get-MpPreference` 异步查询 Defender 排除路径列表。
+///
+/// 返回 None 表示查询失败（PowerShell 不可用 / 进程被卡住等），UI 应显示"无法判断"。
+/// 正常返回的字符串列表里每行是一条排除路径，调用方对比 install_path 即可。
+#[cfg(windows)]
+async fn read_defender_exclusion_paths() -> Option<Vec<String>> {
+    use std::os::windows::process::CommandExt;
+    use std::process::{Command, Stdio};
+    // 单行管道：用 ConvertTo-Json 避免本地化和换行差异，失败时不打印噪音
+    // -Compress 让输出贴一行，更好解析；-Depth 1 足够字符串数组
+    let script = "$ErrorActionPreference='Stop'; \
+                  try { \
+                      $p = Get-MpPreference -ErrorAction Stop; \
+                      $arr = @($p.ExclusionPath); \
+                      ConvertTo-Json -InputObject $arr -Compress -Depth 2 \
+                  } catch { '[]' }";
+
+    // 不提权运行：Get-MpPreference 普通用户即可读
+    // 用 spawn_blocking 隔离阻塞调用，避免堵 Tauri 异步执行器
+    tauri::async_runtime::spawn_blocking(move || {
+        let out = Command::new("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                script,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .stdin(Stdio::null())
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .output()
+            .ok()?;
+        if !out.status.success() {
+            return None;
+        }
+        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        parse_exclusion_json(&text)
+    })
+    .await
+    .ok()
+    .flatten()
+}
+///
+/// 为了不引入完整 JSON parser，这里只识别 `[..]` 内被双引号括起来的字段；
+/// 非数组形式（PowerShell 在数组只有一个元素时输出裸字符串）直接当成单元素。
+#[cfg(windows)]
+/// 简单 JSON 字符串数组解析：能容忍 `null` / `""` / 单字符串退化为非数组。
+///
+/// 为了不引入完整 JSON parser，这里只识别 `[..]` 内被双引号括起来的字段；
+/// 非数组形式（PowerShell 在数组只有一个元素时输出裸字符串）直接当成单元素。
+pub(crate) fn parse_exclusion_json(text: &str) -> Option<Vec<String>> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || trimmed == "null" {
+        return Some(Vec::new());
+    }
+    // PowerShell ConvertTo-Json 单元素数组 + -Compress 仍会输出 `["x"]`，
+    // 但更老的版本会退化成裸字符串，这里两路都接住
+    if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        return Some(vec![unescape_json_string(inner)]);
+    }
+    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
+        return None;
+    }
+    let mut out = Vec::new();
+    let bytes = trimmed.as_bytes();
+    let mut i = 1usize;
+    while i < bytes.len() - 1 {
+        // 跳过空白与逗号
+        while i < bytes.len() - 1
+            && (bytes[i] == b' '
+                || bytes[i] == b','
+                || bytes[i] == b'\n'
+                || bytes[i] == b'\r'
+                || bytes[i] == b'\t')
+        {
+            i += 1;
+        }
+        if i >= bytes.len() - 1 {
+            break;
+        }
+        if bytes[i] != b'"' {
+            // 非引号开头视为格式异常
+            return None;
+        }
+        i += 1;
+        let start = i;
+        while i < bytes.len() - 1 {
+            if bytes[i] == b'\\' && i + 1 < bytes.len() - 1 {
+                i += 2;
+                continue;
+            }
+            if bytes[i] == b'"' {
+                break;
+            }
+            i += 1;
+        }
+        if i >= bytes.len() - 1 {
+            return None;
+        }
+        let raw = &trimmed[start..i];
+        out.push(unescape_json_string(raw));
+        i += 1; // 跳过结束引号
+    }
+    Some(out)
+}
+
+#[cfg(windows)]
+fn unescape_json_string(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('\\') => out.push('\\'),
+            Some('"') => out.push('"'),
+            Some('/') => out.push('/'),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('b') => out.push('\u{0008}'),
+            Some('f') => out.push('\u{000C}'),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
+/// 给定排除路径列表，判断 `target_dir` 是否已被覆盖。
+///
+/// 命中规则：忽略大小写 + 去尾斜杠后，target 必须等于某条排除项，
+/// 或 target 以"排除项 + `\`"开头（排除项是父目录）。
+/// 这样既支持用户加了具体安装目录，也支持加了上级 ProgramFiles 目录。
+pub(crate) fn is_path_excluded(target: &str, exclusions: &[String]) -> bool {
+    let t = normalize_path(target);
+    if t.is_empty() {
+        return false;
+    }
+    for e in exclusions {
+        let n = normalize_path(e);
+        if n.is_empty() {
+            continue;
+        }
+        if t == n {
+            return true;
+        }
+        let prefix = format!("{n}\\");
+        if t.starts_with(&prefix) {
+            return true;
+        }
+    }
+    false
+}
+
+fn normalize_path(p: &str) -> String {
+    let mut s = p.trim().replace('/', "\\").to_lowercase();
+    while s.ends_with('\\') {
+        s.pop();
+    }
+    s
+}
+
+/// 把架构与 sys 文件位宽匹配为友好状态。
+///
+/// 仓库内目前只发 `ddhid63340.sys` 的 x64 版本，ARM64 设备无法加载。
+/// 返回 (是否兼容, 详情文案)。
+fn classify_arch_compat(arch: &str) -> (bool, String) {
+    let lower = arch.to_lowercase();
+    if lower == "x64" || lower == "amd64" {
+        (true, format!("当前架构 {arch}，与 x64 驱动匹配"))
+    } else if lower == "arm64" || lower == "aarch64" {
+        (
+            false,
+            format!("当前架构 {arch}，DD-HID 仅提供 x64 驱动，无法加载"),
+        )
+    } else {
+        (false, format!("当前架构 {arch}，DD-HID 仅适用于 x64 系统"))
+    }
+}
+
+#[cfg(windows)]
+async fn diagnose_install_prerequisites(app: &AppHandle) -> Vec<DiagnosticItem> {
+    let mut out = Vec::new();
+
+    // ---- 资源完整性（先于一切其它检查，缺文件直接出错）----
+    let (resources_ok, missing) = collect_install_resources(app);
+    out.push(DiagnosticItem {
+        id: "prereq.resources".to_string(),
+        category: "安装前置检查".to_string(),
+        label: "驱动安装资源".to_string(),
+        severity: if resources_ok {
+            Severity::Info
+        } else {
+            Severity::Error
+        },
+        status: if resources_ok {
+            ItemStatus::Ok
+        } else {
+            ItemStatus::Missing
+        },
+        detail: if resources_ok {
+            "ddc.exe / ddhid63340.sys / .inf / .cat 全部就位".to_string()
+        } else {
+            format!("缺失或被拦截：{}", missing.join(", "))
+        },
+        recommended_action: None,
+    });
+
+    // ---- 系统架构 ----
+    let arch = crate::commands::sysinfo::host_arch();
+    let (arch_ok, arch_detail) = classify_arch_compat(&arch);
+    out.push(DiagnosticItem {
+        id: "prereq.arch".to_string(),
+        category: "安装前置检查".to_string(),
+        label: "系统架构".to_string(),
+        severity: if arch_ok {
+            Severity::Info
+        } else {
+            Severity::Error
+        },
+        status: if arch_ok {
+            ItemStatus::Ok
+        } else {
+            ItemStatus::Missing
+        },
+        detail: arch_detail,
+        recommended_action: None,
+    });
+
+    // ---- HVCI / 内存完整性 ----
+    let hvci = detect_hvci_active();
+    out.push(DiagnosticItem {
+        id: "prereq.hvci".to_string(),
+        category: "安装前置检查".to_string(),
+        label: "内存完整性 (HVCI)".to_string(),
+        severity: match hvci {
+            Some(true) => Severity::Error,
+            _ => Severity::Info,
+        },
+        status: match hvci {
+            Some(true) => ItemStatus::Orphan, // 借用 Orphan 表示"启用了应该关闭的策略"
+            Some(false) => ItemStatus::Ok,
+            None => ItemStatus::Unknown,
+        },
+        detail: match hvci {
+            Some(true) => "内核隔离已启用，会拒绝加载未通过 HVCI 兼容认证的驱动。\
+                请在 Windows 安全中心 → 设备安全性 → 内核隔离详细信息 → 关闭"
+                .to_string(),
+            Some(false) => "内核隔离未启用".to_string(),
+            None => "未读取到 HVCI 策略键，可能为旧版 Windows".to_string(),
+        },
+        recommended_action: None,
+    });
+
+    // ---- Smart App Control ----
+    let sac = detect_sac_state();
+    out.push(DiagnosticItem {
+        id: "prereq.sac".to_string(),
+        category: "安装前置检查".to_string(),
+        label: "Smart App Control".to_string(),
+        severity: match sac {
+            SacState::Enforce | SacState::Evaluation => Severity::Error,
+            _ => Severity::Info,
+        },
+        status: match sac {
+            SacState::Enforce | SacState::Evaluation => ItemStatus::Orphan,
+            SacState::Off => ItemStatus::Ok,
+            SacState::Unknown => ItemStatus::Unknown,
+        },
+        detail: match sac {
+            SacState::Enforce => "已强制启用，会拦截无强信誉的 ddc.exe。\
+                请在 Windows 设置 → 隐私与安全 → 应用控制中关闭"
+                .to_string(),
+            SacState::Evaluation => "处于评估模式，仍会拦截未知信誉应用。\
+                请在 Windows 设置 → 隐私与安全 → 应用控制中关闭"
+                .to_string(),
+            SacState::Off => "未启用".to_string(),
+            SacState::Unknown => "状态未知".to_string(),
+        },
+        recommended_action: None,
+    });
+
+    // ---- 待重启 ----
+    let pending = detect_pending_reboot();
+    out.push(DiagnosticItem {
+        id: "prereq.pending_reboot".to_string(),
+        category: "安装前置检查".to_string(),
+        label: "系统待重启".to_string(),
+        severity: if pending {
+            Severity::Warn
+        } else {
+            Severity::Info
+        },
+        status: if pending {
+            ItemStatus::Orphan
+        } else {
+            ItemStatus::Ok
+        },
+        detail: if pending {
+            "系统存在挂起的重启请求（更新 / 驱动事务），先重启再装驱动可避免 install error"
+                .to_string()
+        } else {
+            "无挂起的重启请求".to_string()
+        },
+        recommended_action: None,
+    });
+
+    // ---- Defender 白名单 ----
+    // 不提供一键加白：调用 Add-MpPreference 容易被 Defender 自身的"行为分析"或第三方
+    // 杀软拦截，反而把 FlairBloom 标红。这里只做检测和文字引导，让用户自己去
+    // Windows 安全中心 → 病毒和威胁防护 → 排除项 添加。
+    let install_dir = crate::commands::sysinfo::install_path();
+    let exclusions = read_defender_exclusion_paths().await;
+    let (severity, status, detail) = match &exclusions {
+        None => (
+            Severity::Warn,
+            ItemStatus::Unknown,
+            "无法读取 Defender 排除项（可能被组策略限制或 PowerShell 不可用）".to_string(),
+        ),
+        Some(list) => {
+            if install_dir.is_empty() {
+                (
+                    Severity::Info,
+                    ItemStatus::Unknown,
+                    "无法定位安装目录，跳过白名单核对".to_string(),
+                )
+            } else if is_path_excluded(&install_dir, list) {
+                (
+                    Severity::Info,
+                    ItemStatus::Ok,
+                    format!("安装目录已在 Defender 排除列表：{install_dir}"),
+                )
+            } else {
+                (
+                    Severity::Warn,
+                    ItemStatus::Missing,
+                    format!(
+                        "安装目录未加入 Defender 排除列表：{install_dir}\n\
+                        若驱动安装屡次失败，可在 Windows 安全中心 → 病毒和威胁防护 → \
+                        管理设置 → 排除项 中手动添加该目录"
+                    ),
+                )
+            }
+        }
+    };
+    out.push(DiagnosticItem {
+        id: "prereq.defender_exclusion".to_string(),
+        category: "安装前置检查".to_string(),
+        label: "Windows Defender 白名单".to_string(),
+        severity,
+        status,
+        detail,
+        recommended_action: None,
+    });
+
+    out
+}
+
+/// 资源完整性自检（独立于 status.rs 的结果，避免它被缓存）。
+#[cfg(windows)]
+fn collect_install_resources(app: &AppHandle) -> (bool, Vec<String>) {
+    let resources = match app.path().resource_dir() {
+        Ok(d) => d.join("resources"),
+        Err(_) => return (false, vec!["<resource_dir 不可达>".to_string()]),
+    };
+    let mut missing = Vec::new();
+    let expected = [
+        "install-interception.exe",
+        "ddhid-driver/ddc.exe",
+        "ddhid-driver/ddhid63340.sys",
+        "ddhid-driver/ddhid63340.inf",
+        "ddhid-driver/ddhid63340.cat",
+    ];
+    for rel in expected {
+        if !resources.join(rel).exists() {
+            missing.push(rel.to_string());
+        }
+    }
+    (missing.is_empty(), missing)
+}
+
 #[cfg(windows)]
 fn diagnose_dd_hid(_app: &AppHandle) -> Vec<DiagnosticItem> {
     let mut out = Vec::new();
@@ -188,11 +687,7 @@ fn diagnose_dd_hid(_app: &AppHandle) -> Vec<DiagnosticItem> {
         id: "dd_hid.sys".to_string(),
         category: "DD-HID 驱动".to_string(),
         label: "驱动文件 ddhid63340.sys".to_string(),
-        severity: if sys_present {
-            Severity::Info
-        } else {
-            Severity::Info
-        },
+        severity: Severity::Info,
         status: if sys_present {
             ItemStatus::Ok
         } else {
@@ -501,12 +996,69 @@ fn wide(s: &str) -> Vec<u16> {
 }
 
 #[cfg(windows)]
-fn service_key_present(name: &str) -> bool {
+pub(crate) fn service_key_present(name: &str) -> bool {
     use windows_sys::Win32::System::Registry::{
         RegCloseKey, RegOpenKeyExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
     };
     let path = format!("SYSTEM\\CurrentControlSet\\Services\\{name}");
     let wpath = wide(&path);
+    let mut hkey: HKEY = std::ptr::null_mut();
+    // SAFETY: wpath NUL 结尾；hkey 是栈上出参指针
+    let r = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, wpath.as_ptr(), 0, KEY_READ, &mut hkey) };
+    if r != 0 {
+        return false;
+    }
+    // SAFETY: 上面 RegOpenKeyExW 成功
+    unsafe { RegCloseKey(hkey) };
+    true
+}
+
+/// 读取 HKLM 下指定子键的 DWORD 值。读不到（键不存在 / 值不存在 / 类型不符）返回 None。
+///
+/// 用于 HVCI / Smart App Control / Pending Reboot 这类只看一个 DWORD 标志位的检测。
+#[cfg(windows)]
+fn read_hklm_dword(subkey: &str, name: &str) -> Option<u32> {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ, REG_DWORD,
+    };
+    let wpath = wide(subkey);
+    let mut hkey: HKEY = std::ptr::null_mut();
+    // SAFETY: wpath NUL 结尾；hkey 是栈上出参指针
+    let r = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, wpath.as_ptr(), 0, KEY_READ, &mut hkey) };
+    if r != 0 {
+        return None;
+    }
+    let wname = wide(name);
+    let mut ty: u32 = 0;
+    let mut data: u32 = 0;
+    let mut len: u32 = std::mem::size_of::<u32>() as u32;
+    // SAFETY: hkey 已 open；data 是栈上 u32 与 len 匹配
+    let q = unsafe {
+        RegQueryValueExW(
+            hkey,
+            wname.as_ptr(),
+            std::ptr::null_mut(),
+            &mut ty,
+            &mut data as *mut u32 as *mut u8,
+            &mut len,
+        )
+    };
+    // SAFETY: hkey 上面 open 成功
+    unsafe { RegCloseKey(hkey) };
+    if q == 0 && ty == REG_DWORD {
+        Some(data)
+    } else {
+        None
+    }
+}
+
+/// HKLM 子键是否存在（仅判存，不关心内容）。
+#[cfg(windows)]
+fn hklm_subkey_present(subkey: &str) -> bool {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegOpenKeyExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
+    };
+    let wpath = wide(subkey);
     let mut hkey: HKEY = std::ptr::null_mut();
     // SAFETY: wpath NUL 结尾；hkey 是栈上出参指针
     let r = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, wpath.as_ptr(), 0, KEY_READ, &mut hkey) };
@@ -569,7 +1121,7 @@ fn read_service_image_path(name: &str) -> Option<String> {
 
 /// 服务键名 + 期望的驱动文件名后缀（如 `keyboard.sys`），同时满足才视为 Interception 服务。
 #[cfg(windows)]
-fn is_interception_service(name: &str, expected_sys: &str) -> bool {
+pub(crate) fn is_interception_service(name: &str, expected_sys: &str) -> bool {
     if !service_key_present(name) {
         return false;
     }
@@ -1143,9 +1695,8 @@ fn removal_step(
         StepStatus::Skipped
     } else if after == 0 {
         StepStatus::Ok
-    } else if after < before {
-        StepStatus::Failed
     } else {
+        // 残留数 > 0：无论比之前少多少都视为失败，没法保证下次安装走干净
         StepStatus::Failed
     };
     RepairStep {
@@ -1318,5 +1869,79 @@ mod tests {
         // 2026-01-01 是 ymd_from_days(20454)；可以反推单日偏移
         let d_2026_01_01 = ymd_from_days(20454);
         assert_eq!(d_2026_01_01, (2026, 1, 1));
+    }
+
+    // ===== 安装前置检查 =====
+
+    #[cfg(windows)]
+    #[test]
+    fn parse_exclusion_json_handles_common_shapes() {
+        // 常规数组
+        assert_eq!(
+            parse_exclusion_json(r#"["C:\\Foo","C:\\Bar"]"#).unwrap(),
+            vec!["C:\\Foo".to_string(), "C:\\Bar".to_string()]
+        );
+        // 空数组 / null / 空串
+        assert_eq!(parse_exclusion_json("[]").unwrap(), Vec::<String>::new());
+        assert_eq!(parse_exclusion_json("null").unwrap(), Vec::<String>::new());
+        assert_eq!(parse_exclusion_json("").unwrap(), Vec::<String>::new());
+        // PowerShell 单元素退化为裸字符串
+        assert_eq!(
+            parse_exclusion_json(r#""C:\\Only One""#).unwrap(),
+            vec!["C:\\Only One".to_string()]
+        );
+        // 含转义引号
+        assert_eq!(
+            parse_exclusion_json(r#"["C:\\O\"B"]"#).unwrap(),
+            vec!["C:\\O\"B".to_string()]
+        );
+        // 非法格式返回 None
+        assert!(parse_exclusion_json("garbage").is_none());
+    }
+
+    #[test]
+    fn is_path_excluded_matches_dir_and_parent() {
+        // 完全等价（大小写无关 + 斜杠归一化）
+        assert!(is_path_excluded(
+            "C:\\Program Files\\FlairBloom",
+            &["c:\\program files\\flairbloom".to_string()]
+        ));
+        // 父目录覆盖子目录
+        assert!(is_path_excluded(
+            "C:\\Program Files\\FlairBloom\\bin",
+            &["C:\\Program Files\\FlairBloom".to_string()]
+        ));
+        // 子目录不覆盖父目录
+        assert!(!is_path_excluded(
+            "C:\\Program Files\\FlairBloom",
+            &["C:\\Program Files\\FlairBloom\\bin".to_string()]
+        ));
+        // 前缀字符串相同但不是父目录
+        assert!(!is_path_excluded(
+            "C:\\Program Files\\FlairBloomCorp",
+            &["C:\\Program Files\\FlairBloom".to_string()]
+        ));
+        // 排除项尾部带反斜杠也能匹配
+        assert!(is_path_excluded("C:\\App", &["C:\\App\\".to_string()]));
+        // 空目标 / 空排除项不会误判
+        assert!(!is_path_excluded("", &["C:\\App".to_string()]));
+        assert!(!is_path_excluded("C:\\App", &["".to_string()]));
+        // 正反斜杠混用归一化
+        assert!(is_path_excluded("C:/App/Bin", &["C:\\App".to_string()]));
+    }
+
+    #[test]
+    fn classify_arch_compat_matrix() {
+        let (ok, _) = classify_arch_compat("x64");
+        assert!(ok);
+        let (ok, _) = classify_arch_compat("AMD64");
+        assert!(ok);
+        let (ok, msg) = classify_arch_compat("ARM64");
+        assert!(!ok);
+        assert!(msg.contains("ARM64"));
+        let (ok, _) = classify_arch_compat("x86");
+        assert!(!ok);
+        let (ok, _) = classify_arch_compat("unknown(99)");
+        assert!(!ok);
     }
 }

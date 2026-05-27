@@ -9,11 +9,24 @@ use tauri::{AppHandle, Emitter, Manager};
 
 pub const STATUS_CHANGED_EVENT: &str = "app-status-changed";
 
+/// 驱动安装的三态。
+///
+/// `Installed` / `NotInstalled` 都很直观。`PendingReboot` 是关键的中间态：
+/// 卸载（或安装）已发起但未完成 PnP 物理清理 / 注册——此时既不能再装一次
+/// （会撞 install error），也不能直接当作"已安装"使用。
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DriverStatus {
+    Installed,
+    PendingReboot,
+    NotInstalled,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct AppStatus {
     pub elevated: bool,
-    pub interception_installed: bool,
-    pub dd_hid_installed: bool,
+    pub interception_installed: DriverStatus,
+    pub dd_hid_installed: DriverStatus,
     pub input_mode: String,
     pub platform: &'static str,
     pub os_family: &'static str,
@@ -85,23 +98,41 @@ fn collect_elevated() -> bool {
 }
 
 #[cfg(windows)]
-fn collect_interception_installed() -> bool {
-    crate::engine::interception::is_driver_installed()
+fn collect_interception_installed() -> DriverStatus {
+    let api_ok = crate::engine::interception::is_driver_installed();
+    if api_ok {
+        return DriverStatus::Installed;
+    }
+    // API 不可用但服务键残留 → 卸载未完成或装了未重启
+    let kbd = crate::commands::repair::is_interception_service("keyboard", "keyboard.sys");
+    let mouse = crate::commands::repair::is_interception_service("mouse", "mouse.sys");
+    if kbd || mouse {
+        DriverStatus::PendingReboot
+    } else {
+        DriverStatus::NotInstalled
+    }
 }
 
 #[cfg(not(windows))]
-fn collect_interception_installed() -> bool {
-    false
+fn collect_interception_installed() -> DriverStatus {
+    DriverStatus::NotInstalled
 }
 
 #[cfg(windows)]
-fn collect_dd_hid_installed() -> bool {
-    crate::commands::engine::dd_hid_sys_installed()
+fn collect_dd_hid_installed() -> DriverStatus {
+    let sys = crate::commands::engine::dd_hid_sys_installed();
+    let service = crate::commands::repair::service_key_present("ddhid63340");
+    match (sys, service) {
+        (true, true) => DriverStatus::Installed,
+        (false, false) => DriverStatus::NotInstalled,
+        // sys 在但服务键缺 / 服务键在但 sys 缺：都是半卸载残留，重启由 PnP 完成清理
+        _ => DriverStatus::PendingReboot,
+    }
 }
 
 #[cfg(not(windows))]
-fn collect_dd_hid_installed() -> bool {
-    false
+fn collect_dd_hid_installed() -> DriverStatus {
+    DriverStatus::NotInstalled
 }
 
 #[cfg(windows)]
@@ -164,8 +195,8 @@ mod tests {
     fn sample_status() -> AppStatus {
         AppStatus {
             elevated: true,
-            interception_installed: true,
-            dd_hid_installed: false,
+            interception_installed: DriverStatus::Installed,
+            dd_hid_installed: DriverStatus::PendingReboot,
             input_mode: "dd_hid".to_string(),
             platform: "windows",
             os_family: "windows",
@@ -210,6 +241,9 @@ mod tests {
         assert_eq!(obj["input_mode"], "dd_hid");
         assert_eq!(obj["arch"], "x64");
         assert_eq!(obj["locale"], "zh-CN");
+        // 三态序列化为 snake_case 字符串，前端按枚举值匹配
+        assert_eq!(obj["interception_installed"], "installed");
+        assert_eq!(obj["dd_hid_installed"], "pending_reboot");
         assert!(obj["missing_resources"].is_array());
     }
 }

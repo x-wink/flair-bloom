@@ -52,7 +52,7 @@ fn open_dir_in_explorer(dir: &std::path::Path) -> Result<(), String> {
         std::process::Command::new("explorer")
             .arg(dir)
             .spawn()
-            .map_err(|e| format!("无法打开文件夹: {}", e))?;
+            .map_err(|e| format!("无法打开文件夹: {e}"))?;
     }
     #[cfg(target_os = "macos")]
     {
@@ -66,7 +66,7 @@ fn open_dir_in_explorer(dir: &std::path::Path) -> Result<(), String> {
         std::process::Command::new("xdg-open")
             .arg(dir)
             .spawn()
-            .map_err(|e| format!("无法打开文件夹: {}", e))?;
+            .map_err(|e| format!("无法打开文件夹: {e}"))?;
     }
     Ok(())
 }

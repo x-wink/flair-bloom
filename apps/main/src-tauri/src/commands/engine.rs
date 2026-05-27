@@ -101,7 +101,7 @@ pub fn set_input_mode(
         use tauri_plugin_store::StoreExt;
 
         let input_mode =
-            InputMode::from_str(&mode).ok_or_else(|| format!("未知输入模式: {}", mode))?;
+            InputMode::from_str(&mode).ok_or_else(|| format!("未知输入模式: {mode}"))?;
 
         // 切到 DD-HID 时要求当前已是管理员，否则前端应先发起提权重启
         if input_mode.requires_admin() && !is_process_elevated() {
@@ -167,7 +167,7 @@ async fn run_elevated_exe(
 ) -> Result<(), String> {
     match run_elevated_exe_capture(app, file_path, params).await? {
         0 => Ok(()),
-        n => Err(format!("程序返回错误码 {}", n)),
+        n => Err(format!("程序返回错误码 {n}")),
     }
 }
 
@@ -200,7 +200,7 @@ pub(crate) async fn run_elevated_exe_capture(
         .collect();
     let verb: Vec<u16> = "runas\0".encode_utf16().collect();
     let params_wide: Vec<u16> = match params {
-        Some(p) => format!("{}\0", p).encode_utf16().collect(),
+        Some(p) => format!("{p}\0").encode_utf16().collect(),
         None => vec![0u16],
     };
     let working_dir: Vec<u16> = file_path
@@ -230,7 +230,7 @@ pub(crate) async fn run_elevated_exe_capture(
             return if err == ERROR_CANCELLED {
                 Err("已取消管理员授权".to_string())
             } else {
-                Err(format!("启动程序失败 (Win32 错误码 {})", err))
+                Err(format!("启动程序失败 (Win32 错误码 {err})"))
             };
         }
 
@@ -260,7 +260,7 @@ pub(crate) async fn run_elevated_exe_capture(
         Ok(exit_code)
     })
     .await
-    .map_err(|e| format!("任务异常: {}", e))?
+    .map_err(|e| format!("任务异常: {e}"))?
 }
 
 #[cfg(windows)]
@@ -268,7 +268,7 @@ fn resource_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let raw = app
         .path()
         .resource_dir()
-        .map_err(|e| format!("无法获取资源目录: {}", e))?
+        .map_err(|e| format!("无法获取资源目录: {e}"))?
         .join("resources");
     // Tauri 的 resource_dir 在 Windows 上返回 \\?\<drive>:\... 形式的 verbatim 路径。
     // 直接用作 ShellExecuteEx 的 lpDirectory 时，被启动进程（如 ddc.exe）再 spawn cmd
@@ -282,7 +282,7 @@ fn resource_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 fn strip_verbatim(path: std::path::PathBuf) -> std::path::PathBuf {
     let s = path.to_string_lossy();
     if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
-        return std::path::PathBuf::from(format!(r"\\{}", rest));
+        return std::path::PathBuf::from(format!(r"\\{rest}"));
     }
     if let Some(rest) = s.strip_prefix(r"\\?\") {
         // 仅当剥离后形如 "<letter>:\..." 时认为是普通本地路径
@@ -510,25 +510,36 @@ pub(crate) fn base64_std_encode(input: &[u8]) -> String {
     out
 }
 
-/// 把「驱动文件是否落盘」与「ddc.exe 退出码」合并成最终的安装判定结果。
+/// 把「驱动文件是否落盘」「服务键是否注册」与「ddc.exe 退出码」合并成最终的安装判定结果。
 ///
 /// `ddc.exe` 在交互式 cmd 中收尾会 `pause`，用户按键后退出码不可信；
-/// 因此即便外部进程返回错误，只要驱动 `.sys` 已经落盘就视为安装成功。
+/// 必须以驱动 `.sys` 落盘 *并且* `HKLM\...\Services\ddhid63340` 服务键存在为最终判据。
+///
+/// 单看 sys 文件会误判一种边界场景：用户卸载后未重启就立刻点重装，
+/// 卸载阶段 PnP 已经把服务键删了，但 sys 文件被设备实例锁住要重启才能清理。
+/// 这种状态下 ddc.exe 走完一遍并不会重新注册服务（PnP 拒绝），sys 看起来还在原地，
+/// 但驱动其实没生效——必须靠 service key 这一维区分。
 // 非 Windows 编译路径下没有调用方（仅 DD-HID 命令使用），但函数本身跨平台，
 // 留它在这里方便测试与未来移植。
 #[cfg_attr(not(windows), allow(dead_code))]
 pub(crate) fn judge_install_result(
     sys_installed: bool,
+    service_present: bool,
     exe_result: Result<(), String>,
 ) -> Result<(), String> {
-    if sys_installed {
-        Ok(())
-    } else {
-        Err(match exe_result {
-            Ok(()) => "驱动安装未生效".to_string(),
-            Err(e) => e,
-        })
+    if sys_installed && service_present {
+        return Ok(());
     }
+    if sys_installed && !service_present {
+        // 半卸载残留：sys 文件还在但服务键已删，PnP 拒绝重新注册
+        return Err("检测到上次卸载留下的驱动残留尚未清理，本次安装未生效。\n\
+             请重启电脑让 PnP 完成清理后再尝试安装。"
+            .to_string());
+    }
+    Err(match exe_result {
+        Ok(()) => "驱动安装未生效".to_string(),
+        Err(e) => e,
+    })
 }
 
 /// 与 [`judge_install_result`] 对称：以驱动文件是否被移除作为卸载成功的最终标志。
@@ -566,18 +577,21 @@ pub async fn install_dd_hid_driver(app: AppHandle) -> Result<(), String> {
     {
         let exe = resource_dir(&app)?.join("ddhid-driver").join("ddc.exe");
         // ddc.exe 在交互式 cmd 中收尾会 `pause`，用户按键后退出码不可信；
-        // 以驱动文件是否落盘为最终判定。
+        // 以驱动文件 + 服务键是否同时就位为最终判定。
         let exe_result = run_elevated_exe(app.clone(), exe, None).await;
         let sys_installed = dd_hid_sys_installed();
-        let result = judge_install_result(sys_installed, exe_result.clone());
+        let service_present = crate::commands::repair::service_key_present("ddhid63340");
+        let result = judge_install_result(sys_installed, service_present, exe_result.clone());
         if let Err(ref e) = result {
-            // sys 没落盘时记一条 error，把 ddc.exe 的退出码 / 错误信息一并落盘，
-            // 方便用户反馈时贴日志诊断 PnP 残留 / 资源缺失等问题。
+            // 真正失败时把退出码 / 错误信息一并落盘，方便用户反馈时贴日志诊断
+            // 半卸载残留 / 资源缺失等问题。
             let exe_state = match &exe_result {
                 Ok(()) => "ddc.exe 报告成功".to_string(),
                 Err(msg) => format!("ddc.exe 失败: {msg}"),
             };
-            tracing::error!("DD-HID 驱动安装失败：{e}（{exe_state}，sys 落盘={sys_installed}）");
+            tracing::error!(
+                "DD-HID 驱动安装失败：{e}（{exe_state}，sys 落盘={sys_installed}，服务键={service_present}）"
+            );
         }
         crate::commands::status::emit_status_changed(&app);
         result
@@ -732,16 +746,16 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
 
         // 校验目标模式合法
         let _ = crate::engine::input::InputMode::from_str(&mode)
-            .ok_or_else(|| format!("未知输入模式: {}", mode))?;
+            .ok_or_else(|| format!("未知输入模式: {mode}"))?;
 
-        let exe = std::env::current_exe().map_err(|e| format!("无法定位当前可执行文件: {}", e))?;
+        let exe = std::env::current_exe().map_err(|e| format!("无法定位当前可执行文件: {e}"))?;
         let path_wide: Vec<u16> = exe
             .as_os_str()
             .encode_wide()
             .chain(std::iter::once(0))
             .collect();
         let verb: Vec<u16> = "runas\0".encode_utf16().collect();
-        let params: Vec<u16> = format!("--elevated --switch-mode={}\0", mode)
+        let params: Vec<u16> = format!("--elevated --switch-mode={mode}\0")
             .encode_utf16()
             .collect();
 
@@ -762,13 +776,13 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
                 return if err == ERROR_CANCELLED {
                     Err("已取消管理员授权".to_string())
                 } else {
-                    Err(format!("启动管理员实例失败 (Win32 错误码 {})", err))
+                    Err(format!("启动管理员实例失败 (Win32 错误码 {err})"))
                 };
             }
             Ok(())
         })
         .await
-        .map_err(|e| format!("任务异常: {}", e))?;
+        .map_err(|e| format!("任务异常: {e}"))?;
 
         result.as_ref().map_err(|e| e.clone())?;
 
