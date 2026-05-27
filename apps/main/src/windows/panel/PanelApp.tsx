@@ -16,7 +16,7 @@ import Overlay from './components/Overlay';
 import ProfileNameForm from './components/ProfileNameForm';
 import { useToast } from './components/Toast';
 import Button from './components/Button';
-import AboutDialog from './dialogs/AboutDialog';
+import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
 import UpdateNoticeDialog, { type UpdateNoticeInfo } from './dialogs/UpdateNoticeDialog';
 import './PanelApp.css';
@@ -28,6 +28,27 @@ const DEFAULT_PROFILE_NAME = 'defults';
 
 type BurstMode = 'hold' | 'toggle';
 type InputMode = 'sendinput' | 'interception' | 'dd_hid';
+
+interface AppStatus {
+  elevated: boolean;
+  interception_installed: boolean;
+  dd_hid_installed: boolean;
+  input_mode: string;
+  platform: string;
+  os_family: string;
+  os_version: string;
+  webview_version: string;
+  arch: string;
+  locale: string;
+  install_path: string;
+  log_dir: string;
+  app_data_dir: string;
+  autostart_enabled: boolean;
+  resources_ok: boolean;
+  missing_resources: string[];
+}
+
+const APP_STATUS_EVENT = 'app-status-changed';
 
 const INPUT_MODE_LABELS: Record<InputMode, string> = {
   sendinput: '通用模式',
@@ -137,6 +158,33 @@ export default function PanelApp() {
   const [interceptionInstalled, setInterceptionInstalled] = useState(false);
   const [ddHidInstalled, setDdHidInstalled] = useState(false);
   const [elevated, setElevated] = useState(false);
+  const [sysInfo, setSysInfo] = useState<{
+    platform: string;
+    os_family: string;
+    os_version: string;
+    webview_version: string;
+    arch: string;
+    locale: string;
+    install_path: string;
+    log_dir: string;
+    app_data_dir: string;
+    autostart_enabled: boolean;
+    resources_ok: boolean;
+    missing_resources: string[];
+  }>({
+    platform: '',
+    os_family: '',
+    os_version: '',
+    webview_version: '',
+    arch: '',
+    locale: '',
+    install_path: '',
+    log_dir: '',
+    app_data_dir: '',
+    autostart_enabled: false,
+    resources_ok: true,
+    missing_resources: [],
+  });
   const [switchingMode, setSwitchingMode] = useState(false);
   const [modePickerOpen, setModePickerOpen] = useState(false);
   const modeBtnRef = useRef<HTMLButtonElement>(null);
@@ -154,6 +202,29 @@ export default function PanelApp() {
   const initialLoadDone = useRef(false);
   const profileNameRef = useRef(profileName);
   const isDefaultProfile = profileName === DEFAULT_PROFILE_NAME;
+
+  const applyAppStatus = useCallback((status: AppStatus) => {
+    setElevated(status.elevated);
+    setInterceptionInstalled(status.interception_installed);
+    setDdHidInstalled(status.dd_hid_installed);
+    setSysInfo({
+      platform: status.platform,
+      os_family: status.os_family,
+      os_version: status.os_version,
+      webview_version: status.webview_version,
+      arch: status.arch,
+      locale: status.locale,
+      install_path: status.install_path,
+      log_dir: status.log_dir,
+      app_data_dir: status.app_data_dir,
+      autostart_enabled: status.autostart_enabled,
+      resources_ok: status.resources_ok,
+      missing_resources: status.missing_resources,
+    });
+    if ((INPUT_MODE_LIST as string[]).includes(status.input_mode)) {
+      setInputMode(status.input_mode as InputMode);
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -181,21 +252,8 @@ export default function PanelApp() {
         toast.error('读取全局开关状态失败');
       });
 
-    invoke<string>('get_input_mode')
-      .then((mode) => {
-        if ((INPUT_MODE_LIST as string[]).includes(mode)) {
-          setInputMode(mode as InputMode);
-        }
-      })
-      .catch(() => {});
-    invoke<boolean>('is_driver_installed')
-      .then(setInterceptionInstalled)
-      .catch(() => {});
-    invoke<boolean>('is_dd_hid_driver_installed')
-      .then(setDdHidInstalled)
-      .catch(() => {});
-    invoke<boolean>('is_elevated')
-      .then(setElevated)
+    invoke<AppStatus>('get_app_status')
+      .then(applyAppStatus)
       .catch(() => {});
 
     // 启动期：以「activeProfilePath → load_profile」为唯一来源；
@@ -249,6 +307,9 @@ export default function PanelApp() {
         if (needed) setShowAgreement(true);
       })
       .catch(() => {});
+    const unlistenStatus = listen<AppStatus>(APP_STATUS_EVENT, (e) => {
+      applyAppStatus(e.payload);
+    });
     const unlistenGlobal = listen<boolean>('global-enabled-changed', (e) => {
       setGlobalEnabled(e.payload);
     });
@@ -268,6 +329,7 @@ export default function PanelApp() {
     });
     return () => {
       unlistenAgreement.then((fn) => fn());
+      unlistenStatus.then((fn) => fn());
       unlistenGlobal.then((fn) => fn());
       unlistenDownloading.then((fn) => fn());
       unlistenReady.then((fn) => fn());
@@ -420,7 +482,6 @@ export default function PanelApp() {
         });
         if (!ok) return;
         await invoke('install_dd_hid_driver');
-        setDdHidInstalled(true);
         toast.success('究极HID 驱动已安装');
       }
 
@@ -450,12 +511,12 @@ export default function PanelApp() {
 
       // 常规切换
       await invoke('set_input_mode', { mode: target });
-      const actual = await invoke<string>('get_input_mode');
+      const status = await invoke<AppStatus>('get_app_status');
+      applyAppStatus(status);
+      const actual = status.input_mode;
       if (actual === target) {
-        setInputMode(target);
         toast.success(`已切换为${INPUT_MODE_LABELS[target]}`);
       } else if ((INPUT_MODE_LIST as string[]).includes(actual)) {
-        setInputMode(actual as InputMode);
         toast.warning(
           target === 'interception'
             ? '驱动未就绪，请重启电脑后再试'
@@ -715,13 +776,6 @@ export default function PanelApp() {
     else getCurrentWindow().hide();
   }
 
-  function handleOpenLogDir() {
-    setMenuOpen(false);
-    invoke('open_log_dir').catch(() => {
-      toast.warning('打开日志文件夹失败');
-    });
-  }
-
   function handleShowAgreement() {
     setMenuOpen(false);
     setShowAgreement(true);
@@ -751,7 +805,6 @@ export default function PanelApp() {
   }
 
   async function handleUninstallDriver() {
-    setMenuOpen(false);
     const ok = await confirm({
       title: '卸载驱动',
       description: (
@@ -769,8 +822,6 @@ export default function PanelApp() {
     if (!ok) return;
     try {
       await invoke('uninstall_driver');
-      if (inputMode === 'interception') setInputMode('sendinput');
-      setInterceptionInstalled(false);
       await confirm({
         title: '卸载完成',
         description: (
@@ -790,7 +841,6 @@ export default function PanelApp() {
   }
 
   async function handleUninstallDdHid() {
-    setMenuOpen(false);
     const ok = await confirm({
       title: '卸载究极HID 驱动',
       description: (
@@ -808,8 +858,6 @@ export default function PanelApp() {
     if (!ok) return;
     try {
       await invoke('uninstall_dd_hid_driver');
-      if (inputMode === 'dd_hid') setInputMode('sendinput');
-      setDdHidInstalled(false);
       toast.success('究极HID 驱动已卸载');
     } catch (e) {
       toast.error(`卸载失败：${e}`);
@@ -1119,29 +1167,8 @@ export default function PanelApp() {
             ) : undefined,
             onClick: handleShowUpdateNotice,
           },
-          { label: '查看日志', onClick: handleOpenLogDir },
           { label: '用户协议', onClick: handleShowAgreement },
           { label: '关于', onClick: handleShowAbout },
-          { type: 'divider' },
-          {
-            label: '卸载驱动',
-            danger: true,
-            disabled: !interceptionInstalled && !ddHidInstalled,
-            children: [
-              {
-                label: '游戏模式驱动',
-                onClick: handleUninstallDriver,
-                danger: true,
-                disabled: !interceptionInstalled,
-              },
-              {
-                label: '究极HID 驱动',
-                onClick: handleUninstallDdHid,
-                danger: true,
-                disabled: !ddHidInstalled,
-              },
-            ],
-          },
         ]}
       />
 
@@ -1156,7 +1183,43 @@ export default function PanelApp() {
       </Overlay>
 
       <Overlay open={showAbout} onClose={() => setShowAbout(false)}>
-        <AboutDialog version={appVersion} onClose={() => setShowAbout(false)} />
+        <AboutDialog
+          info={
+            {
+              appVersion,
+              elevated,
+              interception_installed: interceptionInstalled,
+              dd_hid_installed: ddHidInstalled,
+              input_mode: inputMode,
+              platform: sysInfo.platform,
+              os_family: sysInfo.os_family,
+              os_version: sysInfo.os_version,
+              webview_version: sysInfo.webview_version,
+              arch: sysInfo.arch,
+              locale: sysInfo.locale,
+              install_path: sysInfo.install_path,
+              log_dir: sysInfo.log_dir,
+              app_data_dir: sysInfo.app_data_dir,
+              autostart_enabled: sysInfo.autostart_enabled,
+              resources_ok: sysInfo.resources_ok,
+              missing_resources: sysInfo.missing_resources,
+              global_enabled: globalEnabled,
+              rules_total: rules.length,
+              rules_enabled: rules.filter((r) => r.enabled).length,
+              active_rule_ids: Array.from(activeRuleIds),
+            } satisfies AboutDialogInfo
+          }
+          onClose={() => setShowAbout(false)}
+          onUninstallInterception={handleUninstallDriver}
+          onUninstallDdHid={handleUninstallDdHid}
+          onOpenDir={(kind) => {
+            invoke('open_app_dir', { kind }).catch((err) => {
+              toast.warning(`打开目录失败：${err}`);
+            });
+          }}
+          onCopied={() => toast.success('已复制状态信息')}
+          onCopyFailed={(e) => toast.error(`复制失败：${e}`)}
+        />
       </Overlay>
     </div>
   );

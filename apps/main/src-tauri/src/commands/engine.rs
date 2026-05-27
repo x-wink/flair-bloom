@@ -137,6 +137,7 @@ pub fn set_input_mode(
             store.set("input_mode", serde_json::json!(input_mode.as_str()));
             let _ = store.save();
         }
+        crate::commands::status::emit_status_changed(&app);
         Ok(())
     }
     #[cfg(not(windows))]
@@ -292,7 +293,9 @@ pub async fn install_driver(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
         let exe = resource_dir(&app)?.join("install-interception.exe");
-        run_elevated_exe(app, exe, Some("/install")).await
+        let result = run_elevated_exe(app.clone(), exe, Some("/install")).await;
+        crate::commands::status::emit_status_changed(&app);
+        result
     }
     #[cfg(not(windows))]
     {
@@ -314,7 +317,9 @@ pub async fn uninstall_driver(app: AppHandle) -> Result<(), String> {
         }
 
         let exe = resource_dir(&app)?.join("install-interception.exe");
-        run_elevated_exe(app, exe, Some("/uninstall")).await
+        let result = run_elevated_exe(app.clone(), exe, Some("/uninstall")).await;
+        crate::commands::status::emit_status_changed(&app);
+        result
     }
     #[cfg(not(windows))]
     {
@@ -325,17 +330,59 @@ pub async fn uninstall_driver(app: AppHandle) -> Result<(), String> {
 
 // ===== DD-HID 驱动管理 =====
 
+#[cfg(windows)]
+pub(crate) fn dd_hid_sys_installed() -> bool {
+    let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    std::path::Path::new(&sysroot)
+        .join("System32")
+        .join("drivers")
+        .join("ddhid63340.sys")
+        .exists()
+}
+
+/// 把「驱动文件是否落盘」与「ddc.exe 退出码」合并成最终的安装判定结果。
+///
+/// `ddc.exe` 在交互式 cmd 中收尾会 `pause`，用户按键后退出码不可信；
+/// 因此即便外部进程返回错误，只要驱动 `.sys` 已经落盘就视为安装成功。
+// 非 Windows 编译路径下没有调用方（仅 DD-HID 命令使用），但函数本身跨平台，
+// 留它在这里方便测试与未来移植。
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn judge_install_result(
+    sys_installed: bool,
+    exe_result: Result<(), String>,
+) -> Result<(), String> {
+    if sys_installed {
+        Ok(())
+    } else {
+        Err(match exe_result {
+            Ok(()) => "驱动安装未生效".to_string(),
+            Err(e) => e,
+        })
+    }
+}
+
+/// 与 [`judge_install_result`] 对称：以驱动文件是否被移除作为卸载成功的最终标志。
+#[cfg_attr(not(windows), allow(dead_code))]
+pub(crate) fn judge_uninstall_result(
+    sys_installed: bool,
+    exe_result: Result<(), String>,
+) -> Result<(), String> {
+    if !sys_installed {
+        Ok(())
+    } else {
+        Err(match exe_result {
+            Ok(()) => "驱动卸载未生效".to_string(),
+            Err(e) => e,
+        })
+    }
+}
+
 /// HID 驱动是否已安装：检测 system32\drivers\ddhid63340.sys 是否存在
 #[tauri::command]
 pub fn is_dd_hid_driver_installed() -> bool {
     #[cfg(windows)]
     {
-        let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
-        let drv_path = std::path::Path::new(&sysroot)
-            .join("System32")
-            .join("drivers")
-            .join("ddhid63340.sys");
-        drv_path.exists()
+        dd_hid_sys_installed()
     }
     #[cfg(not(windows))]
     {
@@ -348,7 +395,12 @@ pub async fn install_dd_hid_driver(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
         let exe = resource_dir(&app)?.join("ddhid-driver").join("ddc.exe");
-        run_elevated_exe(app, exe, None).await
+        // ddc.exe 在交互式 cmd 中收尾会 `pause`，用户按键后退出码不可信；
+        // 以驱动文件是否落盘为最终判定。
+        let exe_result = run_elevated_exe(app.clone(), exe, None).await;
+        let result = judge_install_result(dd_hid_sys_installed(), exe_result);
+        crate::commands::status::emit_status_changed(&app);
+        result
     }
     #[cfg(not(windows))]
     {
@@ -371,7 +423,12 @@ pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<(), String> {
         }
 
         let exe = resource_dir(&app)?.join("ddhid-driver").join("ddc.exe");
-        run_elevated_exe(app, exe, Some("-u")).await
+        // ddc.exe 在交互式 cmd 中收尾会 `pause`，用户按键后退出码不可信；
+        // 以驱动文件是否被移除为最终判定。
+        let exe_result = run_elevated_exe(app.clone(), exe, Some("-u")).await;
+        let result = judge_uninstall_result(dd_hid_sys_installed(), exe_result);
+        crate::commands::status::emit_status_changed(&app);
+        result
     }
     #[cfg(not(windows))]
     {
@@ -383,7 +440,7 @@ pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<(), String> {
 // ===== 提权重启 =====
 
 #[cfg(windows)]
-fn is_process_elevated() -> bool {
+pub(crate) fn is_process_elevated() -> bool {
     use std::mem;
     use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::Security::{GetTokenInformation, TokenElevation, TOKEN_ELEVATION};
@@ -497,3 +554,7 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
 #[cfg(all(test, windows))]
 #[path = "engine_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "engine_judge_tests.rs"]
+mod judge_tests;

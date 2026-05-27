@@ -54,9 +54,7 @@ pub fn agree_license(app: AppHandle) -> Result<(), String> {
         "app_version_at_agree",
         serde_json::json!(env!("CARGO_PKG_VERSION")),
     );
-    store
-        .save()
-        .map_err(|e| format!("保存协议状态失败: {e}"))?;
+    store.save().map_err(|e| format!("保存协议状态失败: {e}"))?;
     Ok(())
 }
 
@@ -72,9 +70,7 @@ pub async fn check_update(app: AppHandle, lock: State<'_, UpdateLock>) -> Result
 }
 
 async fn do_check_update(app: &AppHandle) -> Result<(), String> {
-    let updater = app
-        .updater()
-        .map_err(|e| format!("更新模块不可用: {e}"))?;
+    let updater = app.updater().map_err(|e| format!("更新模块不可用: {e}"))?;
     let update = match updater.check().await {
         Ok(Some(u)) => u,
         Ok(None) => {

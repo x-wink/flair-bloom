@@ -21,11 +21,12 @@ use commands::{
         relaunch_as_admin, set_global_enabled, set_input_mode, set_rules, uninstall_dd_hid_driver,
         uninstall_driver, EngineState,
     },
-    log::{log_from_frontend, open_log_dir},
+    log::{log_from_frontend, open_app_dir},
     profile::{
         delete_profile, fork_active_profile, get_active_profile_path, init_default_profile,
         list_profiles, load_profile, rename_profile, save_profile,
     },
+    status::get_app_status,
 };
 use engine::{burst::start_listener, BurstEngine};
 
@@ -161,7 +162,8 @@ pub fn run() {
             check_update,
             exit_app,
             log_from_frontend,
-            open_log_dir,
+            open_app_dir,
+            get_app_status,
         ])
         .setup(move |app| {
             let need_agreement = check_agreement(app.handle());
