@@ -39,10 +39,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Resolve previous release tag
+        id: prev_release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CURRENT_TAG: ${{ github.ref_name }}
+        run: |
+          prev=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --exclude-pre-releases --limit 30 \
+            --json tagName --jq "[.[] | select(.tagName != \"$CURRENT_TAG\")][0].tagName // \"\"")
+          echo "tag=$prev" >> "$GITHUB_OUTPUT"
+          echo "上一次稳定发布：${prev:-<无>}"
+
       - name: Extract changelog
         id: changelog
         shell: bash
-        run: pnpm exec tsx scripts/extract-changelog.ts "${{ github.ref_name }}"
+        run: pnpm exec tsx scripts/extract-changelog.ts "${{ github.ref_name }}" "${{ steps.prev_release.outputs.tag }}"
 
       - name: Build and publish
         uses: tauri-apps/tauri-action@v0
