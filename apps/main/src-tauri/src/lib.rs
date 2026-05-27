@@ -27,8 +27,8 @@ use commands::{
         list_profiles, load_profile, rename_profile, save_profile,
     },
     repair::{
-        diagnose_environment, repair_clean_logs, repair_corrupted_profiles,
-        repair_dd_hid_residue, repair_interception_residue,
+        diagnose_environment, repair_clean_logs, repair_corrupted_profiles, repair_dd_hid_residue,
+        repair_interception_residue,
     },
     status::get_app_status,
 };

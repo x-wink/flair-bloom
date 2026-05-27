@@ -361,89 +361,125 @@ fn dd_hid_sys_path() -> std::path::PathBuf {
         .join("ddhid63340.sys")
 }
 
-/// 兜底删除 `ddhid63340.sys` 的结果。
+/// 调用 `pnputil /enum-drivers`，扫描 `%SystemRoot%\INF\` 下注册的 OEM INF，
+/// 找出归属 ddhid63340 的 oem 编号（如 `["oem15.inf"]`）。
+///
+/// 走 INF 文件内容匹配而非 pnputil 输出解析，因为 pnputil 是本地化文本而 INF 内
+/// 的 `ddhid63340` 关键字与语言无关、稳定。
 #[cfg(windows)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SysRemoveOutcome {
-    /// 已从磁盘移除
-    Removed,
-    /// 文件被内核占用删不掉，但已通过 MoveFileEx 标记重启时删除
-    PendingReboot,
+fn find_dd_hid_oem_inf() -> Vec<String> {
+    let inf_dir = std::env::var("SystemRoot")
+        .map(|r| std::path::Path::new(&r).join("INF"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("C:\\Windows\\INF"));
+    let entries = match std::fs::read_dir(&inf_dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy().to_lowercase();
+        if !name_str.starts_with("oem") || !name_str.ends_with(".inf") {
+            continue;
+        }
+        let Ok(content) = std::fs::read(entry.path()) else {
+            continue;
+        };
+        let utf8 = String::from_utf8_lossy(&content).to_lowercase();
+        let utf16 = if content.len() >= 2 && content[0] == 0xFF && content[1] == 0xFE {
+            let u16s: Vec<u16> = content[2..]
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16_lossy(&u16s).to_lowercase()
+        } else {
+            String::new()
+        };
+        if utf8.contains("ddhid63340") || utf16.contains("ddhid63340") {
+            out.push(name_str);
+        }
+    }
+    out.sort();
+    out
 }
 
-/// 兜底删除 `ddhid63340.sys`：通过 elevated PowerShell 单脚本完成。
+/// 通过 `pnputil /delete-driver oemXX.inf /uninstall /force` 走 PnP 标准卸载流程。
 ///
-/// `ddc.exe` 安装驱动时 sys 落在 `%SystemRoot%\System32\drivers\` 下且所有者被
-/// 设为 **TrustedInstaller**，即便已 elevated 的管理员也会拿到 ERROR_ACCESS_DENIED。
-/// 因此必须先夺权再删，单独的 `MoveFileEx` 标记重启删除会被 SMSS 同样的 ACL 拦下。
+/// PnP 子系统会自己处理：停服务 → 释放设备实例 → 删 sys → 清 Driver Store → 移除 INF。
+/// 即便 sys 被 TrustedInstaller 持有也由 PnP 提权完成，无需 takeown/icacls 强夺。
 ///
-/// 脚本流程：
-/// 1. 文件不存在 → exit 0
-/// 2. `takeown /F $p /A` 把所有权转给 Administrators 组
-/// 3. `icacls $p /grant *S-1-5-32-544:(F)` 给 Administrators 完整控制
-///    （用 SID 避开本地化名称差异）
-/// 4. `Remove-Item` 删除，成功 → exit 0
-/// 5. 仍删不掉（罕见，通常是 SetupAPI 残留锁）→ 写 `PendingFileRenameOperations`
-///    多字符串标记重启清理（路径已经 takeown，SMSS 删除阶段不会再被 ACL 拦） → exit 1
-/// 6. 注册表写失败 → exit 2
+/// 退出码：
+/// - 0 = 全部 INF 卸载成功
+/// - 1 = 没有需要卸载的 INF（视为成功，幂等）
+/// - 2 = 至少一个 INF 卸载失败（PnP 仍持有设备实例 / 资源被占用，应建议重启）
 #[cfg(windows)]
-async fn try_force_remove_dd_hid_sys(app: &AppHandle) -> Result<SysRemoveOutcome, String> {
-    let sys = dd_hid_sys_path();
-    if !sys.exists() {
-        return Ok(SysRemoveOutcome::Removed);
+async fn pnputil_uninstall_dd_hid(app: &AppHandle) -> Result<u32, String> {
+    let oem_list = find_dd_hid_oem_inf();
+    if oem_list.is_empty() {
+        return Ok(1);
     }
-
-    let sys_lit = sys.display().to_string();
-    // PendingFileRenameOperations 文档要求 NT 命名空间路径 (\??\<drive>:\...)
-    let nt_path = format!("\\??\\{sys_lit}");
+    let oem_array = build_ps_string_array(&oem_list);
     let script = format!(
-        "$ErrorActionPreference='SilentlyContinue';\n\
-         $p='{sys_lit}';\n\
-         if (-not (Test-Path -LiteralPath $p)) {{ exit 0 }}\n\
-         & takeown.exe /F $p /A | Out-Null;\n\
-         & icacls.exe $p /grant '*S-1-5-32-544:(F)' /C | Out-Null;\n\
-         Remove-Item -LiteralPath $p -Force;\n\
-         if (-not (Test-Path -LiteralPath $p)) {{ exit 0 }}\n\
-         $k='HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager';\n\
-         $name='PendingFileRenameOperations';\n\
-         $existing=(Get-ItemProperty -Path $k -Name $name -ErrorAction SilentlyContinue).$name;\n\
-         $entry=@('{nt_path}','');\n\
-         if ($existing) {{ $new=$existing + $entry }} else {{ $new=$entry }};\n\
-         New-ItemProperty -Path $k -Name $name -PropertyType MultiString -Value $new -Force | Out-Null;\n\
-         if (Test-Path -LiteralPath $p) {{\n\
-           if ((Get-ItemProperty -Path $k -Name $name).$name -contains '{nt_path}') {{ exit 1 }} else {{ exit 2 }}\n\
-         }} else {{ exit 0 }}",
+        "$ErrorActionPreference='Continue';\n\
+         $hardFail=$false;\n\
+         foreach ($oem in {oem_array}) {{\n\
+             try {{ & pnputil.exe /delete-driver $oem /uninstall /force | Out-Null }}\n\
+             catch {{ $hardFail=$true }}\n\
+             if ($LASTEXITCODE -ne 0) {{ $hardFail=$true }}\n\
+         }}\n\
+         if ($hardFail) {{ exit 2 }}\n\
+         exit 0",
     );
+    run_powershell_script_elevated(app, &script).await
+}
+
+/// 把字符串包成 PowerShell 单引号字面量，单引号转义为两个单引号。
+#[cfg(windows)]
+fn ps_single_quoted(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('\'');
+    out.push_str(&s.replace('\'', "''"));
+    out.push('\'');
+    out
+}
+
+/// 把 `[String]` 编为 PowerShell 字面量数组：`@('a','b')`。
+#[cfg(windows)]
+fn build_ps_string_array(items: &[String]) -> String {
+    if items.is_empty() {
+        return "@()".to_string();
+    }
+    let mut buf = String::from("@(");
+    for (i, s) in items.iter().enumerate() {
+        if i > 0 {
+            buf.push(',');
+        }
+        buf.push_str(&ps_single_quoted(s));
+    }
+    buf.push(')');
+    buf
+}
+
+/// 把脚本编码成 `-EncodedCommand` 形式并提权执行，返回真实退出码。
+#[cfg(windows)]
+async fn run_powershell_script_elevated(app: &AppHandle, script: &str) -> Result<u32, String> {
     let utf16: Vec<u16> = script.encode_utf16().collect();
     let bytes: Vec<u8> = utf16.iter().flat_map(|c| c.to_le_bytes()).collect();
     let encoded = base64_std_encode(&bytes);
-    let arg = format!(
-        "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {}",
-        encoded
-    );
-    let exit = run_elevated_exe_capture(
+    let arg =
+        format!("-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}");
+    run_elevated_exe_capture(
         app.clone(),
-        std::path::PathBuf::from(
-            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-        ),
+        std::path::PathBuf::from("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"),
         Some(&arg),
     )
-    .await?;
-    match exit {
-        0 => Ok(SysRemoveOutcome::Removed),
-        1 => Ok(SysRemoveOutcome::PendingReboot),
-        n => Err(format!(
-            "兜底删除驱动文件失败（PowerShell 退出码 {}）",
-            n
-        )),
-    }
+    .await
 }
 
 /// 极简 Base64 标准编码（PowerShell -EncodedCommand 用），无需引入 base64 crate。
 #[cfg(windows)]
-fn base64_std_encode(input: &[u8]) -> String {
-    const TBL: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+pub(crate) fn base64_std_encode(input: &[u8]) -> String {
+    const TBL: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     let mut chunks = input.chunks_exact(3);
     for c in chunks.by_ref() {
@@ -541,9 +577,7 @@ pub async fn install_dd_hid_driver(app: AppHandle) -> Result<(), String> {
                 Ok(()) => "ddc.exe 报告成功".to_string(),
                 Err(msg) => format!("ddc.exe 失败: {msg}"),
             };
-            tracing::error!(
-                "DD-HID 驱动安装失败：{e}（{exe_state}，sys 落盘={sys_installed}）"
-            );
+            tracing::error!("DD-HID 驱动安装失败：{e}（{exe_state}，sys 落盘={sys_installed}）");
         }
         crate::commands::status::emit_status_changed(&app);
         result
@@ -582,29 +616,42 @@ pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<UninstallOutcome,
         // ddc.exe 在交互式 cmd 中收尾会 `pause`，用户按键后退出码不可信；
         // 以驱动文件是否被移除为最终判定。
         let exe_result = run_elevated_exe(app.clone(), exe, Some("-u")).await;
-        // 兜底：ddc.exe 偶发会以非 0 退出且把 sys 留在原地（TrustedInstaller 占有 ACL、
-        // PnP 异步等）。统一交给 try_force_remove_dd_hid_sys 接管：takeown + icacls + 删除，
-        // 删不掉再写 PendingFileRenameOperations 标记重启清理。
+        // 兜底：ddc.exe 偶发会以非 0 退出且把 sys 留在原地（PnP 异步、用户取消等）。
+        // 走 pnputil /delete-driver oemXX.inf /uninstall /force 让 PnP 子系统按
+        // 标准流程处理：停服务 → 释放设备实例 → 删 sys → 清 Driver Store → 移除 INF。
+        // 不再 takeown / icacls / PendingFileRenameOperations 强夺 sys——那会
+        // 留下半卸载状态阻塞重装。
         let mut pending_reboot = false;
         if dd_hid_sys_installed() {
-            match try_force_remove_dd_hid_sys(&app).await {
-                Ok(SysRemoveOutcome::Removed) => {}
-                Ok(SysRemoveOutcome::PendingReboot) => pending_reboot = true,
-                Err(e) => tracing::warn!("强删 ddhid63340.sys 兜底失败：{}", e),
+            match pnputil_uninstall_dd_hid(&app).await {
+                Ok(0) | Ok(1) => {}
+                Ok(2) => {
+                    // pnputil 部分失败：通常是 PnP 仍持有设备实例 / 资源被占用
+                    // 重启后 PnP 会在下次启动阶段释放并完成清理
+                    pending_reboot = true;
+                }
+                Ok(n) => tracing::warn!("pnputil 卸载返回未知退出码 {n}"),
+                Err(e) => tracing::warn!("pnputil 卸载兜底失败：{}", e),
+            }
+            // pnputil 卸载后 sys 仍在 → 视作"需要重启"由 PnP 完成
+            if dd_hid_sys_installed() {
+                pending_reboot = true;
             }
         }
         crate::commands::status::emit_status_changed(&app);
 
         if pending_reboot {
             return Ok(UninstallOutcome {
-                message: "驱动文件已标记为重启后清理，请重启电脑完成卸载。".to_string(),
+                message: "驱动卸载已发起，剩余清理需重启电脑由 PnP 完成。\n\
+                    请重启电脑后再尝试安装驱动。"
+                    .to_string(),
                 pending_reboot: true,
             });
         }
         let sys_still_present = dd_hid_sys_installed();
         match judge_uninstall_result(sys_still_present, exe_result.clone()) {
             Ok(()) => Ok(UninstallOutcome {
-                message: "究极HID 驱动已卸载".to_string(),
+                message: "究极HID 驱动已卸载，建议重启电脑后再尝试重新安装。".to_string(),
                 pending_reboot: false,
             }),
             Err(e) => {

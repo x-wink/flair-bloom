@@ -188,8 +188,16 @@ fn diagnose_dd_hid(_app: &AppHandle) -> Vec<DiagnosticItem> {
         id: "dd_hid.sys".to_string(),
         category: "DD-HID 驱动".to_string(),
         label: "驱动文件 ddhid63340.sys".to_string(),
-        severity: if sys_present { Severity::Info } else { Severity::Info },
-        status: if sys_present { ItemStatus::Ok } else { ItemStatus::Missing },
+        severity: if sys_present {
+            Severity::Info
+        } else {
+            Severity::Info
+        },
+        status: if sys_present {
+            ItemStatus::Ok
+        } else {
+            ItemStatus::Missing
+        },
         detail: if sys_present {
             "已落盘".to_string()
         } else {
@@ -295,7 +303,11 @@ fn diagnose_interception(_app: &AppHandle) -> Vec<DiagnosticItem> {
         category: "Interception 驱动".to_string(),
         label: "运行时可用性".to_string(),
         severity: Severity::Info,
-        status: if api_ok { ItemStatus::Ok } else { ItemStatus::Missing },
+        status: if api_ok {
+            ItemStatus::Ok
+        } else {
+            ItemStatus::Missing
+        },
         detail: if api_ok {
             "create_context 成功".to_string()
         } else {
@@ -304,11 +316,7 @@ fn diagnose_interception(_app: &AppHandle) -> Vec<DiagnosticItem> {
         recommended_action: None,
     });
 
-    let mut detail = format!(
-        "keyboard: {} / mouse: {}",
-        yes_no(kbd),
-        yes_no(mouse),
-    );
+    let mut detail = format!("keyboard: {} / mouse: {}", yes_no(kbd), yes_no(mouse),);
     if foreign_kbd || foreign_mouse {
         detail.push_str("（检测到同名但非 Interception 的服务键，已跳过，不会清理）");
     }
@@ -417,7 +425,11 @@ fn diagnose_logs(_app: &AppHandle) -> Vec<DiagnosticItem> {
         id: "logs.size".to_string(),
         category: "日志".to_string(),
         label: "本地日志文件".to_string(),
-        severity: if mb > 50.0 { Severity::Warn } else { Severity::Info },
+        severity: if mb > 50.0 {
+            Severity::Warn
+        } else {
+            Severity::Info
+        },
         status: ItemStatus::Ok,
         detail: format!("{count} 份, 共 {mb:.1} MB"),
         recommended_action: if mb > 50.0 {
@@ -497,15 +509,7 @@ fn service_key_present(name: &str) -> bool {
     let wpath = wide(&path);
     let mut hkey: HKEY = std::ptr::null_mut();
     // SAFETY: wpath NUL 结尾；hkey 是栈上出参指针
-    let r = unsafe {
-        RegOpenKeyExW(
-            HKEY_LOCAL_MACHINE,
-            wpath.as_ptr(),
-            0,
-            KEY_READ,
-            &mut hkey,
-        )
-    };
+    let r = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, wpath.as_ptr(), 0, KEY_READ, &mut hkey) };
     if r != 0 {
         return false;
     }
@@ -528,15 +532,7 @@ fn read_service_image_path(name: &str) -> Option<String> {
     let wpath = wide(&path);
     let mut hkey: HKEY = std::ptr::null_mut();
     // SAFETY: wpath NUL 结尾；hkey 是栈上出参指针
-    let r = unsafe {
-        RegOpenKeyExW(
-            HKEY_LOCAL_MACHINE,
-            wpath.as_ptr(),
-            0,
-            KEY_READ,
-            &mut hkey,
-        )
-    };
+    let r = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, wpath.as_ptr(), 0, KEY_READ, &mut hkey) };
     if r != 0 {
         return None;
     }
@@ -697,31 +693,26 @@ async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
 
     let backup_lit = ps_single_quoted(&backup.display().to_string());
     let oem_inf_array = ps_string_array(&oem_inf);
-    let driverstore_array = ps_string_array(&driverstore);
-    let sys_path = format!(
-        "{}\\System32\\drivers\\ddhid63340.sys",
-        std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string())
-    );
-    let sys_path_lit = ps_single_quoted(&sys_path);
-    let nt_path_lit = ps_single_quoted(&format!("\\??\\{sys_path}"));
 
-    // 单脚本完成：备份 → pnputil 卸载 → 删服务键 → 强删 sys → 必要时写
-    // PendingFileRenameOperations。脚本退出码：
-    //   0 = 全部完成
-    //   1 = 已标记重启删除（部分目标在重启后清理）
-    //   2 = 中途有不可恢复错误
+    // 单脚本：备份 → pnputil 标准卸载 → 仅在 PnP 未清干净时移除注册表残留键。
+    // 关键设计：不再 takeown / icacls / Remove-Item / PendingFileRenameOperations
+    // 强夺 sys 文件——那种"半卸载"状态正是后续重装失败的根因。
+    // PnP 子系统在 pnputil /delete-driver /uninstall /force 时会自己处理：
+    //   停服务 → 释放设备实例 → 删 sys → 清 Driver Store → 移除 INF。
+    // 即便 sys 被 TrustedInstaller 持有也由 PnP 提权完成，无需我们绕过 ACL。
     //
-    // 每步用 try/catch 包裹，单步失败不中断后续步骤——目标是尽量推进到
-    // "重启即可继续"的可控状态。
+    // 退出码：
+    //   0 = 全部完成
+    //   2 = 某步骤失败（脚本不再使用 1 / PendingReboot 形式，pending_reboot 由
+    //       Rust 侧根据"动了什么残留"来综合判定，更精确）
     let script = format!(
         "$ErrorActionPreference='Continue';\n\
          $backup={backup_lit};\n\
-         $pendingReboot=$false;\n\
          $hardFail=$false;\n\
          function Backup-RegKey($path,$file){{\n\
              try {{ & reg.exe export $path (Join-Path $backup $file) /y | Out-Null }} catch {{ }}\n\
          }}\n\
-         # 1. 备份服务键 + INF + Driver Store\n\
+         # 1. 备份服务键 + OEM INF + PNF\n\
          Backup-RegKey 'HKLM\\SYSTEM\\CurrentControlSet\\Services\\ddhid63340' 'service_ddhid63340.reg'\n\
          $oemInfList = {oem_inf_array}\n\
          foreach ($oem in $oemInfList) {{\n\
@@ -733,47 +724,20 @@ async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
                  if (Test-Path -LiteralPath $pnf) {{ try {{ Copy-Item -LiteralPath $pnf -Destination $backup -Force -ErrorAction Stop }} catch {{ }} }}\n\
              }}\n\
          }}\n\
-         # 2. pnputil /delete-driver /uninstall /force\n\
+         # 2. pnputil /delete-driver /uninstall /force（让 PnP 主导，不绕过）\n\
          foreach ($oem in $oemInfList) {{\n\
-             try {{ & pnputil.exe /delete-driver $oem /uninstall /force | Out-Null }} catch {{ $hardFail=$true }}\n\
+             try {{ & pnputil.exe /delete-driver $oem /uninstall /force | Out-Null }}\n\
+             catch {{ $hardFail=$true }}\n\
+             if ($LASTEXITCODE -ne 0) {{ $hardFail=$true }}\n\
          }}\n\
-         # 3. 删服务键\n\
-         try {{\n\
-             if (Test-Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\ddhid63340') {{\n\
-                 Remove-Item -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\ddhid63340' -Recurse -Force -ErrorAction Stop\n\
-             }}\n\
-         }} catch {{ $hardFail=$true }}\n\
-         # 4. 强删 Driver Store 副本\n\
-         $dsList = {driverstore_array}\n\
-         $dsBase = Join-Path $env:SystemRoot 'System32\\DriverStore\\FileRepository'\n\
-         foreach ($d in $dsList) {{\n\
-             $full = Join-Path $dsBase $d\n\
-             if (Test-Path -LiteralPath $full) {{\n\
-                 & takeown.exe /F $full /R /A | Out-Null\n\
-                 & icacls.exe $full /grant '*S-1-5-32-544:(F)' /T /C | Out-Null\n\
-                 try {{ Remove-Item -LiteralPath $full -Recurse -Force -ErrorAction Stop }}\n\
-                 catch {{ $hardFail=$true }}\n\
-             }}\n\
-         }}\n\
-         # 5. 强删 sys 文件\n\
-         $sys={sys_path_lit};\n\
-         if (Test-Path -LiteralPath $sys) {{\n\
-             & takeown.exe /F $sys /A | Out-Null\n\
-             & icacls.exe $sys /grant '*S-1-5-32-544:(F)' /C | Out-Null\n\
-             try {{ Remove-Item -LiteralPath $sys -Force -ErrorAction Stop }} catch {{ }}\n\
-             if (Test-Path -LiteralPath $sys) {{\n\
-                 # 仍删不掉 → 写 PendingFileRenameOperations\n\
-                 $k='HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager';\n\
-                 $name='PendingFileRenameOperations';\n\
-                 $existing=(Get-ItemProperty -Path $k -Name $name -ErrorAction SilentlyContinue).$name;\n\
-                 $entry=@({nt_path_lit},'');\n\
-                 if ($existing) {{ $new=$existing + $entry }} else {{ $new=$entry }};\n\
-                 try {{ New-ItemProperty -Path $k -Name $name -PropertyType MultiString -Value $new -Force | Out-Null; $pendingReboot=$true }}\n\
-                 catch {{ $hardFail=$true }}\n\
-             }}\n\
+         # 3. pnputil 走完后若服务键仍在（罕见，常因 sys 已被手动删除导致 PnP\n\
+         #    无法识别该 INF 归属的设备实例）→ 仅做注册表层面的兜底清理。\n\
+         #    这一步只动注册表，不动文件系统、不动 ACL。\n\
+         if (Test-Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\ddhid63340') {{\n\
+             try {{ Remove-Item -LiteralPath 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\ddhid63340' -Recurse -Force -ErrorAction Stop }}\n\
+             catch {{ $hardFail=$true }}\n\
          }}\n\
          if ($hardFail) {{ exit 2 }}\n\
-         if ($pendingReboot) {{ exit 1 }}\n\
          exit 0",
     );
 
@@ -796,7 +760,7 @@ async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
         },
     ));
     steps.push(removal_step(
-        "卸载 OEM INF",
+        "卸载 OEM INF（pnputil）",
         oem_inf.len(),
         oem_inf_after.len(),
         |before, after| {
@@ -810,7 +774,7 @@ async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
         },
     ));
     steps.push(boolean_removal_step(
-        "删除服务键",
+        "清理服务键",
         service_present_before,
         service_present_after,
         "服务键 ddhid63340",
@@ -829,21 +793,24 @@ async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
             }
         },
     ));
-    steps.push(sys_removal_step(sys_present_before, sys_present_after, &exit));
+    steps.push(pnp_sys_step(sys_present_before, sys_present_after));
 
-    let pending_reboot = matches!(exit, Ok(1));
-    let mut success = match &exit {
-        Ok(0) | Ok(1) => true,
-        _ => false,
-    };
+    let mut success = matches!(exit, Ok(0));
     // 物理事实优先：即便脚本声称成功，只要服务键 / OEM INF 还在就是失败
     if service_present_after || !oem_inf_after.is_empty() {
         success = false;
     }
+    // 只要动过任何残留就建议重启：PnP 内部状态（设备实例缓存、SCM 内存副本）
+    // 必须等下次开机才能彻底刷新，立即重装大概率撞 install error
+    let touched_anything = oem_inf.len() != oem_inf_after.len()
+        || service_present_before != service_present_after
+        || driverstore.len() != driverstore_after.len()
+        || sys_present_before != sys_present_after;
+    let pending_reboot = success && touched_anything;
 
     let summary = match (&exit, success, pending_reboot) {
-        (_, true, true) => "残留已清理，部分文件将在重启后彻底移除".to_string(),
-        (_, true, false) => "DD-HID 残留已全部清理，可重新安装驱动".to_string(),
+        (_, true, true) => "残留已清理，请重启电脑后再尝试安装驱动".to_string(),
+        (_, true, false) => "未发现 DD-HID 残留".to_string(),
         (Err(e), false, _) => format!("修复中断: {e}"),
         (_, false, _) => "修复部分完成，仍存在残留，建议重启后重试".to_string(),
     };
@@ -963,8 +930,18 @@ async fn run_interception_repair(app: AppHandle) -> Result<RepairOutcome, String
                 StepStatus::Failed
             },
         ),
-        boolean_removal_step("删除 keyboard 服务键", kbd_before, kbd_after, "keyboard 服务键"),
-        boolean_removal_step("删除 mouse 服务键", mouse_before, mouse_after, "mouse 服务键"),
+        boolean_removal_step(
+            "删除 keyboard 服务键",
+            kbd_before,
+            kbd_after,
+            "keyboard 服务键",
+        ),
+        boolean_removal_step(
+            "删除 mouse 服务键",
+            mouse_before,
+            mouse_after,
+            "mouse 服务键",
+        ),
     ];
 
     let success = !kbd_after && !mouse_after && matches!(exit, Ok(0));
@@ -1008,8 +985,7 @@ pub async fn repair_corrupted_profiles(app: AppHandle) -> Result<RepairOutcome, 
 
     let mut steps = Vec::new();
     let mut moved = 0usize;
-    let entries = std::fs::read_dir(&profiles_dir)
-        .map_err(|e| format!("读取配置目录失败: {e}"))?;
+    let entries = std::fs::read_dir(&profiles_dir).map_err(|e| format!("读取配置目录失败: {e}"))?;
     for entry in entries.flatten() {
         let path = entry.path();
         if path.extension().and_then(|s| s.to_str()) != Some("qzh") {
@@ -1044,7 +1020,10 @@ pub async fn repair_corrupted_profiles(app: AppHandle) -> Result<RepairOutcome, 
         }
     }
 
-    let failed = steps.iter().filter(|s| s.status == StepStatus::Failed).count();
+    let failed = steps
+        .iter()
+        .filter(|s| s.status == StepStatus::Failed)
+        .count();
     let success = failed == 0;
     // 失败优先：哪怕 moved == 0，只要有 rename 失败也要给出失败文案，
     // 不能再说"未发现损坏配置"——前端会同时收到 error toast，文案必须自洽
@@ -1100,7 +1079,9 @@ pub async fn repair_clean_logs(_app: AppHandle) -> Result<RepairOutcome, String>
             continue; // 崩溃日志保留供反馈
         }
         let Ok(meta) = entry.metadata() else { continue };
-        let Ok(modified) = meta.modified() else { continue };
+        let Ok(modified) = meta.modified() else {
+            continue;
+        };
         if modified < cutoff {
             let size = meta.len();
             if std::fs::remove_file(&path).is_ok() {
@@ -1175,19 +1156,18 @@ fn removal_step(
 }
 
 #[cfg(windows)]
-fn sys_removal_step(before: bool, after: bool, exit: &Result<u32, String>) -> RepairStep {
-    let pending = matches!(exit, Ok(1));
-    let (status, detail) = match (before, after, pending) {
-        (false, _, _) => (StepStatus::Skipped, "驱动文件本就不存在".to_string()),
-        (true, false, _) => (StepStatus::Ok, "驱动文件已删除".to_string()),
-        (true, true, true) => (
+fn pnp_sys_step(before: bool, after: bool) -> RepairStep {
+    let (status, detail) = match (before, after) {
+        (false, _) => (StepStatus::Skipped, "驱动文件本就不存在".to_string()),
+        (true, false) => (StepStatus::Ok, "驱动文件已由 PnP 移除".to_string()),
+        // pnputil 走完后 sys 仍在：通常是 PnP 还在异步释放设备实例，重启即可
+        (true, true) => (
             StepStatus::PendingReboot,
-            "驱动文件被占用，已标记重启删除".to_string(),
+            "驱动文件仍占用，将在重启后由 PnP 完成清理".to_string(),
         ),
-        (true, true, false) => (StepStatus::Failed, "驱动文件仍存在且未标记重启删除".to_string()),
     };
     RepairStep {
-        name: "删除 ddhid63340.sys".to_string(),
+        name: "驱动文件 ddhid63340.sys".to_string(),
         status,
         detail,
     }
@@ -1229,20 +1209,17 @@ async fn run_powershell_script_elevated(app: &AppHandle, script: &str) -> Result
     let utf16: Vec<u16> = script.encode_utf16().collect();
     let bytes: Vec<u8> = utf16.iter().flat_map(|c| c.to_le_bytes()).collect();
     let encoded = base64_std_encode(&bytes);
-    let arg = format!(
-        "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}"
-    );
-    let exe = std::path::PathBuf::from(
-        "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-    );
+    let arg =
+        format!("-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}");
+    let exe =
+        std::path::PathBuf::from("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
     crate::commands::engine::run_elevated_exe_capture(app.clone(), exe, Some(&arg)).await
 }
 
 /// 复用 engine.rs 的 base64 实现，避免新增依赖
 #[cfg(windows)]
 fn base64_std_encode(input: &[u8]) -> String {
-    const TBL: &[u8] =
-        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    const TBL: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
     let mut chunks = input.chunks_exact(3);
     for c in chunks.by_ref() {
@@ -1282,24 +1259,12 @@ mod tests {
     #[test]
     fn residue_severity_matrix() {
         // 残留 + sys 在 → 正常
-        assert_eq!(
-            classify_residue_severity(true, true),
-            Severity::Info
-        );
+        assert_eq!(classify_residue_severity(true, true), Severity::Info);
         // 残留 + sys 缺 → 阻塞重装，升级为 Error
-        assert_eq!(
-            classify_residue_severity(true, false),
-            Severity::Error
-        );
+        assert_eq!(classify_residue_severity(true, false), Severity::Error);
         // 无残留 → Info（无论 sys 是否在）
-        assert_eq!(
-            classify_residue_severity(false, true),
-            Severity::Info
-        );
-        assert_eq!(
-            classify_residue_severity(false, false),
-            Severity::Info
-        );
+        assert_eq!(classify_residue_severity(false, true), Severity::Info);
+        assert_eq!(classify_residue_severity(false, false), Severity::Info);
     }
 
     #[test]
@@ -1318,10 +1283,7 @@ mod tests {
             "@('oem15.inf','oem99.inf')"
         );
         // 单引号转义为两个单引号
-        assert_eq!(
-            ps_string_array(&["a'b".to_string()]),
-            "@('a''b')"
-        );
+        assert_eq!(ps_string_array(&["a'b".to_string()]), "@('a''b')");
     }
 
     #[test]
@@ -1358,4 +1320,3 @@ mod tests {
         assert_eq!(d_2026_01_01, (2026, 1, 1));
     }
 }
-

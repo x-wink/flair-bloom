@@ -855,7 +855,7 @@ export default function PanelApp() {
           将卸载究极HID 虚拟驱动。卸载后究极HID 模式将不可用，应用会切回通用模式。
           <br />
           <br />
-          本驱动卸载无需重启电脑。
+          卸载流程会调用 PnP 标准接口处理，建议卸载完成后重启电脑再尝试重新安装。
         </>
       ),
       confirmText: '卸载',

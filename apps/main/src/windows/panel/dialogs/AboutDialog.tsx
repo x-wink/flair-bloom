@@ -33,7 +33,7 @@ interface Props {
   onClose: () => void;
   onUninstallInterception: () => void;
   onUninstallDdHid: () => void;
-  onOpenDir: (kind: 'install' | 'data' | 'log') => void;
+  onOpenDir: (kind: 'install' | 'data' | 'log' | 'drivers') => void;
   onCopied: () => void;
   onCopyFailed: (err: unknown) => void;
 }
@@ -188,6 +188,16 @@ export default function AboutDialog({
                 </Button>
               </span>
             </li>
+            {info.os_family === 'windows' && (
+              <li>
+                <span className="about-key">驱动目录</span>
+                <span className="about-value about-value--with-action">
+                  <Button size="sm" variant="outline" onClick={() => onOpenDir('drivers')}>
+                    打开
+                  </Button>
+                </span>
+              </li>
+            )}
           </ul>
         </section>
 
