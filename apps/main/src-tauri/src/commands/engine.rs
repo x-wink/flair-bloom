@@ -174,7 +174,7 @@ async fn run_elevated_exe(
 /// 与 [`run_elevated_exe`] 同语义，但返回真实退出码而非把非 0 视为错误。
 /// PowerShell 脚本约定退出码 0/1/2 表示不同结果时使用。
 #[cfg(windows)]
-async fn run_elevated_exe_capture(
+pub(crate) async fn run_elevated_exe_capture(
     app: AppHandle,
     file_path: std::path::PathBuf,
     params: Option<&str>,
@@ -304,6 +304,9 @@ pub async fn install_driver(app: AppHandle) -> Result<(), String> {
     {
         let exe = resource_dir(&app)?.join("install-interception.exe");
         let result = run_elevated_exe(app.clone(), exe, Some("/install")).await;
+        if let Err(ref e) = result {
+            tracing::error!("Interception 驱动安装失败：{e}");
+        }
         crate::commands::status::emit_status_changed(&app);
         result
     }
@@ -328,6 +331,9 @@ pub async fn uninstall_driver(app: AppHandle) -> Result<(), String> {
 
         let exe = resource_dir(&app)?.join("install-interception.exe");
         let result = run_elevated_exe(app.clone(), exe, Some("/uninstall")).await;
+        if let Err(ref e) = result {
+            tracing::error!("Interception 驱动卸载失败：{e}");
+        }
         crate::commands::status::emit_status_changed(&app);
         result
     }
@@ -526,7 +532,19 @@ pub async fn install_dd_hid_driver(app: AppHandle) -> Result<(), String> {
         // ddc.exe 在交互式 cmd 中收尾会 `pause`，用户按键后退出码不可信；
         // 以驱动文件是否落盘为最终判定。
         let exe_result = run_elevated_exe(app.clone(), exe, None).await;
-        let result = judge_install_result(dd_hid_sys_installed(), exe_result);
+        let sys_installed = dd_hid_sys_installed();
+        let result = judge_install_result(sys_installed, exe_result.clone());
+        if let Err(ref e) = result {
+            // sys 没落盘时记一条 error，把 ddc.exe 的退出码 / 错误信息一并落盘，
+            // 方便用户反馈时贴日志诊断 PnP 残留 / 资源缺失等问题。
+            let exe_state = match &exe_result {
+                Ok(()) => "ddc.exe 报告成功".to_string(),
+                Err(msg) => format!("ddc.exe 失败: {msg}"),
+            };
+            tracing::error!(
+                "DD-HID 驱动安装失败：{e}（{exe_state}，sys 落盘={sys_installed}）"
+            );
+        }
         crate::commands::status::emit_status_changed(&app);
         result
     }
@@ -583,12 +601,22 @@ pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<UninstallOutcome,
                 pending_reboot: true,
             });
         }
-        match judge_uninstall_result(dd_hid_sys_installed(), exe_result) {
+        let sys_still_present = dd_hid_sys_installed();
+        match judge_uninstall_result(sys_still_present, exe_result.clone()) {
             Ok(()) => Ok(UninstallOutcome {
                 message: "究极HID 驱动已卸载".to_string(),
                 pending_reboot: false,
             }),
-            Err(e) => Err(e),
+            Err(e) => {
+                let exe_state = match &exe_result {
+                    Ok(()) => "ddc.exe 报告成功".to_string(),
+                    Err(msg) => format!("ddc.exe 失败: {msg}"),
+                };
+                tracing::error!(
+                    "DD-HID 驱动卸载失败：{e}（{exe_state}，sys 仍存在={sys_still_present}）"
+                );
+                Err(e)
+            }
         }
     }
     #[cfg(not(windows))]

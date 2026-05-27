@@ -25,6 +25,7 @@ apps/main/src-tauri/resources/interception.dll
 .env
 .env.*
 !.env.example
+.codex/
 
 # IDE
 .vscode/

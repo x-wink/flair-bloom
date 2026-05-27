@@ -1,0 +1,262 @@
+.repair-card {
+  width: min(560px, calc(100vw - 32px));
+  max-height: 80vh;
+  background: var(--fb-surface);
+  border-radius: var(--fb-radius-2xl);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: var(--fb-shadow-modal);
+  animation: modal-pop var(--fb-duration-slow) ease;
+}
+
+.repair-header {
+  padding: var(--fb-space-8) var(--fb-space-10) var(--fb-space-4);
+}
+
+.repair-title {
+  font-size: var(--fb-fs-xl);
+  font-weight: var(--fb-fw-semibold);
+  color: var(--fb-text-strong);
+  margin: 0 0 var(--fb-space-2);
+}
+
+.repair-tagline {
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-text-weak);
+  line-height: var(--fb-lh-relaxed);
+  margin: 0;
+}
+
+.repair-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--fb-space-4) var(--fb-space-10);
+  border-top: 1px solid var(--fb-border-soft);
+}
+
+.repair-loading {
+  text-align: center;
+  color: var(--fb-text-weak);
+  padding: var(--fb-space-8) 0;
+}
+
+.repair-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fb-space-3);
+  margin: 0 0 var(--fb-space-4);
+  font-size: var(--fb-fs-sm);
+}
+
+.repair-summary--ok {
+  color: var(--fb-color-success-active);
+  font-weight: var(--fb-fw-semibold);
+}
+
+.repair-summary--warn {
+  color: var(--fb-color-warning-active, #a85d00);
+  font-weight: var(--fb-fw-semibold);
+}
+
+.repair-meta {
+  color: var(--fb-text-faint);
+  font-size: var(--fb-fs-xs);
+}
+
+.repair-section + .repair-section {
+  margin-top: var(--fb-space-5);
+}
+
+.repair-section-label {
+  font-size: var(--fb-fs-xs);
+  font-weight: var(--fb-fw-semibold);
+  color: var(--fb-text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: var(--fb-space-3) 0;
+  margin: 0;
+}
+
+.repair-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--fb-space-3);
+}
+
+.repair-item {
+  border: 1px solid var(--fb-divider);
+  border-radius: var(--fb-radius-md);
+  padding: var(--fb-space-3) var(--fb-space-4);
+  background: var(--fb-surface);
+}
+
+.repair-item--error {
+  border-color: var(--fb-color-danger-soft, #fde2e2);
+  background: var(--fb-color-danger-soft, #fde2e2);
+}
+
+.repair-item--warn {
+  border-color: var(--fb-color-warning-soft, #fff4d6);
+  background: var(--fb-color-warning-soft, #fff4d6);
+}
+
+.repair-item-head {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+  flex-wrap: wrap;
+}
+
+.repair-item-label {
+  font-size: var(--fb-fs-md);
+  font-weight: var(--fb-fw-medium);
+  color: var(--fb-text-strong);
+  flex: 1 1 auto;
+}
+
+.repair-item-detail {
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-text-regular);
+  margin: var(--fb-space-2) 0 0;
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.repair-item-action {
+  margin-top: var(--fb-space-3);
+}
+
+.repair-flag {
+  display: inline-block;
+  font-size: var(--fb-fs-xs);
+  font-weight: var(--fb-fw-semibold);
+  padding: var(--fb-space-1) var(--fb-space-3);
+  border-radius: var(--fb-radius-pill);
+  line-height: var(--fb-lh-tight);
+}
+
+.repair-flag--info {
+  background: var(--fb-color-success-soft);
+  color: var(--fb-color-success-active);
+}
+
+.repair-flag--warn {
+  background: var(--fb-color-warning-soft, #fff4d6);
+  color: var(--fb-color-warning-active, #a85d00);
+}
+
+.repair-flag--error {
+  background: var(--fb-color-danger-soft, #fde2e2);
+  color: var(--fb-color-danger-active, #b3261e);
+}
+
+.repair-flag--status-ok {
+  background: var(--fb-color-neutral-soft);
+  color: var(--fb-text-weak);
+}
+
+.repair-flag--status-orphan,
+.repair-flag--status-corrupted,
+.repair-flag--status-missing {
+  background: var(--fb-color-warning-soft, #fff4d6);
+  color: var(--fb-color-warning-active, #a85d00);
+}
+
+.repair-flag--status-unknown {
+  background: var(--fb-color-neutral-soft);
+  color: var(--fb-text-faint);
+}
+
+.repair-flag--step-ok {
+  background: var(--fb-color-success-soft);
+  color: var(--fb-color-success-active);
+}
+
+.repair-flag--step-skipped {
+  background: var(--fb-color-neutral-soft);
+  color: var(--fb-text-weak);
+}
+
+.repair-flag--step-failed {
+  background: var(--fb-color-danger-soft, #fde2e2);
+  color: var(--fb-color-danger-active, #b3261e);
+}
+
+.repair-flag--step-pending_reboot {
+  background: var(--fb-color-warning-soft, #fff4d6);
+  color: var(--fb-color-warning-active, #a85d00);
+}
+
+.repair-log {
+  margin-top: var(--fb-space-3);
+  padding: var(--fb-space-3) var(--fb-space-4);
+  background: var(--fb-surface);
+  border: 1px dashed var(--fb-divider);
+  border-radius: var(--fb-radius-md);
+}
+
+.repair-log-summary {
+  margin: 0 0 var(--fb-space-2);
+  font-size: var(--fb-fs-sm);
+  font-weight: var(--fb-fw-semibold);
+}
+
+.repair-log-summary--ok {
+  color: var(--fb-color-success-active);
+}
+
+.repair-log-summary--fail {
+  color: var(--fb-color-danger-active, #b3261e);
+}
+
+.repair-log-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--fb-space-2);
+  font-size: var(--fb-fs-sm);
+}
+
+.repair-log-step {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fb-space-2);
+}
+
+.repair-log-step-name {
+  flex: 0 0 auto;
+  color: var(--fb-text-strong);
+}
+
+.repair-log-step-detail {
+  flex: 1 1 100%;
+  color: var(--fb-text-weak);
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.repair-log-backup {
+  margin: var(--fb-space-3) 0 0;
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-faint);
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+.repair-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--fb-space-3);
+  padding: var(--fb-space-4) var(--fb-space-10) var(--fb-space-8);
+  border-top: 1px solid var(--fb-border-soft);
+}

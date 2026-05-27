@@ -26,6 +26,10 @@ use commands::{
         delete_profile, fork_active_profile, get_active_profile_path, init_default_profile,
         list_profiles, load_profile, rename_profile, save_profile,
     },
+    repair::{
+        diagnose_environment, repair_clean_logs, repair_corrupted_profiles,
+        repair_dd_hid_residue, repair_interception_residue,
+    },
     status::get_app_status,
 };
 use engine::{burst::start_listener, BurstEngine};
@@ -164,6 +168,11 @@ pub fn run() {
             log_from_frontend,
             open_app_dir,
             get_app_status,
+            diagnose_environment,
+            repair_dd_hid_residue,
+            repair_interception_residue,
+            repair_corrupted_profiles,
+            repair_clean_logs,
         ])
         .setup(move |app| {
             let need_agreement = check_agreement(app.handle());

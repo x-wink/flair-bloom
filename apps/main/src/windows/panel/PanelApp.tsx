@@ -18,6 +18,7 @@ import { useToast } from './components/Toast';
 import Button from './components/Button';
 import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
+import RepairDialog from './dialogs/RepairDialog';
 import UpdateNoticeDialog, { type UpdateNoticeInfo } from './dialogs/UpdateNoticeDialog';
 import './PanelApp.css';
 
@@ -148,6 +149,7 @@ export default function PanelApp() {
   const [showAgreement, setShowAgreement] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
+  const [showRepair, setShowRepair] = useState(false);
   const [appVersion, setAppVersion] = useState('');
   const [updateNotice, setUpdateNotice] = useState<UpdateNoticeInfo | null>(null);
   const [showUpdateNotice, setShowUpdateNotice] = useState(false);
@@ -804,6 +806,11 @@ export default function PanelApp() {
     setShowAbout(true);
   }
 
+  function handleShowRepair() {
+    setMenuOpen(false);
+    setShowRepair(true);
+  }
+
   async function handleUninstallDriver() {
     const ok = await confirm({
       title: '卸载驱动',
@@ -1174,6 +1181,7 @@ export default function PanelApp() {
             onClick: handleShowUpdateNotice,
           },
           { label: '用户协议', onClick: handleShowAgreement },
+          { label: '环境修复', onClick: handleShowRepair },
           { label: '关于', onClick: handleShowAbout },
         ]}
       />
@@ -1225,6 +1233,17 @@ export default function PanelApp() {
           }}
           onCopied={() => toast.success('已复制状态信息')}
           onCopyFailed={(e) => toast.error(`复制失败：${e}`)}
+        />
+      </Overlay>
+
+      <Overlay open={showRepair} onClose={() => setShowRepair(false)}>
+        <RepairDialog
+          onClose={() => setShowRepair(false)}
+          onToast={(kind, msg) => {
+            if (kind === 'success') toast.success(msg);
+            else if (kind === 'warn') toast.warning(msg);
+            else toast.error(msg);
+          }}
         />
       </Overlay>
     </div>
