@@ -201,10 +201,13 @@ fn diagnose_dd_hid(_app: &AppHandle) -> Vec<DiagnosticItem> {
     out.push(DiagnosticItem {
         id: "dd_hid.service".to_string(),
         category: "DD-HID 驱动".to_string(),
-        label: "服务键 HKLM\\SYSTEM\\CurrentControlSet\\Services\\ddhid63340".to_string(),
+        label: "服务键 ddhid63340".to_string(),
         severity: classify_residue_severity(service_present, sys_present),
         status: classify_residue_status(service_present, sys_present),
-        detail: residue_detail(service_present, sys_present, "服务键"),
+        detail: format!(
+            "{}\nHKLM\\SYSTEM\\CurrentControlSet\\Services\\ddhid63340",
+            residue_detail(service_present, sys_present, "服务键"),
+        ),
         recommended_action: if service_present && !sys_present {
             Some("repair_dd_hid_residue".to_string())
         } else {

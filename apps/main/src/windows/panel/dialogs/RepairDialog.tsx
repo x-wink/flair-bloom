@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Button from '../components/Button';
+import { useConfirm } from '../components/ConfirmDialog';
 import './dialog-base.css';
 import './RepairDialog.css';
 
@@ -61,6 +62,14 @@ const STATUS_LABEL: Record<ItemStatus, string> = {
   unknown: '未知',
 };
 
+/// 仅当确有异常（severity 非 info 或 status 非 ok）时返回 chip 文案，
+/// 正常项整体不挂 chip——卡片底色和边框已经传达「无异常」。
+function itemChipLabel(severity: Severity, status: ItemStatus): string | null {
+  if (status !== 'ok') return STATUS_LABEL[status];
+  if (severity !== 'info') return SEVERITY_LABEL[severity];
+  return null;
+}
+
 const STEP_LABEL: Record<StepStatus, string> = {
   ok: '完成',
   skipped: '跳过',
@@ -86,6 +95,7 @@ const ACTION_CONFIRM: Record<RepairCommand, string> = {
 };
 
 export default function RepairDialog({ onClose, onToast }: Props) {
+  const confirm = useConfirm();
   const [report, setReport] = useState<RepairReport | null>(null);
   const [scanning, setScanning] = useState(false);
   const [running, setRunning] = useState<RepairCommand | null>(null);
@@ -123,7 +133,14 @@ export default function RepairDialog({ onClose, onToast }: Props) {
   const runRepair = useCallback(
     async (cmd: RepairCommand) => {
       if (running) return;
-      const proceed = window.confirm(ACTION_CONFIRM[cmd]);
+      const proceed = await confirm({
+        title: ACTION_LABEL[cmd],
+        description: ACTION_CONFIRM[cmd],
+        confirmText: '继续修复',
+        cancelText: '取消',
+        tone:
+          cmd === 'repair_clean_logs' || cmd === 'repair_corrupted_profiles' ? 'default' : 'danger',
+      });
       if (!proceed) return;
       setRunning(cmd);
       try {
@@ -145,7 +162,7 @@ export default function RepairDialog({ onClose, onToast }: Props) {
         setRunning(null);
       }
     },
-    [running, scan],
+    [confirm, running, scan],
   );
 
   const grouped = groupByCategory(report?.items ?? []);
@@ -181,12 +198,14 @@ export default function RepairDialog({ onClose, onToast }: Props) {
                     <li key={it.id} className={`repair-item repair-item--${it.severity}`}>
                       <div className="repair-item-head">
                         <span className="repair-item-label">{it.label}</span>
-                        <span className={`repair-flag repair-flag--${it.severity}`}>
-                          {SEVERITY_LABEL[it.severity]}
-                        </span>
-                        <span className={`repair-flag repair-flag--status-${it.status}`}>
-                          {STATUS_LABEL[it.status]}
-                        </span>
+                        {(() => {
+                          const chip = itemChipLabel(it.severity, it.status);
+                          return chip ? (
+                            <span className={`repair-flag repair-flag--${it.severity}`}>
+                              {chip}
+                            </span>
+                          ) : null;
+                        })()}
                       </div>
                       <p className="repair-item-detail">{it.detail}</p>
                       {it.recommended_action && (

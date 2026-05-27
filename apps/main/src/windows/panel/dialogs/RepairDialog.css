@@ -117,6 +117,9 @@
   font-weight: var(--fb-fw-medium);
   color: var(--fb-text-strong);
   flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .repair-item-detail {
@@ -124,6 +127,8 @@
   color: var(--fb-text-regular);
   margin: var(--fb-space-2) 0 0;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-line;
   -webkit-user-select: text;
   user-select: text;
 }
@@ -154,23 +159,6 @@
 .repair-flag--error {
   background: var(--fb-color-danger-soft, #fde2e2);
   color: var(--fb-color-danger-active, #b3261e);
-}
-
-.repair-flag--status-ok {
-  background: var(--fb-color-neutral-soft);
-  color: var(--fb-text-weak);
-}
-
-.repair-flag--status-orphan,
-.repair-flag--status-corrupted,
-.repair-flag--status-missing {
-  background: var(--fb-color-warning-soft, #fff4d6);
-  color: var(--fb-color-warning-active, #a85d00);
-}
-
-.repair-flag--status-unknown {
-  background: var(--fb-color-neutral-soft);
-  color: var(--fb-text-faint);
 }
 
 .repair-flag--step-ok {
