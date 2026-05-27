@@ -146,9 +146,13 @@ pub fn host_arch() -> String {
 /// 唯一稳定 API，比 `GetUserDefaultUILanguage` 返的 LCID 更适合直接展示。
 #[cfg(windows)]
 pub fn user_locale() -> String {
-    use windows_sys::Win32::Globalization::{GetUserDefaultLocaleName, LOCALE_NAME_MAX_LENGTH};
+    use windows_sys::Win32::Globalization::GetUserDefaultLocaleName;
 
-    let mut buf = vec![0u16; LOCALE_NAME_MAX_LENGTH as usize];
+    // LOCALE_NAME_MAX_LENGTH 在 windows-sys 的 Globalization 里随 feature 组合可见性不稳，
+    // 直接按 WinNls.h 的固定值硬编（与 host_arch 里处理 PROCESSOR_ARCHITECTURE_* 同思路）。
+    const LOCALE_NAME_MAX_LENGTH: usize = 85;
+
+    let mut buf = vec![0u16; LOCALE_NAME_MAX_LENGTH];
     // SAFETY: buf 在调用期间存活，长度参数与缓冲区匹配
     let n = unsafe { GetUserDefaultLocaleName(buf.as_mut_ptr(), buf.len() as i32) };
     if n <= 1 {

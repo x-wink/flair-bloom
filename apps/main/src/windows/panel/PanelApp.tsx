@@ -857,8 +857,14 @@ export default function PanelApp() {
     });
     if (!ok) return;
     try {
-      await invoke('uninstall_dd_hid_driver');
-      toast.success('究极HID 驱动已卸载');
+      const r = await invoke<{ message: string; pending_reboot: boolean }>(
+        'uninstall_dd_hid_driver',
+      );
+      if (r.pending_reboot) {
+        toast.warning(r.message, 8000);
+      } else {
+        toast.success(r.message || '究极HID 驱动已卸载');
+      }
     } catch (e) {
       toast.error(`卸载失败：${e}`);
     }

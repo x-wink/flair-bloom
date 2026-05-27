@@ -220,6 +220,18 @@ pub fn init_backend(mode: InputMode) {
             }
         }
         InputMode::SendInput => {
+            // 切回 SendInput 时主动释放其他后端持有的句柄，避免 DLL 句柄/驱动 context
+            // 在切换后泄漏，并让后续卸载操作不残留任何用户态引用。
+            if let Some(lock) = DD_HID_BACKEND.get() {
+                if revive(lock.lock()).take().is_some() {
+                    info!("DD-HID 后端已释放");
+                }
+            }
+            if let Some(lock) = INTERCEPTION_BACKEND.get() {
+                if revive(lock.lock()).take().is_some() {
+                    info!("Interception 后端已释放");
+                }
+            }
             current.store(MODE_SENDINPUT, std::sync::atomic::Ordering::SeqCst);
             info!("输入后端已切换为 SendInput 模式");
         }

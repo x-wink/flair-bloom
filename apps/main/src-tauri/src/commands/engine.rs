@@ -165,6 +165,20 @@ async fn run_elevated_exe(
     file_path: std::path::PathBuf,
     params: Option<&str>,
 ) -> Result<(), String> {
+    match run_elevated_exe_capture(app, file_path, params).await? {
+        0 => Ok(()),
+        n => Err(format!("程序返回错误码 {}", n)),
+    }
+}
+
+/// 与 [`run_elevated_exe`] 同语义，但返回真实退出码而非把非 0 视为错误。
+/// PowerShell 脚本约定退出码 0/1/2 表示不同结果时使用。
+#[cfg(windows)]
+async fn run_elevated_exe_capture(
+    app: AppHandle,
+    file_path: std::path::PathBuf,
+    params: Option<&str>,
+) -> Result<u32, String> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, ERROR_CANCELLED, WAIT_OBJECT_0};
     use windows_sys::Win32::System::Threading::{
@@ -197,7 +211,7 @@ async fn run_elevated_exe(
         .chain(std::iter::once(0))
         .collect();
 
-    tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || -> Result<u32, String> {
         // SAFETY: SHELLEXECUTEINFOW 是 POD,全 0 初始化合法,后续逐字段填写
         let mut sei: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
         sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
@@ -243,11 +257,7 @@ async fn run_elevated_exe(
             return Err("无法读取退出码".to_string());
         }
 
-        if exit_code == 0 {
-            Ok(())
-        } else {
-            Err(format!("程序返回错误码 {}", exit_code))
-        }
+        Ok(exit_code)
     })
     .await
     .map_err(|e| format!("任务异常: {}", e))?
@@ -332,12 +342,130 @@ pub async fn uninstall_driver(app: AppHandle) -> Result<(), String> {
 
 #[cfg(windows)]
 pub(crate) fn dd_hid_sys_installed() -> bool {
+    dd_hid_sys_path().exists()
+}
+
+/// `ddhid63340.sys` 的绝对路径（基于 `%SystemRoot%`）。
+#[cfg(windows)]
+fn dd_hid_sys_path() -> std::path::PathBuf {
     let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
     std::path::Path::new(&sysroot)
         .join("System32")
         .join("drivers")
         .join("ddhid63340.sys")
-        .exists()
+}
+
+/// 兜底删除 `ddhid63340.sys` 的结果。
+#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SysRemoveOutcome {
+    /// 已从磁盘移除
+    Removed,
+    /// 文件被内核占用删不掉，但已通过 MoveFileEx 标记重启时删除
+    PendingReboot,
+}
+
+/// 兜底删除 `ddhid63340.sys`：通过 elevated PowerShell 单脚本完成。
+///
+/// `ddc.exe` 安装驱动时 sys 落在 `%SystemRoot%\System32\drivers\` 下且所有者被
+/// 设为 **TrustedInstaller**，即便已 elevated 的管理员也会拿到 ERROR_ACCESS_DENIED。
+/// 因此必须先夺权再删，单独的 `MoveFileEx` 标记重启删除会被 SMSS 同样的 ACL 拦下。
+///
+/// 脚本流程：
+/// 1. 文件不存在 → exit 0
+/// 2. `takeown /F $p /A` 把所有权转给 Administrators 组
+/// 3. `icacls $p /grant *S-1-5-32-544:(F)` 给 Administrators 完整控制
+///    （用 SID 避开本地化名称差异）
+/// 4. `Remove-Item` 删除，成功 → exit 0
+/// 5. 仍删不掉（罕见，通常是 SetupAPI 残留锁）→ 写 `PendingFileRenameOperations`
+///    多字符串标记重启清理（路径已经 takeown，SMSS 删除阶段不会再被 ACL 拦） → exit 1
+/// 6. 注册表写失败 → exit 2
+#[cfg(windows)]
+async fn try_force_remove_dd_hid_sys(app: &AppHandle) -> Result<SysRemoveOutcome, String> {
+    let sys = dd_hid_sys_path();
+    if !sys.exists() {
+        return Ok(SysRemoveOutcome::Removed);
+    }
+
+    let sys_lit = sys.display().to_string();
+    // PendingFileRenameOperations 文档要求 NT 命名空间路径 (\??\<drive>:\...)
+    let nt_path = format!("\\??\\{sys_lit}");
+    let script = format!(
+        "$ErrorActionPreference='SilentlyContinue';\n\
+         $p='{sys_lit}';\n\
+         if (-not (Test-Path -LiteralPath $p)) {{ exit 0 }}\n\
+         & takeown.exe /F $p /A | Out-Null;\n\
+         & icacls.exe $p /grant '*S-1-5-32-544:(F)' /C | Out-Null;\n\
+         Remove-Item -LiteralPath $p -Force;\n\
+         if (-not (Test-Path -LiteralPath $p)) {{ exit 0 }}\n\
+         $k='HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager';\n\
+         $name='PendingFileRenameOperations';\n\
+         $existing=(Get-ItemProperty -Path $k -Name $name -ErrorAction SilentlyContinue).$name;\n\
+         $entry=@('{nt_path}','');\n\
+         if ($existing) {{ $new=$existing + $entry }} else {{ $new=$entry }};\n\
+         New-ItemProperty -Path $k -Name $name -PropertyType MultiString -Value $new -Force | Out-Null;\n\
+         if (Test-Path -LiteralPath $p) {{\n\
+           if ((Get-ItemProperty -Path $k -Name $name).$name -contains '{nt_path}') {{ exit 1 }} else {{ exit 2 }}\n\
+         }} else {{ exit 0 }}",
+    );
+    let utf16: Vec<u16> = script.encode_utf16().collect();
+    let bytes: Vec<u8> = utf16.iter().flat_map(|c| c.to_le_bytes()).collect();
+    let encoded = base64_std_encode(&bytes);
+    let arg = format!(
+        "-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {}",
+        encoded
+    );
+    let exit = run_elevated_exe_capture(
+        app.clone(),
+        std::path::PathBuf::from(
+            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+        ),
+        Some(&arg),
+    )
+    .await?;
+    match exit {
+        0 => Ok(SysRemoveOutcome::Removed),
+        1 => Ok(SysRemoveOutcome::PendingReboot),
+        n => Err(format!(
+            "兜底删除驱动文件失败（PowerShell 退出码 {}）",
+            n
+        )),
+    }
+}
+
+/// 极简 Base64 标准编码（PowerShell -EncodedCommand 用），无需引入 base64 crate。
+#[cfg(windows)]
+fn base64_std_encode(input: &[u8]) -> String {
+    const TBL: &[u8] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
+    let mut chunks = input.chunks_exact(3);
+    for c in chunks.by_ref() {
+        let n = ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | (c[2] as u32);
+        out.push(TBL[((n >> 18) & 0x3F) as usize] as char);
+        out.push(TBL[((n >> 12) & 0x3F) as usize] as char);
+        out.push(TBL[((n >> 6) & 0x3F) as usize] as char);
+        out.push(TBL[(n & 0x3F) as usize] as char);
+    }
+    let rem = chunks.remainder();
+    match rem.len() {
+        1 => {
+            let n = (rem[0] as u32) << 16;
+            out.push(TBL[((n >> 18) & 0x3F) as usize] as char);
+            out.push(TBL[((n >> 12) & 0x3F) as usize] as char);
+            out.push('=');
+            out.push('=');
+        }
+        2 => {
+            let n = ((rem[0] as u32) << 16) | ((rem[1] as u32) << 8);
+            out.push(TBL[((n >> 18) & 0x3F) as usize] as char);
+            out.push(TBL[((n >> 12) & 0x3F) as usize] as char);
+            out.push(TBL[((n >> 6) & 0x3F) as usize] as char);
+            out.push('=');
+        }
+        _ => {}
+    }
+    out
 }
 
 /// 把「驱动文件是否落盘」与「ddc.exe 退出码」合并成最终的安装判定结果。
@@ -409,8 +537,18 @@ pub async fn install_dd_hid_driver(app: AppHandle) -> Result<(), String> {
     }
 }
 
+/// 卸载结果。`pending_reboot=true` 表示驱动文件已标记为重启删除、卸载在逻辑上
+/// 已完成，但物理文件要等下次开机才消失。
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct UninstallOutcome {
+    /// 用户友好提示文案
+    pub message: String,
+    /// 是否需要重启计算机以最终清理驱动文件
+    pub pending_reboot: bool,
+}
+
 #[tauri::command]
-pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<(), String> {
+pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<UninstallOutcome, String> {
     #[cfg(windows)]
     {
         use crate::engine::input::{init_backend, InputMode};
@@ -426,9 +564,32 @@ pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<(), String> {
         // ddc.exe 在交互式 cmd 中收尾会 `pause`，用户按键后退出码不可信；
         // 以驱动文件是否被移除为最终判定。
         let exe_result = run_elevated_exe(app.clone(), exe, Some("-u")).await;
-        let result = judge_uninstall_result(dd_hid_sys_installed(), exe_result);
+        // 兜底：ddc.exe 偶发会以非 0 退出且把 sys 留在原地（TrustedInstaller 占有 ACL、
+        // PnP 异步等）。统一交给 try_force_remove_dd_hid_sys 接管：takeown + icacls + 删除，
+        // 删不掉再写 PendingFileRenameOperations 标记重启清理。
+        let mut pending_reboot = false;
+        if dd_hid_sys_installed() {
+            match try_force_remove_dd_hid_sys(&app).await {
+                Ok(SysRemoveOutcome::Removed) => {}
+                Ok(SysRemoveOutcome::PendingReboot) => pending_reboot = true,
+                Err(e) => tracing::warn!("强删 ddhid63340.sys 兜底失败：{}", e),
+            }
+        }
         crate::commands::status::emit_status_changed(&app);
-        result
+
+        if pending_reboot {
+            return Ok(UninstallOutcome {
+                message: "驱动文件已标记为重启后清理，请重启电脑完成卸载。".to_string(),
+                pending_reboot: true,
+            });
+        }
+        match judge_uninstall_result(dd_hid_sys_installed(), exe_result) {
+            Ok(()) => Ok(UninstallOutcome {
+                message: "究极HID 驱动已卸载".to_string(),
+                pending_reboot: false,
+            }),
+            Err(e) => Err(e),
+        }
     }
     #[cfg(not(windows))]
     {
