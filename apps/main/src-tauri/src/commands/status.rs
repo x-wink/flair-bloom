@@ -89,7 +89,7 @@ pub fn emit_status_changed(app: &AppHandle) {
 
 #[cfg(windows)]
 fn collect_elevated() -> bool {
-    crate::commands::engine::is_process_elevated()
+    win_driver::elevation::is_process_elevated()
 }
 
 #[cfg(not(windows))]
@@ -120,7 +120,7 @@ fn collect_interception_installed() -> DriverStatus {
 
 #[cfg(windows)]
 fn collect_dd_hid_installed() -> DriverStatus {
-    let sys = crate::commands::engine::dd_hid_sys_installed();
+    let sys = win_driver::dd_hid::dd_hid_sys_installed();
     let service = win_sysinfo::registry::service_key_present("ddhid63340");
     match (sys, service) {
         (true, true) => DriverStatus::Installed,

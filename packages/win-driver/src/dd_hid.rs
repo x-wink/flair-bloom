@@ -1,6 +1,8 @@
 //! DD-HID 驱动安装/卸载 + 残留检测。
 
 #[cfg(windows)]
+use std::path::Path;
+#[cfg(windows)]
 use crate::{elevation::run_elevated_exe, powershell};
 #[cfg(windows)]
 use tracing::warn;

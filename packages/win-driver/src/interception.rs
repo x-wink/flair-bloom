@@ -1,6 +1,8 @@
 //! Interception 驱动安装/卸载。
 
 #[cfg(windows)]
+use std::path::Path;
+#[cfg(windows)]
 use crate::elevation::run_elevated_exe;
 
 /// 安装 Interception 驱动（调用 `install-interception.exe /install`）。
