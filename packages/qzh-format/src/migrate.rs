@@ -4,7 +4,7 @@
 //! 每个版本对应的具体改写规则集中在 `migrate_step` 内。
 
 use migrate::{run_migrations, MigrateError};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::profile::CURRENT_SCHEMA_VERSION;
 
@@ -15,9 +15,56 @@ pub fn migrate_profile(data: Value, from: u32) -> Result<Value, MigrateError> {
     run_migrations(data, from, CURRENT_SCHEMA_VERSION, migrate_step)
 }
 
-fn migrate_step(_data: Value, from_version: u32) -> Result<Value, MigrateError> {
-    // v1 is the initial version — no migrations needed yet
-    Err(MigrateError::UnknownVersion(from_version))
+fn migrate_step(data: Value, from_version: u32) -> Result<Value, MigrateError> {
+    match from_version {
+        1 => migrate_v1_to_v2(data),
+        v => Err(MigrateError::UnknownVersion(v)),
+    }
+}
+
+/// v1 → v2：所有按键字段从裸 `u32` 改为 [`crate::key_id::KeyId`]。
+///
+/// 涉及位置：
+/// - `rules[].trigger_key` / `rules[].target_key`：必填，`u32` → `Keyboard(u32)`。
+/// - `rules[].stop_key`：可选，缺省/`null` 保留；存在则同样包装。
+/// - `hotkeys.global_toggle`：可选，缺省/`null` 保留；存在则包装。
+fn migrate_v1_to_v2(mut data: Value) -> Result<Value, MigrateError> {
+    if let Some(rules) = data.get_mut("rules").and_then(|r| r.as_array_mut()) {
+        for rule in rules.iter_mut() {
+            wrap_keyboard_field(rule, "trigger_key");
+            wrap_keyboard_field(rule, "target_key");
+            wrap_optional_keyboard_field(rule, "stop_key");
+        }
+    }
+    if let Some(hotkeys) = data.get_mut("hotkeys") {
+        wrap_optional_keyboard_field(hotkeys, "global_toggle");
+    }
+    data["schema_version"] = json!(2);
+    Ok(data)
+}
+
+/// 必填字段：若存在且为整数，包装为 `{kind: "keyboard", code: <vk>}`。
+/// 已经是对象（理论上不该出现在 v1）则原样保留，避免重复包装。
+fn wrap_keyboard_field(obj: &mut Value, field: &str) {
+    let Some(val) = obj.get_mut(field) else {
+        return;
+    };
+    if let Some(vk) = val.as_u64() {
+        *val = json!({ "kind": "keyboard", "code": vk });
+    }
+}
+
+/// 可选字段：`null` / 缺省保持不变；整数包装；其他类型不动。
+fn wrap_optional_keyboard_field(obj: &mut Value, field: &str) {
+    let Some(val) = obj.get_mut(field) else {
+        return;
+    };
+    if val.is_null() {
+        return;
+    }
+    if let Some(vk) = val.as_u64() {
+        *val = json!({ "kind": "keyboard", "code": vk });
+    }
 }
 
 #[cfg(test)]

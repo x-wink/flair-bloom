@@ -6,10 +6,15 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::key_id::{KeyId, MouseButton};
+
 /// 当前 [`Profile`] 的 schema 版本号。
 ///
 /// 升级配置数据结构时必须递增并同步 `migrate::migrate_step`，否则旧文件无法升级。
-pub const CURRENT_SCHEMA_VERSION: u32 = 1;
+///
+/// - v1：所有按键字段为裸 `u32` VK 码。
+/// - v2：按键字段改为 [`KeyId`]，支持键盘 + 鼠标 5 键。
+pub const CURRENT_SCHEMA_VERSION: u32 = 2;
 /// 单个 [`Profile`] 允许的最大规则数量，超出会在 [`Profile::validate`] 阶段被拒绝。
 pub const MAX_RULES: usize = 64;
 
@@ -51,15 +56,15 @@ pub struct BurstRule {
     pub id: String,
     /// 是否启用此规则。被禁用的规则不会被引擎装载。
     pub enabled: bool,
-    /// 触发键（物理按下时启动连发）的虚拟键码。
-    pub trigger_key: u32,
-    /// 连发实际输出到游戏的目标键虚拟键码。
-    pub target_key: u32,
+    /// 触发键（物理按下时启动连发）。
+    pub trigger_key: KeyId,
+    /// 连发实际输出到游戏的目标键。
+    pub target_key: KeyId,
     /// 触发模式：[`BurstMode::Hold`] 或 [`BurstMode::Toggle`]。
     pub mode: BurstMode,
     /// Toggle mode only: separate stop hotkey. Defaults to trigger_key when None.
     #[serde(default)]
-    pub stop_key: Option<u32>,
+    pub stop_key: Option<KeyId>,
     /// Milliseconds between simulated keypresses. Clamped to [10, 10000].
     pub interval_ms: u32,
 }
@@ -77,8 +82,8 @@ pub enum BurstMode {
 /// 全局热键映射。当前仅支持「全局开关」一个槽位。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Hotkeys {
-    /// 全局连发引擎开关的虚拟键码。`None` 表示未绑定热键。
-    pub global_toggle: Option<u32>,
+    /// 全局连发引擎开关绑定的按键。`None` 表示未绑定。
+    pub global_toggle: Option<KeyId>,
 }
 
 /// 高级选项。当前仅含日志级别，未来可扩展。
@@ -108,6 +113,9 @@ pub enum ProfileError {
     /// DD-HID 模式下 Toggle 规则的 `target_key == stop_key`，会导致按下停止键即又触发。
     #[error("rule {0}: target_key must differ from stop_key in DD mode")]
     DdTargetEqualsStop(String),
+    /// DD-HID 模式不支持把鼠标 X1/X2 作为 target（DD SDK `DD_btn` 值域只到 32）。
+    #[error("rule {0}: DD-HID mode does not support mouse X1/X2 as target")]
+    DdMouseSideButtonUnsupported(String),
     /// 解析或序列化 JSON 时出错。
     #[error(transparent)]
     Json(#[from] serde_json::Error),
@@ -140,6 +148,9 @@ impl Profile {
     /// KEYDOWN 必须被 hook 处理（toggle 的本意），无法过滤自身，故仍要求：
     /// - `target_key != trigger_key`
     /// - `target_key != stop_key`（默认 `stop_key = trigger_key`）
+    ///
+    /// 另外 DD SDK `DD_btn` 不支持 X1/X2，故启用规则的 `target_key` 不允许是
+    /// `Mouse(X1|X2)`（trigger / stop 端只走 hook，不受限）。
     pub fn validate_for_mode(&self, distinct_target: bool) -> Result<(), ProfileError> {
         if self.rules.len() > MAX_RULES {
             return Err(ProfileError::TooManyRules);
@@ -149,7 +160,16 @@ impl Profile {
             if !(10..=10000).contains(&i) {
                 return Err(ProfileError::InvalidInterval(i));
             }
-            if distinct_target && rule.enabled && rule.mode == BurstMode::Toggle {
+            if !distinct_target || !rule.enabled {
+                continue;
+            }
+            if matches!(
+                rule.target_key,
+                KeyId::Mouse(MouseButton::X1) | KeyId::Mouse(MouseButton::X2)
+            ) {
+                return Err(ProfileError::DdMouseSideButtonUnsupported(rule.id.clone()));
+            }
+            if rule.mode == BurstMode::Toggle {
                 if rule.target_key == rule.trigger_key {
                     return Err(ProfileError::DdTargetEqualsTrigger(rule.id.clone()));
                 }

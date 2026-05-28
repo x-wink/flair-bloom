@@ -37,15 +37,27 @@ pub fn set_rules(state: State<EngineState>, rules: Vec<BurstRule>) -> Result<(),
     }
 
     // DD-HID 模式仅 Toggle 模式要求 target_key 与 trigger_key/stop_key 不同；
-    // Hold 模式靠 input.rs 的注入事件队列识别 sim 事件，允许 trigger == target
+    // Hold 模式靠 input.rs 的注入事件队列识别 sim 事件，允许 trigger == target；
+    // 另外 X1/X2 鼠标键作为 target 在 DD 模式不被支持（DD_btn 值域所限）。
     #[cfg(windows)]
     {
+        use qzh_format::key_id::{KeyId, MouseButton};
+
         let mode = crate::engine::input::current_mode();
         if mode.requires_distinct_target_for_toggle() {
-            for rule in rules
-                .iter()
-                .filter(|r| r.enabled && matches!(r.mode, qzh_format::profile::BurstMode::Toggle))
-            {
+            for rule in rules.iter().filter(|r| r.enabled) {
+                if matches!(
+                    rule.target_key,
+                    KeyId::Mouse(MouseButton::X1) | KeyId::Mouse(MouseButton::X2)
+                ) {
+                    return Err(format!(
+                        "究极HID 模式不支持鼠标侧键作为目标键，请把规则「{}」的目标键换成左/右/中键或键盘键",
+                        rule.id
+                    ));
+                }
+                if !matches!(rule.mode, qzh_format::profile::BurstMode::Toggle) {
+                    continue;
+                }
                 if rule.target_key == rule.trigger_key {
                     return Err(format!(
                         "究极HID 模式下，切换连发规则「{}」的目标键不可与启动热键相同",
@@ -108,13 +120,25 @@ pub fn set_input_mode(
             return Err("究极HID 模式需要管理员权限，请先以管理员身份重启应用".to_string());
         }
 
-        // 切到 DD-HID 前用新规则约束做静态校验：仅 Toggle 模式要求 target 与 trigger/stop 互异
+        // 切到 DD-HID 前用新规则约束做静态校验：
+        // - Toggle 模式要求 target 与 trigger/stop 互异
+        // - target 不允许是鼠标 X1/X2（DD_btn 值域所限）
         if input_mode.requires_distinct_target_for_toggle() {
+            use qzh_format::key_id::{KeyId, MouseButton};
             let rules = state.0.get_rules();
-            for rule in rules
-                .iter()
-                .filter(|r| r.enabled && matches!(r.mode, qzh_format::profile::BurstMode::Toggle))
-            {
+            for rule in rules.iter().filter(|r| r.enabled) {
+                if matches!(
+                    rule.target_key,
+                    KeyId::Mouse(MouseButton::X1) | KeyId::Mouse(MouseButton::X2)
+                ) {
+                    return Err(format!(
+                        "切换失败：规则「{}」的目标键是鼠标侧键，究极HID 模式不支持。请把目标键改为左/右/中键或键盘键。",
+                        rule.id
+                    ));
+                }
+                if !matches!(rule.mode, qzh_format::profile::BurstMode::Toggle) {
+                    continue;
+                }
                 if rule.target_key == rule.trigger_key {
                     return Err(format!(
                         "切换失败：切换连发规则「{}」的目标键与启动热键相同。\n究极HID 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",

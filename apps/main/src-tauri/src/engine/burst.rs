@@ -3,6 +3,9 @@ use super::input::SIM_MARKER;
 #[cfg(windows)]
 use super::input::{clear_pending_injections, try_consume_injection};
 use super::input::{key_down, key_up};
+use qzh_format::key_id::KeyId;
+#[cfg(windows)]
+use qzh_format::key_id::MouseButton;
 use qzh_format::profile::{BurstMode, BurstRule};
 #[cfg(windows)]
 use std::sync::{RwLock, Weak};
@@ -23,8 +26,10 @@ use windows_sys::Win32::{
     Foundation::{LPARAM, WPARAM},
     UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
-        UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP,
-        WM_SYSKEYDOWN, WM_SYSKEYUP,
+        UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL,
+        WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+        WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP,
+        XBUTTON1, XBUTTON2,
     },
 };
 
@@ -32,8 +37,19 @@ use windows_sys::Win32::{
 #[cfg(windows)]
 static ENGINE_HOOK: RwLock<Option<Weak<BurstEngine>>> = RwLock::new(None);
 
-type ActiveLoops =
-    Arc<Mutex<HashMap<String, (Arc<AtomicBool>, thread::Thread, u32, thread::JoinHandle<()>)>>>;
+type ActiveLoops = Arc<
+    Mutex<
+        HashMap<
+            String,
+            (
+                Arc<AtomicBool>,
+                thread::Thread,
+                KeyId,
+                thread::JoinHandle<()>,
+            ),
+        >,
+    >,
+>;
 
 /// 关键路径锁兜底：若前一持锁者 panic 导致 Mutex 中毒,强行复活并继续。
 /// 按键工具最差故障是键盘卡死,值得给一层硬兜底；连发线程已被 catch_unwind
@@ -85,7 +101,7 @@ impl BurstEngine {
         revive(self.active_loops.lock()).keys().cloned().collect()
     }
 
-    pub fn on_key_press(&self, vk: u32) {
+    pub fn on_key_press(&self, key: KeyId) {
         if !self.global_enabled.load(Ordering::SeqCst) {
             return;
         }
@@ -93,22 +109,22 @@ impl BurstEngine {
         for rule in rules.iter().filter(|r| r.enabled) {
             match rule.mode {
                 BurstMode::Hold => {
-                    if rule.trigger_key == vk {
+                    if rule.trigger_key == key {
                         self.start_hold_burst(rule);
                     }
                 }
                 BurstMode::Toggle => {
                     let stop = rule.stop_key.unwrap_or(rule.trigger_key);
-                    if rule.trigger_key == vk || stop == vk {
+                    if rule.trigger_key == key || stop == key {
                         let started = revive(self.toggle_states.lock())
                             .get(&rule.id)
                             .copied()
                             .unwrap_or(false);
                         if started {
-                            if stop == vk {
+                            if stop == key {
                                 self.handle_toggle_press(rule);
                             }
-                        } else if rule.trigger_key == vk {
+                        } else if rule.trigger_key == key {
                             self.handle_toggle_press(rule);
                         }
                     }
@@ -117,11 +133,11 @@ impl BurstEngine {
         }
     }
 
-    pub fn on_key_release(&self, vk: u32) {
+    pub fn on_key_release(&self, key: KeyId) {
         let rules = revive(self.rules.lock()).clone();
         for rule in rules
             .iter()
-            .filter(|r| r.enabled && r.trigger_key == vk && r.mode == BurstMode::Hold)
+            .filter(|r| r.enabled && r.trigger_key == key && r.mode == BurstMode::Hold)
         {
             self.stop_burst(&rule.id);
         }
@@ -274,7 +290,7 @@ const LLKHF_REPEAT: u32 = 0x40;
 /// 有效 `KBDLLHOOKSTRUCT`,生命周期覆盖本次回调返回前。函数内不持有该指针的延长引用,
 /// 也不跨线程发送借用。
 #[cfg(windows)]
-unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> isize {
+unsafe extern "system" fn keyboard_hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> isize {
     if ncode >= 0 {
         // SAFETY: 上文 # Safety 契约保证 ncode>=0 时 lparam 是有效的
         // KBDLLHOOKSTRUCT 指针,借用 kb 不存活到回调返回之后
@@ -283,13 +299,14 @@ unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
         // DD-HID：dwExtraInfo 由驱动端置位，无法控制，转用 PENDING_INJECTIONS 队列匹配
         let is_sim_marker = kb.dwExtraInfo == SIM_MARKER;
         if !is_sim_marker {
+            let key = KeyId::Keyboard(kb.vkCode);
             let is_up = matches!(wparam as u32, WM_KEYUP | WM_SYSKEYUP);
             let is_down_or_up = matches!(
                 wparam as u32,
                 WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP
             );
             // 仅对 down/up 主事件调用消费，避免无关 wparam 误吃记录
-            if is_down_or_up && try_consume_injection(kb.vkCode, is_up) {
+            if is_down_or_up && try_consume_injection(key, is_up) {
                 // SAFETY: WH_KEYBOARD_LL 文档允许传入 null hhk,Windows 会沿钩链向后传递
                 return CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam);
             }
@@ -303,15 +320,80 @@ unsafe extern "system" fn hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
                 match wparam as u32 {
                     // key-repeat 时跳过：Toggle 模式下持续按键会反复开关连发
                     WM_KEYDOWN | WM_SYSKEYDOWN if (kb.flags & LLKHF_REPEAT) == 0 => {
-                        engine.on_key_press(kb.vkCode)
+                        engine.on_key_press(key)
                     }
-                    WM_KEYUP | WM_SYSKEYUP => engine.on_key_release(kb.vkCode),
+                    WM_KEYUP | WM_SYSKEYUP => engine.on_key_release(key),
                     _ => {}
                 }
             }
         }
     }
     // SAFETY: 同上,fall-through 路径必须把事件继续传递给后续钩子,否则会吞掉键盘输入
+    CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam)
+}
+
+/// 把 wparam + MSLLHOOKSTRUCT 解析为 (按钮, 是否抬起)。仅识别 5 个按钮事件，
+/// 移动 / 滚轮 / 双击不映射，调用方应直接转发。
+#[cfg(windows)]
+fn classify_mouse_event(wparam: u32, mouse_data: u32) -> Option<(MouseButton, bool)> {
+    match wparam {
+        WM_LBUTTONDOWN => Some((MouseButton::Left, false)),
+        WM_LBUTTONUP => Some((MouseButton::Left, true)),
+        WM_RBUTTONDOWN => Some((MouseButton::Right, false)),
+        WM_RBUTTONUP => Some((MouseButton::Right, true)),
+        WM_MBUTTONDOWN => Some((MouseButton::Middle, false)),
+        WM_MBUTTONUP => Some((MouseButton::Middle, true)),
+        WM_XBUTTONDOWN | WM_XBUTTONUP => {
+            // MSLLHOOKSTRUCT.mouseData 高 16 位是 XBUTTON1 / XBUTTON2 标识
+            let xbtn = ((mouse_data >> 16) & 0xFFFF) as u16;
+            let btn = if xbtn == XBUTTON1 {
+                MouseButton::X1
+            } else if xbtn == XBUTTON2 {
+                MouseButton::X2
+            } else {
+                return None;
+            };
+            Some((btn, wparam == WM_XBUTTONUP))
+        }
+        _ => None,
+    }
+}
+
+/// WH_MOUSE_LL 低级鼠标钩子回调；与键盘 hook 共用同一消息循环线程。
+///
+/// # Safety
+///
+/// 由 Windows 调用：当 `ncode >= 0` 时 `lparam` 指向 Windows 维护的
+/// 有效 `MSLLHOOKSTRUCT`，生命周期覆盖本次回调返回前。函数内不持有该指针的延长引用。
+#[cfg(windows)]
+unsafe extern "system" fn mouse_hook_proc(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> isize {
+    if ncode >= 0 {
+        // SAFETY: 上文 # Safety 契约保证 ncode>=0 时 lparam 指向有效 MSLLHOOKSTRUCT
+        let ms = &*(lparam as *const MSLLHOOKSTRUCT);
+        let is_sim_marker = ms.dwExtraInfo == SIM_MARKER;
+        if !is_sim_marker {
+            if let Some((btn, is_up)) = classify_mouse_event(wparam as u32, ms.mouseData) {
+                let key = KeyId::Mouse(btn);
+                if try_consume_injection(key, is_up) {
+                    // SAFETY: 文档允许 null hhk
+                    return CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam);
+                }
+                let engine = ENGINE_HOOK
+                    .read()
+                    .unwrap()
+                    .as_ref()
+                    .and_then(|w| w.upgrade());
+                if let Some(engine) = engine {
+                    if is_up {
+                        engine.on_key_release(key);
+                    } else {
+                        engine.on_key_press(key);
+                    }
+                }
+            }
+        }
+    }
+    // SAFETY: 同上,fall-through 路径必须把事件继续传递给后续钩子
     CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam)
 }
 
@@ -326,16 +408,34 @@ pub fn start_listener(engine: Arc<BurstEngine>) {
         *guard = Some(Arc::downgrade(&engine));
     }
     thread::spawn(move || {
-        let hook =
-            // SAFETY: WH_KEYBOARD_LL 全局钩子允许 hmod=null + dwThreadId=0,Windows
-            // 会自行加载本进程模块作为 hook owner;hook_proc 满足 # Safety 契约
-            unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(hook_proc), std::ptr::null_mut(), 0) };
-        if hook.is_null() {
+        // SAFETY: WH_KEYBOARD_LL 全局钩子允许 hmod=null + dwThreadId=0,Windows
+        // 会自行加载本进程模块作为 hook owner;hook_proc 满足 # Safety 契约
+        let kbd_hook = unsafe {
+            SetWindowsHookExW(
+                WH_KEYBOARD_LL,
+                Some(keyboard_hook_proc),
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if kbd_hook.is_null() {
             error!("安装键盘 hook 失败");
             return;
         }
         info!("键盘 hook 已安装");
-        // WH_KEYBOARD_LL 要求安装线程持续运行消息循环，否则 Windows 会在超时后移除 hook
+
+        // SAFETY: WH_MOUSE_LL 全局钩子规则与键盘相同
+        let mouse_hook = unsafe {
+            SetWindowsHookExW(WH_MOUSE_LL, Some(mouse_hook_proc), std::ptr::null_mut(), 0)
+        };
+        if mouse_hook.is_null() {
+            error!("安装鼠标 hook 失败，鼠标按键将无法触发连发");
+        } else {
+            info!("鼠标 hook 已安装");
+        }
+
+        // WH_KEYBOARD_LL / WH_MOUSE_LL 都要求安装线程持续运行消息循环，
+        // 否则 Windows 会在超时后移除 hook
         // SAFETY: MSG 是 POD 结构,全 0 是合法初值,GetMessageW 会写入有效字段
         let mut msg = unsafe { std::mem::zeroed::<MSG>() };
         loop {
@@ -351,9 +451,14 @@ pub fn start_listener(engine: Arc<BurstEngine>) {
                 DispatchMessageW(&msg);
             }
         }
-        // SAFETY: hook 是上面 SetWindowsHookExW 返回的非空有效句柄
-        unsafe { UnhookWindowsHookEx(hook) };
+        // SAFETY: kbd_hook 是上面 SetWindowsHookExW 返回的非空有效句柄
+        unsafe { UnhookWindowsHookEx(kbd_hook) };
         info!("键盘 hook 已卸载");
+        if !mouse_hook.is_null() {
+            // SAFETY: mouse_hook 上面已校验非空
+            unsafe { UnhookWindowsHookEx(mouse_hook) };
+            info!("鼠标 hook 已卸载");
+        }
     });
     info!("连发引擎监听器已启动");
 }

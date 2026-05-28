@@ -11,7 +11,7 @@ import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehavio
 import { useConfirm } from './components/ConfirmDialog';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/icons';
-import KeyCapture from './components/KeyCapture';
+import KeyCapture, { keyboardKey, type KeyId } from './components/KeyCapture';
 import Overlay from './components/Overlay';
 import ProfileNameForm from './components/ProfileNameForm';
 import { useToast } from './components/Toast';
@@ -62,10 +62,10 @@ const INPUT_MODE_LIST: InputMode[] = ['sendinput', 'interception', 'dd_hid'];
 interface BurstRule {
   id: string;
   enabled: boolean;
-  trigger_key: number;
-  target_key: number;
+  trigger_key: KeyId;
+  target_key: KeyId;
   mode: BurstMode;
-  stop_key: number | null;
+  stop_key: KeyId | null;
   interval_ms: number;
 }
 
@@ -80,7 +80,7 @@ interface Profile {
   schema_version: number;
   meta: ProfileMeta;
   rules: BurstRule[];
-  hotkeys: { global_toggle: number | null };
+  hotkeys: { global_toggle: KeyId | null };
   advanced: { log_level: string };
 }
 
@@ -97,11 +97,12 @@ interface ForkResult {
 function newRule(mode: BurstMode = 'hold'): BurstRule {
   const isHold = mode === 'hold';
   const vk = isHold ? 0x51 : 0x46;
+  const key = keyboardKey(vk);
   return {
     id: crypto.randomUUID(),
     enabled: !isHold,
-    trigger_key: vk,
-    target_key: vk,
+    trigger_key: key,
+    target_key: key,
     mode,
     stop_key: null,
     interval_ms: 10,
@@ -358,7 +359,7 @@ export default function PanelApp() {
     saveTimer.current = setTimeout(() => {
       const name = profileNameRef.current;
       const profile: Profile = {
-        schema_version: 1,
+        schema_version: 2,
         meta: {
           name,
           created_at: 0, // backend will set timestamps

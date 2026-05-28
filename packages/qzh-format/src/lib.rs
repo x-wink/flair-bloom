@@ -6,8 +6,10 @@
 #![deny(missing_docs)]
 
 pub mod header;
+pub mod key_id;
 pub mod macro_seq;
 pub mod migrate;
 pub mod profile;
 
+pub use key_id::{KeyId, MouseButton};
 pub use profile::{Profile, ProfileError};

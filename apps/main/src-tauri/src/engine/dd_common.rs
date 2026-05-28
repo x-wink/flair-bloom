@@ -1,12 +1,14 @@
-//! ddxoft DD SDK 的 FFI 装载层，由 [`super::dd`] 与 [`super::ddhid`] 共用。
+//! ddxoft DD SDK 的 FFI 装载层，由 [`super::ddhid`] 共用。
 //!
 //! 设计要点：
 //! - DLL 在运行时通过 `LoadLibraryW` 加载，避免编译期链接到不存在的导入库；
 //! - DD 协议要求首次调用 `DD_btn(0)`，返回 `1` 才表示内核驱动已就绪；
-//! - 仅暴露键盘相关函数（`DD_key` / `DD_todc`），鼠标功能暂不使用。
+//! - 暴露键盘 `DD_key` / `DD_todc` 与鼠标 `DD_btn`。X1/X2 不在 DD_btn 值域，调用方
+//!   按返回值决定是否回退到 SendInput。
 
 #![cfg(windows)]
 
+use qzh_format::key_id::MouseButton;
 use std::ffi::c_void;
 use std::os::raw::c_int;
 use std::os::windows::ffi::OsStrExt;
@@ -23,10 +25,15 @@ type DdTodcFn = unsafe extern "C" fn(c_int) -> c_int;
 
 pub struct DdFfi {
     handle: HMODULE,
+    dd_btn: DdBtnFn,
     dd_key: DdKeyFn,
     dd_todc: DdTodcFn,
     /// 仅在首次注入时打印一次诊断日志，避免连发循环把日志塞满
     diag_logged: AtomicBool,
+    /// 鼠标分支首次成功注入诊断
+    mouse_diag_logged: AtomicBool,
+    /// X1/X2 不在 DD_btn 值域：仅首次遇到时 warn 一次，避免连发循环刷屏
+    mouse_x1x2_warned: AtomicBool,
 }
 
 // SAFETY: HMODULE 在 64 位 Windows 上是地址不变的内核句柄,DLL 一旦加载到进程
@@ -100,9 +107,12 @@ impl DdFfi {
 
         Some(DdFfi {
             handle,
+            dd_btn,
             dd_key,
             dd_todc,
             diag_logged: AtomicBool::new(false),
+            mouse_diag_logged: AtomicBool::new(false),
+            mouse_x1x2_warned: AtomicBool::new(false),
         })
     }
 
@@ -129,6 +139,36 @@ impl DdFfi {
                 vk, ddcode, flag, ret
             );
         }
+    }
+
+    /// 注入鼠标按钮。返回 `true` 表示由 DD 处理；`false` 表示 DD 不支持
+    /// 此按钮（X1/X2），调用方应回退到 SendInput。
+    pub fn send_mouse(&self, button: MouseButton, is_up: bool) -> bool {
+        // DD_btn 文档值域：1=L↓ 2=L↑ 4=R↓ 8=R↑ 16=M↓ 32=M↑
+        let flag: c_int = match (button, is_up) {
+            (MouseButton::Left, false) => 1,
+            (MouseButton::Left, true) => 2,
+            (MouseButton::Right, false) => 4,
+            (MouseButton::Right, true) => 8,
+            (MouseButton::Middle, false) => 16,
+            (MouseButton::Middle, true) => 32,
+            (MouseButton::X1 | MouseButton::X2, _) => {
+                if !self.mouse_x1x2_warned.swap(true, Ordering::SeqCst) {
+                    warn!("DD-HID 不支持 X1/X2 鼠标按钮，回退到 SendInput");
+                }
+                return false;
+            }
+        };
+        // SAFETY: dd_btn 是从 DD DLL 解析的函数指针，flag 取自上面的有限枚举
+        // 全部在 DD 协议文档定义的合法值域内
+        let ret = unsafe { (self.dd_btn)(flag) };
+        if !self.mouse_diag_logged.swap(true, Ordering::SeqCst) {
+            info!(
+                "DD 首次鼠标注入：button={:?} is_up={} flag={} ret={}",
+                button, is_up, flag, ret
+            );
+        }
+        true
     }
 }
 

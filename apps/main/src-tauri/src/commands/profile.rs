@@ -1,6 +1,7 @@
 use crypto::aes;
 use qzh_format::{
     header::{FileHeader, MAGIC, VERSION},
+    key_id::KeyId,
     migrate::migrate_profile,
     profile::{
         Advanced, BurstMode, BurstRule, Hotkeys, Profile, ProfileMeta, CURRENT_SCHEMA_VERSION,
@@ -267,8 +268,8 @@ fn factory_default_rules() -> Vec<BurstRule> {
         BurstRule {
             id: make_id(),
             enabled: false,
-            trigger_key: 0x51, // Q
-            target_key: 0x51,
+            trigger_key: KeyId::Keyboard(0x51), // Q
+            target_key: KeyId::Keyboard(0x51),
             mode: BurstMode::Hold,
             stop_key: None,
             interval_ms: 10,
@@ -276,8 +277,8 @@ fn factory_default_rules() -> Vec<BurstRule> {
         BurstRule {
             id: make_id(),
             enabled: false,
-            trigger_key: 0x46, // F
-            target_key: 0x46,
+            trigger_key: KeyId::Keyboard(0x46), // F
+            target_key: KeyId::Keyboard(0x46),
             mode: BurstMode::Toggle,
             stop_key: None,
             interval_ms: 10,

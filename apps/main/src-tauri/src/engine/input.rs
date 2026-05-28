@@ -2,6 +2,9 @@
 use super::ddhid::DdHidBackend;
 #[cfg(windows)]
 use super::interception::InterceptionBackend;
+use qzh_format::key_id::KeyId;
+#[cfg(windows)]
+use qzh_format::key_id::MouseButton;
 #[cfg(windows)]
 use std::collections::{HashMap, VecDeque};
 #[cfg(windows)]
@@ -16,9 +19,13 @@ use std::time::{Duration, Instant};
 use tracing::{info, warn};
 #[cfg(windows)]
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
-    MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYEVENTF_EXTENDEDKEY,
-    KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC_EX,
+    MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
+    KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC_EX,
+    MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
+    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT,
 };
+#[cfg(windows)]
+use windows_sys::Win32::UI::WindowsAndMessaging::{XBUTTON1, XBUTTON2};
 
 /// 写入 SendInput 的 dwExtraInfo，hook 据此过滤程序自身模拟的按键，消除竞态。
 /// Interception 后端会把 `information` 字段透传到 `KBDLLHOOKSTRUCT.dwExtraInfo`。
@@ -32,10 +39,10 @@ pub const SIM_MARKER: usize = 0x5148_5844;
 #[cfg(windows)]
 const SIM_TTL: Duration = Duration::from_millis(50);
 
-/// `(vk, is_up) -> Instant 队列`：记录 DD-HID 后端注入的每次 down/up，hook 收到对应
-/// 事件时按 FIFO 配对消费。down 与 up 分桶避免计数串扰。
+/// `(KeyId, is_up) -> Instant 队列`：记录注入的每次 down/up，hook 收到对应
+/// 事件时按 FIFO 配对消费。down 与 up 分桶避免计数串扰。键盘 / 鼠标共用同一张表。
 #[cfg(windows)]
-type PendingMap = HashMap<(u32, bool), VecDeque<Instant>>;
+type PendingMap = HashMap<(KeyId, bool), VecDeque<Instant>>;
 #[cfg(windows)]
 static PENDING_INJECTIONS: OnceLock<Mutex<PendingMap>> = OnceLock::new();
 
@@ -64,20 +71,20 @@ fn drop_expired(queue: &mut VecDeque<Instant>, now: Instant) {
 }
 
 #[cfg(windows)]
-fn record_injection(vk: u32, is_up: bool) {
+fn record_injection(key: KeyId, is_up: bool) {
     let mut map = revive(pending_map().lock());
-    let queue = map.entry((vk, is_up)).or_default();
+    let queue = map.entry((key, is_up)).or_default();
     let now = Instant::now();
     drop_expired(queue, now);
     queue.push_back(now);
 }
 
-/// hook 端调用：若该 (vk, is_up) 对应有未过期的 sim 记录，pop 一条并返回 true
+/// hook 端调用：若该 (KeyId, is_up) 对应有未过期的 sim 记录，pop 一条并返回 true
 /// 表示这是程序自身注入的事件，应该被过滤掉。
 #[cfg(windows)]
-pub fn try_consume_injection(vk: u32, is_up: bool) -> bool {
+pub fn try_consume_injection(key: KeyId, is_up: bool) -> bool {
     let mut map = revive(pending_map().lock());
-    let Some(queue) = map.get_mut(&(vk, is_up)) else {
+    let Some(queue) = map.get_mut(&(key, is_up)) else {
         return false;
     };
     drop_expired(queue, Instant::now());
@@ -152,6 +159,9 @@ static DD_KEY_DOWN_LOGGED: AtomicBool = AtomicBool::new(false);
 static DD_KEY_UP_LOGGED: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
 static DD_FALLBACK_LOGGED: AtomicBool = AtomicBool::new(false);
+/// Interception 模式下鼠标设备缺失而落到 SendInput 的首次诊断
+#[cfg(windows)]
+static INTERCEPTION_MOUSE_FALLBACK_LOGGED: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
 const MODE_SENDINPUT: u8 = 0;
@@ -179,10 +189,11 @@ pub fn set_resources_dir(dir: PathBuf) {
 pub fn init_backend(mode: InputMode) {
     let current = CURRENT_MODE.get_or_init(|| std::sync::atomic::AtomicU8::new(MODE_SENDINPUT));
 
-    // 切换模式时重置 DD 诊断旗标，便于下一轮再观察是否被路由到 DD
+    // 切换模式时重置诊断旗标，便于下一轮再观察是否被路由到 DD / Interception
     DD_KEY_DOWN_LOGGED.store(false, std::sync::atomic::Ordering::SeqCst);
     DD_KEY_UP_LOGGED.store(false, std::sync::atomic::Ordering::SeqCst);
     DD_FALLBACK_LOGGED.store(false, std::sync::atomic::Ordering::SeqCst);
+    INTERCEPTION_MOUSE_FALLBACK_LOGGED.store(false, std::sync::atomic::Ordering::SeqCst);
 
     match mode {
         InputMode::Interception => {
@@ -269,7 +280,7 @@ impl InputMode {
 /// `vk` 必须是 Win32 文档允许的虚拟键码;`flags` 必须是 `KEYBDINPUT.dwFlags`
 /// 合法位的子集（KEYEVENTF_KEYUP 等）。本函数仅写本地栈上的 `INPUT` 然后
 /// 调用 `SendInput`,不持有任何外部指针。
-unsafe fn send_via_sendinput(vk: u32, flags: u32) {
+unsafe fn send_kbd_via_sendinput(vk: u32, flags: u32) {
     // SAFETY: MapVirtualKeyW 对任意 u32 都安全,无效 VK 返回 0
     let scan_ex = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX);
     let scan = (scan_ex & 0xFF) as u16;
@@ -301,81 +312,150 @@ unsafe fn send_via_sendinput(vk: u32, flags: u32) {
     SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
 }
 
-pub fn key_down(vk: u32) {
-    #[cfg(windows)]
-    {
-        let mode = CURRENT_MODE
-            .get()
-            .map(|a| a.load(std::sync::atomic::Ordering::SeqCst))
-            .unwrap_or(MODE_SENDINPUT);
-        match mode {
-            MODE_INTERCEPTION => {
-                if let Some(lock) = INTERCEPTION_BACKEND.get() {
-                    if let Some(backend) = revive(lock.lock()).as_ref() {
-                        backend.send_key(vk, false);
-                        return;
-                    }
-                }
-            }
-            MODE_DD_HID => {
-                if let Some(lock) = DD_HID_BACKEND.get() {
-                    if let Some(backend) = revive(lock.lock()).as_ref() {
-                        if !DD_KEY_DOWN_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                            info!("key_down 路由到 DD-HID 后端（vk={:#x}）", vk);
-                        }
-                        // 注入前登记，hook 端按 FIFO 消费以过滤自循环
-                        record_injection(vk, false);
-                        backend.send_key(vk, false);
-                        return;
-                    }
-                }
-                if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                    warn!("当前模式 DD-HID 但后端不存在，回退 SendInput");
-                }
-            }
-            _ => {}
-        }
-        // SAFETY: send_via_sendinput 的 # Safety 契约对 (vk, 0) 成立——
-        // vk 来自上层规则配置,0 是 KEYBDINPUT.dwFlags 的合法值（按下事件）
-        unsafe { send_via_sendinput(vk, 0) };
-    }
-    #[cfg(not(windows))]
-    let _ = vk;
+/// 通过 `SendInput` 发送一个鼠标按钮事件，dwExtraInfo 同样写入 SIM_MARKER 用于 hook 过滤。
+///
+/// # Safety
+///
+/// 仅在本地栈上构造 `INPUT_MOUSE` 调用 `SendInput`，不持有外部指针。
+#[cfg(windows)]
+unsafe fn send_mouse_via_sendinput(button: MouseButton, is_up: bool) {
+    let (dw_flags, mouse_data) = match (button, is_up) {
+        (MouseButton::Left, false) => (MOUSEEVENTF_LEFTDOWN, 0),
+        (MouseButton::Left, true) => (MOUSEEVENTF_LEFTUP, 0),
+        (MouseButton::Right, false) => (MOUSEEVENTF_RIGHTDOWN, 0),
+        (MouseButton::Right, true) => (MOUSEEVENTF_RIGHTUP, 0),
+        (MouseButton::Middle, false) => (MOUSEEVENTF_MIDDLEDOWN, 0),
+        (MouseButton::Middle, true) => (MOUSEEVENTF_MIDDLEUP, 0),
+        (MouseButton::X1, false) => (MOUSEEVENTF_XDOWN, XBUTTON1 as i32),
+        (MouseButton::X1, true) => (MOUSEEVENTF_XUP, XBUTTON1 as i32),
+        (MouseButton::X2, false) => (MOUSEEVENTF_XDOWN, XBUTTON2 as i32),
+        (MouseButton::X2, true) => (MOUSEEVENTF_XUP, XBUTTON2 as i32),
+    };
+    let input = INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx: 0,
+                dy: 0,
+                mouseData: mouse_data as u32,
+                dwFlags: dw_flags,
+                time: 0,
+                dwExtraInfo: SIM_MARKER,
+            },
+        },
+    };
+    // SAFETY: input 是栈上初始化完整的 INPUT_MOUSE,&input 在调用期间有效
+    SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
 }
 
-pub fn key_up(vk: u32) {
+pub fn key_down(key: KeyId) {
     #[cfg(windows)]
     {
-        let mode = CURRENT_MODE
-            .get()
-            .map(|a| a.load(std::sync::atomic::Ordering::SeqCst))
-            .unwrap_or(MODE_SENDINPUT);
-        match mode {
-            MODE_INTERCEPTION => {
-                if let Some(lock) = INTERCEPTION_BACKEND.get() {
-                    if let Some(backend) = revive(lock.lock()).as_ref() {
-                        backend.send_key(vk, true);
-                        return;
-                    }
-                }
-            }
-            MODE_DD_HID => {
-                if let Some(lock) = DD_HID_BACKEND.get() {
-                    if let Some(backend) = revive(lock.lock()).as_ref() {
-                        if !DD_KEY_UP_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
-                            info!("key_up 路由到 DD-HID 后端（vk={:#x}）", vk);
-                        }
-                        record_injection(vk, true);
-                        backend.send_key(vk, true);
-                        return;
-                    }
-                }
-            }
-            _ => {}
-        }
-        // SAFETY: send_via_sendinput 的 # Safety 契约对 (vk, KEYEVENTF_KEYUP) 成立
-        unsafe { send_via_sendinput(vk, KEYEVENTF_KEYUP) };
+        dispatch(key, false);
     }
     #[cfg(not(windows))]
-    let _ = vk;
+    let _ = key;
+}
+
+pub fn key_up(key: KeyId) {
+    #[cfg(windows)]
+    {
+        dispatch(key, true);
+    }
+    #[cfg(not(windows))]
+    let _ = key;
+}
+
+#[cfg(windows)]
+fn dispatch(key: KeyId, is_up: bool) {
+    let mode = CURRENT_MODE
+        .get()
+        .map(|a| a.load(std::sync::atomic::Ordering::SeqCst))
+        .unwrap_or(MODE_SENDINPUT);
+    match (mode, key) {
+        (MODE_INTERCEPTION, KeyId::Keyboard(vk)) => {
+            if let Some(lock) = INTERCEPTION_BACKEND.get() {
+                if let Some(backend) = revive(lock.lock()).as_ref() {
+                    backend.send_key(vk, is_up);
+                    return;
+                }
+            }
+        }
+        (MODE_INTERCEPTION, KeyId::Mouse(btn)) => {
+            if let Some(lock) = INTERCEPTION_BACKEND.get() {
+                if let Some(backend) = revive(lock.lock()).as_ref() {
+                    if backend.send_mouse(btn, is_up) {
+                        return;
+                    }
+                    // Interception 鼠标设备未识别时 send_mouse 返回 false，
+                    // 落到 SendInput 通路；首次发生时打一条 warn 帮用户诊断。
+                    if !INTERCEPTION_MOUSE_FALLBACK_LOGGED
+                        .swap(true, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        warn!("Interception 模式但未识别鼠标设备，鼠标连发回退 SendInput");
+                    }
+                }
+            }
+        }
+        (MODE_DD_HID, KeyId::Keyboard(vk)) => {
+            if let Some(lock) = DD_HID_BACKEND.get() {
+                if let Some(backend) = revive(lock.lock()).as_ref() {
+                    log_dd_route(is_up, key);
+                    record_injection(key, is_up);
+                    backend.send_key(vk, is_up);
+                    return;
+                }
+            }
+            if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                warn!("当前模式 DD-HID 但后端不存在，回退 SendInput");
+            }
+        }
+        (MODE_DD_HID, KeyId::Mouse(btn)) => {
+            // 三种状态：(a) backend 已就绪且接受了按钮 → 已发送，结束；
+            // (b) backend 已就绪但拒绝按钮（X1/X2）→ fall through 到 SendInput，
+            //     原因 dd_common.rs::send_mouse 已自己 warn 过；
+            // (c) backend 不存在（OnceLock 未初始化或被 take 走）→ 与 Keyboard 分支
+            //     对称地 warn 一次再回退到 SendInput。
+            let mut backend_seen = false;
+            if let Some(lock) = DD_HID_BACKEND.get() {
+                if let Some(backend) = revive(lock.lock()).as_ref() {
+                    backend_seen = true;
+                    log_dd_route(is_up, key);
+                    if backend.send_mouse(btn, is_up) {
+                        record_injection(key, is_up);
+                        return;
+                    }
+                }
+            }
+            if !backend_seen && !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
+                warn!("当前模式 DD-HID 但后端不存在，回退 SendInput");
+            }
+        }
+        _ => {}
+    }
+    // SAFETY: 各 send_*_via_sendinput 的 # Safety 契约由调用方保证
+    match key {
+        KeyId::Keyboard(vk) => unsafe {
+            let flags = if is_up { KEYEVENTF_KEYUP } else { 0 };
+            send_kbd_via_sendinput(vk, flags);
+        },
+        KeyId::Mouse(btn) => unsafe {
+            send_mouse_via_sendinput(btn, is_up);
+        },
+    }
+}
+
+/// DD 路由诊断：每个方向（down / up）只在首次命中时打印一次，避免连发循环刷屏
+#[cfg(windows)]
+fn log_dd_route(is_up: bool, key: KeyId) {
+    let logged = if is_up {
+        &DD_KEY_UP_LOGGED
+    } else {
+        &DD_KEY_DOWN_LOGGED
+    };
+    if !logged.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        let dir = if is_up { "key_up" } else { "key_down" };
+        info!("{} 路由到 DD-HID 后端（key={:?}）", dir, key);
+    }
 }

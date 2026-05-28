@@ -6,6 +6,7 @@
 #![cfg(windows)]
 
 use super::dd_common::DdFfi;
+use qzh_format::key_id::MouseButton;
 use std::path::Path;
 use tracing::info;
 
@@ -25,5 +26,11 @@ impl DdHidBackend {
 
     pub fn send_key(&self, vk: u32, is_up: bool) {
         self.ffi.send_key(vk, is_up);
+    }
+
+    /// 返回 `true` 表示由 DD 完成；`false` 表示 X1/X2 等 DD SDK 不支持的按钮，
+    /// 调用方需回退到 SendInput。
+    pub fn send_mouse(&self, button: MouseButton, is_up: bool) -> bool {
+        self.ffi.send_mouse(button, is_up)
     }
 }

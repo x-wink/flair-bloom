@@ -606,9 +606,10 @@ pub fn migrate(mut data: Value, from: u32, to: u32) -> Result<Value> {
 
 **版本历史（持续追加）：**
 
-| schema_version | 变更内容    | 引入版本 |
-| -------------- | ----------- | -------- |
-| 1              | 初始 schema | v0.1     |
+| schema_version | 变更内容                                              | 引入版本 |
+| -------------- | ----------------------------------------------------- | -------- |
+| 1              | 初始 schema                                           | v0.1     |
+| 2              | 按键字段 `u32` VK → `KeyId`（键盘 + 鼠标 5 键统一）   | v0.2     |
 
 ---
 
@@ -733,6 +734,15 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] 跨规则干扰：同上，模拟 target_key 的 release 带 SIM_MARKER，不会进入其他规则的 stop_burst
 - [x] Toggle 连发未过滤 OS key-repeat：hook 回调中 `LLKHF_REPEAT` 标志位检测，仅首次按下进入 `on_key_press`
 
+**键盘全键位 + 鼠标连发（v0.2.0）**
+
+- [x] 数据模型：`packages/qzh-format/src/key_id.rs` 引入 tagged `KeyId = Keyboard(u32) | Mouse(MouseButton)`；`BurstRule.{trigger_key,target_key,stop_key}` 与 `Hotkeys.global_toggle` 全部 `u32` → `KeyId`
+- [x] schema v1→v2 自动迁移：旧裸 VK 包装为 `{kind:"keyboard",code:VK}`，可选字段 `null` 保留
+- [x] 全局物理按键 hook 扩鼠标：与键盘 hook 共用消息循环线程加装 `WH_MOUSE_LL`，识别 5 键 + `WM_XBUTTONDOWN/UP` 高 16 位的 X1/X2，过滤 SIM_MARKER 与自循环
+- [x] 三通道注入支持鼠标 5 键：SendInput `INPUT_MOUSE` + `MOUSEEVENTF_*`、DD `DD_btn`（X1/X2 不在值域，自动回退 SendInput + 一次 warn）、Interception `InterceptionMouseStroke` + 鼠标设备扫描
+- [x] 前端 KeyCapture 扩约 120 项键盘白名单（F13–F24 / 小键盘 / OEM 标点 / 编辑键 / 修饰键独立位）+ 鼠标 5 键 onMouseDown 录入
+- [x] DD-HID schema validate 拦截 `target_key = Mouse(X1|X2)`，UI 提示用户改用 SendInput / Interception 模式
+
 **发布 v0.2**
 
 ---
@@ -824,7 +834,9 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 | 用途              | 库 / 工具                                                  |
 | ----------------- | ---------------------------------------------------------- |
 | 全局键盘监听      | `windows_sys` `WH_KEYBOARD_LL`（Windows）；macOS 待定      |
+| 全局鼠标监听      | `windows_sys` `WH_MOUSE_LL`（Windows，含 X1/X2 侧键）；macOS 待定 |
 | 按键模拟          | `windows_sys` `SendInput` + `KEYEVENTF_SCANCODE`（Windows）；macOS 待定 |
+| 鼠标按钮模拟      | `windows_sys` `SendInput INPUT_MOUSE` + `MOUSEEVENTF_*`（Windows） |
 | 全局热键注册      | `tauri-plugin-global-shortcut`                             |
 | 点击穿透          | `Window::set_ignore_cursor_events()`（Tauri 内置，跨平台） |
 | 自动升级          | `tauri-plugin-updater`                                     |
