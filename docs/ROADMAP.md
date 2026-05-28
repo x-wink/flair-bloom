@@ -161,21 +161,22 @@ std::panic::set_hook → 捕获 panic 信息
 │   │   │   └── assets/
 │   │   │       └── EULA.md             # 用户协议正文（内嵌构建）
 │   │   └── src-tauri/
-│   │       ├── Cargo.toml              # 依赖 qzh-format、crypto
+│   │       ├── Cargo.toml              # 依赖 qzh-profile、win-* 等 packages
 │   │       ├── tauri.conf.json         # 多窗口配置（panel + pet）
 │   │       └── src/
 │   │           ├── main.rs
-│   │           ├── engine/             # 连发引擎
-│   │           │   ├── burst.rs        # 按压连发 + Toggle 连发
-│   │           │   ├── macro_play.rs   # 宏回放
-│   │           │   └── input.rs        # rdev 监听 + enigo 模拟
+│   │           ├── lib.rs              # Tauri Builder 薄壳（~100 行）
+│   │           ├── bootstrap/          # 启动期装配（logging/agreement/update/profile/input）
 │   │           ├── tray.rs             # 系统托盘图标与菜单
-│   │           ├── watcher.rs          # 配置文件变更监听（notify）
+│   │           ├── engine/
+│   │           │   └── mod.rs          # re-export burst-engine / win-input 公开 API
 │   │           └── commands/
-│   │               ├── profile.rs      # 配置文件 CRUD、导入导出
-│   │               ├── license.rs      # 兑换码激活与查询
-│   │               ├── engine.rs       # 引擎控制（开关、规则热更新）
-│   │               └── updater.rs      # 检查更新、下载安装
+│   │               ├── app.rs          # 协议同意 / 检查更新 / 退出
+│   │               ├── driver.rs       # 驱动安装卸载 + 提权重启
+│   │               ├── engine.rs       # 规则 CRUD + 输入模式切换
+│   │               ├── profile.rs      # 配置文件 CRUD
+│   │               ├── repair.rs       # 环境诊断与修复
+│   │               └── status.rs       # 应用状态快照
 │   │
 │   ├── keygen/                         # 兑换码生成 CLI（纯 Rust，不打包进应用）
 │   │   ├── Cargo.toml
@@ -212,14 +213,23 @@ std::panic::set_hook → 捕获 panic 信息
     │   └── src/
     │       └── lib.rs                  # VersionedData trait + migrate() 泛型函数
     │
-    └── qzh-format/                     # .qzh 文件格式（Rust lib crate）
-        ├── Cargo.toml
-        └── src/
-            ├── lib.rs
-            ├── header.rs
-            ├── profile.rs
-            ├── macro_seq.rs
-            └── migrate.rs              # schema 版本迁移链（依赖 packages/migrate）
+    ├── qzh-format/                     # .qzh 文件容器（header + read/write_encrypted）
+    │   └── src/
+    │       ├── header.rs               # FileHeader（Magic/Version/Flags/Nonce）
+    │       └── lib.rs                  # read_encrypted / write_encrypted
+    │
+    ├── qzh-profile/                    # 业务 Profile schema（从 qzh-format 独立）
+    │   └── src/
+    │       ├── key_id.rs               # KeyId（Keyboard(VK) | Mouse(MouseButton)）
+    │       ├── profile.rs              # Profile / BurstRule + validate()
+    │       ├── macro_seq.rs            # MacroSequence / MacroStep
+    │       ├── schema_migrate.rs       # migrate_profile()
+    │       └── lib.rs                  # load_from_path / save_to_path
+    │
+    ├── win-sysinfo/                    # Windows 系统信息 + 注册表 + 安装前置检测
+    ├── win-input/                      # SendInput / Interception / DD-HID 输入注入
+    ├── burst-engine/                   # BurstEngine + LL keyboard/mouse hook
+    └── win-driver/                     # 驱动安装卸载 + ShellExecuteExW + PowerShell
 ```
 
 ---
@@ -401,7 +411,7 @@ apps/release-server（仅依赖 axum / tokio / rust-embed）
 | 单配置规则数 | ≤ 64 条        | 线性匹配不成瓶颈，上限防止滥用                      |
 | 宏序列步骤数 | ≤ 256 步       | 防止回放时间过长                                    |
 
-约束在 `qzh-format` 的 schema 校验层执行（clamp 或 reject），不依赖前端验证。
+约束在 `qzh-profile` 的 schema 校验层执行（clamp 或 reject），不依赖前端验证。
 
 ### 卸载清理策略
 
@@ -508,28 +518,28 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 
 ### 核心功能
 
-| 功能                     | 实现位置                              |
-| ------------------------ | ------------------------------------- |
-| 用户协议（首次启动）     | apps/main — AgreementPage             |
-| 按压连发                 | apps/main/src-tauri — engine/burst.rs |
-| 一键连发（热键 Toggle）  | apps/main/src-tauri — engine/burst.rs |
-| 配置文件 CRUD + 导入导出 | apps/main — commands/profile.rs       |
-| `.qzh` 加密格式          | packages/qzh-format                   |
-| 快速切换配置文件         | 面板 UI + 托盘菜单                    |
-| 系统托盘 & 开机自启      | apps/main/src-tauri — tray.rs         |
-| 桌宠模式（基础动画）     | apps/main — pet/PetApp.tsx            |
-| 自动升级                 | apps/main — commands/updater.rs       |
+| 功能                     | 实现位置                                        |
+| ------------------------ | ----------------------------------------------- |
+| 用户协议（首次启动）     | apps/main — AgreementPage                       |
+| 按压连发                 | packages/burst-engine                           |
+| 一键连发（热键 Toggle）  | packages/burst-engine                           |
+| 配置文件 CRUD + 导入导出 | apps/main — commands/profile.rs                 |
+| `.qzh` 加密格式          | packages/qzh-format + packages/qzh-profile      |
+| 快速切换配置文件         | 面板 UI + 托盘菜单                              |
+| 系统托盘 & 开机自启      | apps/main/src-tauri — tray.rs                   |
+| 桌宠模式（基础动画）     | apps/main — pet/PetApp.tsx                      |
+| 自动升级                 | apps/main — bootstrap/update.rs + commands/app.rs |
 
 ### 亲友专属功能（兑换码激活，限时）
 
-| 功能           | 实现位置                                   |
-| -------------- | ------------------------------------------ |
-| 宏录制与回放   | apps/main/src-tauri — engine/macro_play.rs |
-| 鼠标连点       | apps/main/src-tauri — engine/burst.rs      |
-| 随机抖动       | apps/main/src-tauri — engine/burst.rs      |
-| 条件配置集     | apps/main/src-tauri — watcher.rs           |
-| 回放速度调节   | apps/main/src-tauri — engine/macro_play.rs |
-| 桌宠扩展动画包 | apps/main — pet/（激活后解锁）             |
+| 功能           | 实现位置                                        |
+| -------------- | ----------------------------------------------- |
+| 宏录制与回放   | apps/main/src-tauri — engine/macro_play.rs      |
+| 鼠标连点       | packages/burst-engine                           |
+| 随机抖动       | packages/burst-engine                           |
+| 条件配置集     | apps/main/src-tauri — watcher.rs                |
+| 回放速度调节   | apps/main/src-tauri — engine/macro_play.rs      |
+| 桌宠扩展动画包 | apps/main — pet/（激活后解锁）                  |
 
 ---
 
@@ -578,7 +588,7 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
   → version > CURRENT   → 拒绝加载，提示"请升级应用版本"
 ```
 
-**迁移函数规范（`qzh-format/src/migrate.rs`）：**
+**迁移函数规范（`qzh-profile/src/schema_migrate.rs`）：**
 
 ```rust
 // 每个版本对应一个迁移函数，接收旧 JSON Value，返回新 JSON Value
@@ -635,7 +645,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] `apps/main` Tauri v2 + Vite 多页（panel），`tauri.conf.json` 单窗口配置
 - [x] `packages/crypto` 骨架（AES-256-GCM + HKDF + Ed25519 校验）
 - [x] `packages/migrate` 骨架（`run_migrations()` 泛型函数）
-- [x] `packages/qzh-format` 骨架（`Profile` / `BurstRule` 数据结构 + `FileHeader` + `migrate.rs`）
+- [x] `packages/qzh-format` 骨架（`FileHeader` + `read/write_encrypted`）+ `packages/qzh-profile`（`Profile` / `BurstRule` 数据结构 + `schema_migrate.rs`）
 - [x] GitHub Actions `release.yml`：推 tag 触发矩阵构建（`windows-latest` / `macos-latest`）→ 签名 → 发布 GitHub Release
 - [x] GitHub Secrets：`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 已配置
 - [x] `tauri.conf.json` updater endpoint 指向 GitHub Releases `latest.json`
@@ -736,7 +746,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **键盘全键位 + 鼠标连发（v0.2.0）**
 
-- [x] 数据模型：`packages/qzh-format/src/key_id.rs` 引入 tagged `KeyId = Keyboard(u32) | Mouse(MouseButton)`；`BurstRule.{trigger_key,target_key,stop_key}` 与 `Hotkeys.global_toggle` 全部 `u32` → `KeyId`
+- [x] 数据模型：`packages/qzh-profile/src/key_id.rs` 引入 tagged `KeyId = Keyboard(u32) | Mouse(MouseButton)`；`BurstRule.{trigger_key,target_key,stop_key}` 与 `Hotkeys.global_toggle` 全部 `u32` → `KeyId`
 - [x] schema v1→v2 自动迁移：旧裸 VK 包装为 `{kind:"keyboard",code:VK}`，可选字段 `null` 保留
 - [x] 全局物理按键 hook 扩鼠标：与键盘 hook 共用消息循环线程加装 `WH_MOUSE_LL`，识别 5 键 + `WM_XBUTTONDOWN/UP` 高 16 位的 X1/X2，过滤 SIM_MARKER 与自循环
 - [x] 三通道注入支持鼠标 5 键：SendInput `INPUT_MOUSE` + `MOUSEEVENTF_*`、DD `DD_btn`（X1/X2 不在值域，自动回退 SendInput + 一次 warn）、Interception `InterceptionMouseStroke` + 鼠标设备扫描
