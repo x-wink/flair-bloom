@@ -3,12 +3,19 @@
 //! `UpdateLock` 由 lib.rs `.manage()` 注入，`commands/app.rs` 的 `check_update`
 //! 命令通过 `State<UpdateLock>` 获取它。
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::Manager;
+use std::{
+    sync::atomic::{AtomicBool, Ordering},
+    time::{Duration, Instant},
+};
+use tauri::{Emitter, Manager};
 use tauri_plugin_updater::UpdaterExt;
 use tracing::{info, warn};
 
 pub const DEFAULT_GITHUB_PROXY: &str = "https://gh-proxy.com/";
+pub const UPDATE_DOWNLOAD_PROGRESS_EVENT: &str = "update-download-progress";
+pub const UPDATE_DOWNLOAD_FAILED_EVENT: &str = "update-download-failed";
+
+const PROGRESS_EMIT_INTERVAL: Duration = Duration::from_millis(200);
 
 /// 保证同一时刻只有一个更新任务在运行。
 pub struct UpdateLock(pub AtomicBool);
@@ -53,8 +60,6 @@ pub async fn check_for_updates(app: tauri::AppHandle) {
 }
 
 async fn do_silent_update(app: &tauri::AppHandle) -> Result<(), String> {
-    use tauri::Emitter;
-
     let updater = build_updater(app)?;
     let mut update = match updater.check().await {
         Ok(Some(u)) => u,
@@ -71,8 +76,7 @@ async fn do_silent_update(app: &tauri::AppHandle) -> Result<(), String> {
     proxy_github_download_url(app, &mut update);
     let _ = app.emit("update-downloading", &version);
 
-    let bytes = update
-        .download(|_, _| {}, || {})
+    let bytes = download_update(app, &update, &version)
         .await
         .map_err(|e| format!("download failed: {e}"))?;
 
@@ -109,6 +113,73 @@ pub fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Upd
         .map_err(|e| format!("{e}"))
 }
 
+pub async fn download_update(
+    app: &tauri::AppHandle,
+    update: &tauri_plugin_updater::Update,
+    version: &str,
+) -> Result<Vec<u8>, tauri_plugin_updater::Error> {
+    let handle = app.clone();
+    let mut downloaded = 0u64;
+    let mut last_total = None;
+    let mut last_percent = None;
+    let mut last_emit = Instant::now() - PROGRESS_EMIT_INTERVAL;
+
+    emit_update_download_progress(app, version, 0, None, false);
+
+    let result = update
+        .download(
+            |chunk, total| {
+                downloaded = downloaded.saturating_add(chunk as u64);
+                last_total = total;
+                let percent = total.and_then(|total| {
+                    if total == 0 {
+                        None
+                    } else {
+                        Some(downloaded.saturating_mul(100) / total)
+                    }
+                });
+                let percent_changed = match (percent, last_percent) {
+                    (Some(current), Some(last)) => current > last,
+                    (Some(_), None) => true,
+                    _ => false,
+                };
+                let now = Instant::now();
+                if percent_changed || now.duration_since(last_emit) >= PROGRESS_EMIT_INTERVAL {
+                    emit_update_download_progress(&handle, version, downloaded, total, false);
+                    last_emit = now;
+                    if percent.is_some() {
+                        last_percent = percent;
+                    }
+                }
+            },
+            || {
+                info!("update downloaded");
+            },
+        )
+        .await;
+
+    match result {
+        Ok(bytes) => {
+            let final_size = bytes.len() as u64;
+            emit_update_download_progress(
+                app,
+                version,
+                final_size,
+                last_total.or(Some(final_size)),
+                true,
+            );
+            Ok(bytes)
+        }
+        Err(e) => {
+            let _ = app.emit(
+                UPDATE_DOWNLOAD_FAILED_EVENT,
+                serde_json::json!({ "version": version, "message": e.to_string() }),
+            );
+            Err(e)
+        }
+    }
+}
+
 pub fn proxy_github_download_url(
     app: &tauri::AppHandle,
     update: &mut tauri_plugin_updater::Update,
@@ -122,6 +193,32 @@ pub fn proxy_github_download_url(
         info!("update download routed through GitHub proxy: {proxy_prefix}");
         update.download_url = proxied;
     }
+}
+
+fn emit_update_download_progress(
+    app: &tauri::AppHandle,
+    version: &str,
+    downloaded: u64,
+    total: Option<u64>,
+    done: bool,
+) {
+    let percent = total.and_then(|total| {
+        if total == 0 {
+            None
+        } else {
+            Some(((downloaded as f64 / total as f64) * 100.0).clamp(0.0, 100.0))
+        }
+    });
+    let _ = app.emit(
+        UPDATE_DOWNLOAD_PROGRESS_EVENT,
+        serde_json::json!({
+            "version": version,
+            "downloaded": downloaded,
+            "total": total,
+            "percent": percent,
+            "done": done,
+        }),
+    );
 }
 
 fn github_proxy_prefix(_app: &tauri::AppHandle) -> Option<String> {

@@ -6,7 +6,7 @@ use tracing::{info, warn};
 
 use crate::bootstrap::{
     agreement::AGREEMENT_VERSION,
-    update::{build_updater, proxy_github_download_url, UpdateLock},
+    update::{build_updater, download_update, proxy_github_download_url, UpdateLock},
 };
 
 const PENDING_UPDATE_DIR: &str = "pending_update";
@@ -73,18 +73,10 @@ async fn do_check_update(app: &AppHandle) -> Result<(), String> {
     proxy_github_download_url(app, &mut update);
     let _ = app.emit("update-downloading", &version);
 
-    let bytes = update
-        .download(
-            |_chunk, _total| {},
-            || {
-                info!("update downloaded");
-            },
-        )
-        .await
-        .map_err(|e| {
-            warn!("update download failed: {}", e);
-            format!("下载更新失败: {e}")
-        })?;
+    let bytes = download_update(app, &update, &version).await.map_err(|e| {
+        warn!("update download failed: {}", e);
+        format!("下载更新失败: {e}")
+    })?;
 
     save_pending_update(app, &version, &bytes)?;
     let _ = app.emit(

@@ -15,6 +15,7 @@ import KeyCapture, { keyboardKey, type KeyId } from './components/KeyCapture';
 import Overlay from './components/Overlay';
 import ProfileNameForm from './components/ProfileNameForm';
 import { useToast } from './components/Toast';
+import UpdateProgressBar, { type UpdateDownloadProgress } from './components/UpdateProgressBar';
 import Button from './components/Button';
 import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
@@ -51,6 +52,13 @@ interface AppStatus {
 }
 
 const APP_STATUS_EVENT = 'app-status-changed';
+const UPDATE_PROGRESS_EVENT = 'update-download-progress';
+const UPDATE_FAILED_EVENT = 'update-download-failed';
+
+interface UpdateDownloadFailed {
+  version: string;
+  message: string;
+}
 
 const INPUT_MODE_LABELS: Record<InputMode, string> = {
   sendinput: '通用模式',
@@ -155,6 +163,7 @@ export default function PanelApp() {
   const [appVersion, setAppVersion] = useState('');
   const [updateNotice, setUpdateNotice] = useState<UpdateNoticeInfo | null>(null);
   const [showUpdateNotice, setShowUpdateNotice] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const [globalEnabled, setGlobalEnabled] = useState(false);
   const [togglingGlobal, setTogglingGlobal] = useState(false);
@@ -203,6 +212,8 @@ export default function PanelApp() {
   const confirm = useConfirm();
   const toast = useToast();
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
+  const updateProgressDoneTimer = useRef<ReturnType<typeof setTimeout>>();
+  const updateDownloadFailedRef = useRef(false);
   const initialLoadDone = useRef(false);
   const profileNameRef = useRef(profileName);
   const isDefaultProfile = profileName === DEFAULT_PROFILE_NAME;
@@ -233,6 +244,7 @@ export default function PanelApp() {
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
+      if (updateProgressDoneTimer.current) clearTimeout(updateProgressDoneTimer.current);
     };
   }, []);
 
@@ -318,13 +330,40 @@ export default function PanelApp() {
       setGlobalEnabled(e.payload);
     });
     const unlistenDownloading = listen<string>('update-downloading', (e) => {
+      if (updateProgressDoneTimer.current) clearTimeout(updateProgressDoneTimer.current);
+      updateDownloadFailedRef.current = false;
+      setUpdateProgress({
+        version: e.payload,
+        downloaded: 0,
+        total: null,
+        percent: null,
+        done: false,
+      });
       toast.info(`发现新版本 v${e.payload}，正在下载更新…`);
+    });
+    const unlistenProgress = listen<UpdateDownloadProgress>(UPDATE_PROGRESS_EVENT, (e) => {
+      if (updateProgressDoneTimer.current) clearTimeout(updateProgressDoneTimer.current);
+      setUpdateProgress(e.payload);
+      if (e.payload.done) {
+        updateProgressDoneTimer.current = setTimeout(() => {
+          setUpdateProgress((current) =>
+            current?.version === e.payload.version && current.done ? null : current,
+          );
+        }, 1800);
+      }
+    });
+    const unlistenFailed = listen<UpdateDownloadFailed>(UPDATE_FAILED_EVENT, (e) => {
+      if (updateProgressDoneTimer.current) clearTimeout(updateProgressDoneTimer.current);
+      updateDownloadFailedRef.current = true;
+      setUpdateProgress(null);
+      toast.warning(`下载更新失败：${e.payload.message}`);
     });
     const unlistenReady = listen<UpdateNoticeInfo>('update-ready', (e) => {
       setUpdateNotice(e.payload);
       setShowUpdateNotice(true);
     });
     const unlistenUpToDate = listen('update-not-available', () => {
+      setUpdateProgress(null);
       toast.info('已是最新版本');
     });
     const unlistenClose = getCurrentWindow().onCloseRequested((event) => {
@@ -336,6 +375,8 @@ export default function PanelApp() {
       unlistenStatus.then((fn) => fn());
       unlistenGlobal.then((fn) => fn());
       unlistenDownloading.then((fn) => fn());
+      unlistenProgress.then((fn) => fn());
+      unlistenFailed.then((fn) => fn());
       unlistenReady.then((fn) => fn());
       unlistenUpToDate.then((fn) => fn());
       unlistenClose.then((fn) => fn());
@@ -815,8 +856,12 @@ export default function PanelApp() {
 
   function handleCheckUpdate() {
     setMenuOpen(false);
+    updateDownloadFailedRef.current = false;
     invoke('check_update').catch(() => {
-      toast.warning('检查更新失败，请检查网络连接后重试');
+      setUpdateProgress(null);
+      if (!updateDownloadFailedRef.current) {
+        toast.warning('检查更新失败，请检查网络连接后重试');
+      }
     });
   }
 
@@ -825,8 +870,12 @@ export default function PanelApp() {
     if (updateNotice) {
       setShowUpdateNotice(true);
     } else {
+      updateDownloadFailedRef.current = false;
       invoke('check_update').catch(() => {
-        toast.warning('检查更新失败，请检查网络连接后重试');
+        setUpdateProgress(null);
+        if (!updateDownloadFailedRef.current) {
+          toast.warning('检查更新失败，请检查网络连接后重试');
+        }
       });
     }
   }
@@ -943,6 +992,7 @@ export default function PanelApp() {
           </button>
         </div>
       </header>
+      {updateProgress && <UpdateProgressBar progress={updateProgress} />}
 
       <section className="rules-section">
         <div className="tab-bar">
