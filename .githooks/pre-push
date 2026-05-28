@@ -1,9 +1,0 @@
-#!/usr/bin/env sh
-set -eu
-
-if ! command -v pnpm >/dev/null 2>&1; then
-  echo "pre-push: pnpm is required to run resource integrity checks." >&2
-  exit 1
-fi
-
-pnpm check:resources

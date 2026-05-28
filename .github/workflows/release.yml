@@ -39,6 +39,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Check packaged driver resources
+        run: pnpm check:resources
+
       - name: Resolve previous release tag
         id: prev_release
         shell: bash
