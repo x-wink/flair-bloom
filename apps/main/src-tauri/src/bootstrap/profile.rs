@@ -23,20 +23,18 @@ pub fn load_or_init_profile(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
     };
 
     match active_path {
-        Some(path) => {
-            match load_profile_from_path(&path, &profiles_dir) {
-                Ok(profile) => {
-                    engine.set_rules(profile.rules);
-                    info!("已加载配置: {}", path);
-                }
-                Err(e) => {
-                    warn!("加载配置失败 ({}): {}，回退到默认配置", path, e);
-                    if let Err(e2) = crate::commands::profile::create_default_profile(app, engine) {
-                        error!("回退默认配置也失败: {}", e2);
-                    }
+        Some(path) => match load_profile_from_path(&path, &profiles_dir) {
+            Ok(profile) => {
+                engine.set_rules(profile.rules);
+                info!("已加载配置: {}", path);
+            }
+            Err(e) => {
+                warn!("加载配置失败 ({}): {}，回退到默认配置", path, e);
+                if let Err(e2) = crate::commands::profile::create_default_profile(app, engine) {
+                    error!("回退默认配置也失败: {}", e2);
                 }
             }
-        }
+        },
         None => {
             if let Err(e) = crate::commands::profile::create_default_profile(app, engine) {
                 error!("初始化默认配置失败: {}", e);

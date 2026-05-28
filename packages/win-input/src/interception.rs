@@ -98,15 +98,11 @@ impl InterceptionBackend {
             (MouseButton::X1, false) => {
                 InterceptionMouseState_INTERCEPTION_MOUSE_BUTTON_4_DOWN as u16
             }
-            (MouseButton::X1, true) => {
-                InterceptionMouseState_INTERCEPTION_MOUSE_BUTTON_4_UP as u16
-            }
+            (MouseButton::X1, true) => InterceptionMouseState_INTERCEPTION_MOUSE_BUTTON_4_UP as u16,
             (MouseButton::X2, false) => {
                 InterceptionMouseState_INTERCEPTION_MOUSE_BUTTON_5_DOWN as u16
             }
-            (MouseButton::X2, true) => {
-                InterceptionMouseState_INTERCEPTION_MOUSE_BUTTON_5_UP as u16
-            }
+            (MouseButton::X2, true) => InterceptionMouseState_INTERCEPTION_MOUSE_BUTTON_5_UP as u16,
         };
         let stroke = InterceptionMouseStroke {
             state,

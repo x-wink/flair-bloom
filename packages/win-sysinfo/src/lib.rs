@@ -9,10 +9,10 @@ pub mod registry;
 /// 操作系统版本描述字符串，例如 `"Windows 11 23H2 (Build 22631.4317)"`。
 #[cfg(windows)]
 pub fn os_version() -> String {
+    use crate::registry::{read_reg_dword, read_reg_sz, wide};
     use windows_sys::Win32::System::Registry::{
         RegCloseKey, RegOpenKeyExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY,
     };
-    use crate::registry::{read_reg_dword, read_reg_sz, wide};
 
     let subkey = wide("SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion");
     let mut hkey: HKEY = std::ptr::null_mut();

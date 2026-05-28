@@ -27,7 +27,10 @@ mod tests {
     #[test]
     fn strip_verbatim_removes_drive_prefix() {
         let p = std::path::PathBuf::from(r"\\?\C:\Windows\System32");
-        assert_eq!(strip_verbatim(p), std::path::PathBuf::from(r"C:\Windows\System32"));
+        assert_eq!(
+            strip_verbatim(p),
+            std::path::PathBuf::from(r"C:\Windows\System32")
+        );
     }
 
     #[test]
@@ -39,6 +42,9 @@ mod tests {
     #[test]
     fn strip_verbatim_converts_unc_back_to_double_slash() {
         let p = std::path::PathBuf::from(r"\\?\UNC\server\share\dir");
-        assert_eq!(strip_verbatim(p), std::path::PathBuf::from(r"\\server\share\dir"));
+        assert_eq!(
+            strip_verbatim(p),
+            std::path::PathBuf::from(r"\\server\share\dir")
+        );
     }
 }

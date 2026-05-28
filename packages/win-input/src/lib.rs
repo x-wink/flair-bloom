@@ -279,7 +279,11 @@ unsafe fn send_kbd_via_sendinput(vk: u32, flags: u32) {
     let (w_vk, w_scan, scan_flags) = if scan == 0 || prefix == 0xE1 {
         (vk as u16, 0u16, 0u32)
     } else {
-        let ext = if prefix == 0xE0 { KEYEVENTF_EXTENDEDKEY } else { 0 };
+        let ext = if prefix == 0xE0 {
+            KEYEVENTF_EXTENDEDKEY
+        } else {
+            0
+        };
         (0u16, scan, KEYEVENTF_SCANCODE | ext)
     };
     let input = INPUT {
@@ -407,8 +411,7 @@ fn dispatch(key: KeyId, is_up: bool) {
                     try_consume_injection(key, is_up);
                 }
             }
-            if !backend_seen
-                && !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst)
+            if !backend_seen && !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst)
             {
                 warn!("当前模式 DD-HID 但后端不存在，回退 SendInput");
             }
@@ -429,7 +432,11 @@ fn dispatch(key: KeyId, is_up: bool) {
 
 #[cfg(windows)]
 fn log_dd_route(is_up: bool, key: KeyId) {
-    let logged = if is_up { &DD_KEY_UP_LOGGED } else { &DD_KEY_DOWN_LOGGED };
+    let logged = if is_up {
+        &DD_KEY_UP_LOGGED
+    } else {
+        &DD_KEY_DOWN_LOGGED
+    };
     if !logged.swap(true, std::sync::atomic::Ordering::SeqCst) {
         let dir = if is_up { "key_up" } else { "key_down" };
         info!("{} 路由到 DD-HID 后端（key={:?}）", dir, key);

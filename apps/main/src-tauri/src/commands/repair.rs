@@ -717,8 +717,8 @@ pub async fn repair_dd_hid_residue(app: AppHandle) -> Result<RepairOutcome, Stri
 
 #[cfg(windows)]
 async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
-    use win_input::{init_backend, InputMode};
     use tauri_plugin_store::StoreExt;
+    use win_input::{init_backend, InputMode};
 
     // 修复前先切回 SendInput，避免修复进行时 DLL 仍持有 sys 句柄
     init_backend(InputMode::SendInput);
@@ -1259,5 +1259,4 @@ mod tests {
         let d_2026_01_01 = ymd_from_days(20454);
         assert_eq!(d_2026_01_01, (2026, 1, 1));
     }
-
 }

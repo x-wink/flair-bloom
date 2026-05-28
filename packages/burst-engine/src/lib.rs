@@ -1,6 +1,3 @@
-#[cfg(windows)]
-use win_input::{clear_pending_injections, try_consume_injection, SIM_MARKER};
-use win_input::{key_down, key_up};
 use qzh_profile::key_id::KeyId;
 #[cfg(windows)]
 use qzh_profile::key_id::MouseButton;
@@ -19,6 +16,9 @@ use std::{
 #[cfg(windows)]
 use tracing::error;
 use tracing::info;
+#[cfg(windows)]
+use win_input::{clear_pending_injections, try_consume_injection, SIM_MARKER};
+use win_input::{key_down, key_up};
 #[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{LPARAM, WPARAM},

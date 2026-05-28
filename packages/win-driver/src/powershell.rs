@@ -70,9 +70,7 @@ pub async fn run_script_elevated(script: &str) -> Result<u32, String> {
     let arg =
         format!("-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}");
     run_elevated_exe_capture(
-        std::path::PathBuf::from(
-            "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
-        ),
+        std::path::PathBuf::from("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"),
         Some(&arg),
     )
     .await

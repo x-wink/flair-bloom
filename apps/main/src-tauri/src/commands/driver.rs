@@ -94,8 +94,11 @@ pub async fn install_dd_hid_driver(app: AppHandle) -> Result<(), String> {
         let exe_result = win_driver::dd_hid::install(&res_dir).await;
         let sys_installed = win_driver::dd_hid::dd_hid_sys_installed();
         let service_present = win_sysinfo::registry::service_key_present("ddhid63340");
-        let result =
-            win_driver::judge::judge_install_result(sys_installed, service_present, exe_result.clone());
+        let result = win_driver::judge::judge_install_result(
+            sys_installed,
+            service_present,
+            exe_result.clone(),
+        );
         if let Err(ref e) = result {
             let exe_state = match &exe_result {
                 Ok(()) => "ddc.exe 报告成功".to_string(),
@@ -177,11 +180,10 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
         use windows_sys::Win32::Foundation::ERROR_CANCELLED;
         use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW};
 
-        let _ = win_input::InputMode::from_str(&mode)
-            .ok_or_else(|| format!("未知输入模式: {mode}"))?;
+        let _ =
+            win_input::InputMode::from_str(&mode).ok_or_else(|| format!("未知输入模式: {mode}"))?;
 
-        let exe =
-            std::env::current_exe().map_err(|e| format!("无法定位当前可执行文件: {e}"))?;
+        let exe = std::env::current_exe().map_err(|e| format!("无法定位当前可执行文件: {e}"))?;
         let path_wide: Vec<u16> = exe
             .as_os_str()
             .encode_wide()
