@@ -46,7 +46,10 @@ pub fn read_reg_sz_at(root: RegRoot, subkey: &str, name: &str) -> Option<String>
 
 /// 从已打开的键句柄读取 REG_SZ / REG_EXPAND_SZ 值。
 #[cfg(windows)]
-pub fn read_reg_sz(hkey: windows_sys::Win32::System::Registry::HKEY, name: &str) -> Option<String> {
+pub(crate) fn read_reg_sz(
+    hkey: windows_sys::Win32::System::Registry::HKEY,
+    name: &str,
+) -> Option<String> {
     use windows_sys::Win32::System::Registry::{RegQueryValueExW, REG_EXPAND_SZ, REG_SZ};
 
     let wname = wide(name);
@@ -93,7 +96,10 @@ pub fn read_reg_sz(hkey: windows_sys::Win32::System::Registry::HKEY, name: &str)
 
 /// 从已打开的键句柄读取 REG_DWORD 值。
 #[cfg(windows)]
-pub fn read_reg_dword(hkey: windows_sys::Win32::System::Registry::HKEY, name: &str) -> Option<u32> {
+pub(crate) fn read_reg_dword(
+    hkey: windows_sys::Win32::System::Registry::HKEY,
+    name: &str,
+) -> Option<u32> {
     use windows_sys::Win32::System::Registry::{RegQueryValueExW, REG_DWORD};
 
     let wname = wide(name);

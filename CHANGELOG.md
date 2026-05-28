@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-05-28
+
 ### 新功能
 
 - **键盘全键位录入**：按键录入器（启动热键 / 连发键 / 停止热键）支持键盘所有刻字键，包含 F13–F24、小键盘 0–9 与 `* / + - .`、OEM 标点（`; = , - . / \` `[ ] '`）、Insert / Delete / Home / End / PageUp / PageDown 等编辑键，以及 CapsLock / NumLock / ScrollLock / Pause / 菜单键

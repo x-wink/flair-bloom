@@ -131,13 +131,8 @@ pub async fn download_update(
             |chunk, total| {
                 downloaded = downloaded.saturating_add(chunk as u64);
                 last_total = total;
-                let percent = total.and_then(|total| {
-                    if total == 0 {
-                        None
-                    } else {
-                        Some(downloaded.saturating_mul(100) / total)
-                    }
-                });
+                let percent =
+                    total.and_then(|total| downloaded.saturating_mul(100).checked_div(total));
                 let percent_changed = match (percent, last_percent) {
                     (Some(current), Some(last)) => current > last,
                     (Some(_), None) => true,
