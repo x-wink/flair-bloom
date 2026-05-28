@@ -385,7 +385,6 @@ fn collect_install_resources(
                 checked: 0,
                 issues: vec![crate::commands::resource_integrity::ResourceIssue {
                     rel: "<resource_dir>",
-                    label: "<resource_dir>",
                     path: std::path::PathBuf::new(),
                     kind: crate::commands::resource_integrity::ResourceIssueKind::ReadError(
                         e.to_string(),

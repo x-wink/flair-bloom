@@ -1,10 +1,10 @@
-//! Packaged driver resource integrity checks.
+//! FlairBloom packaged driver resource integrity checks.
 
-use sha2::{Digest, Sha256};
-use std::{
-    fs::File,
-    io::{self, Read},
-    path::{Path, PathBuf},
+use std::path::Path;
+
+use ::resource_integrity as generic_resource_integrity;
+pub use generic_resource_integrity::{
+    sha256_file_hex, ResourceHealth, ResourceIssue, ResourceIssueKind, ResourceSpec,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -54,148 +54,38 @@ pub const EXPECTED_RESOURCES: &[ExpectedResource] = &[
     },
 ];
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ResourceIssueKind {
-    Missing,
-    SizeMismatch {
-        actual: u64,
-        expected: u64,
-    },
-    HashMismatch {
-        actual: String,
-        expected: &'static str,
-    },
-    ReadError(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResourceIssue {
-    pub rel: &'static str,
-    pub label: &'static str,
-    pub path: PathBuf,
-    pub kind: ResourceIssueKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ResourceHealth {
-    pub checked: usize,
-    pub issues: Vec<ResourceIssue>,
-}
-
-impl ResourceHealth {
-    pub fn ok(&self) -> bool {
-        self.issues.is_empty()
-    }
-
-    pub fn has_missing(&self) -> bool {
-        self.issues
-            .iter()
-            .any(|issue| matches!(issue.kind, ResourceIssueKind::Missing))
-    }
-}
-
 pub fn check_resources(resources_dir: &Path) -> ResourceHealth {
-    let mut issues = Vec::new();
-    for expected in EXPECTED_RESOURCES {
-        let path = resources_dir.join(expected.rel);
-        let meta = match std::fs::metadata(&path) {
-            Ok(meta) => meta,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => {
-                issues.push(ResourceIssue {
-                    rel: expected.rel,
-                    label: expected.label,
-                    path,
-                    kind: ResourceIssueKind::Missing,
-                });
-                continue;
-            }
-            Err(e) => {
-                issues.push(ResourceIssue {
-                    rel: expected.rel,
-                    label: expected.label,
-                    path,
-                    kind: ResourceIssueKind::ReadError(e.to_string()),
-                });
-                continue;
-            }
-        };
-
-        let actual_size = meta.len();
-        if actual_size != expected.size {
-            issues.push(ResourceIssue {
-                rel: expected.rel,
-                label: expected.label,
-                path,
-                kind: ResourceIssueKind::SizeMismatch {
-                    actual: actual_size,
-                    expected: expected.size,
-                },
-            });
-            continue;
-        }
-
-        match sha256_file_hex(&path) {
-            Ok(actual_hash) if actual_hash == expected.sha256 => {}
-            Ok(actual_hash) => issues.push(ResourceIssue {
-                rel: expected.rel,
-                label: expected.label,
-                path,
-                kind: ResourceIssueKind::HashMismatch {
-                    actual: actual_hash,
-                    expected: expected.sha256,
-                },
-            }),
-            Err(e) => issues.push(ResourceIssue {
-                rel: expected.rel,
-                label: expected.label,
-                path,
-                kind: ResourceIssueKind::ReadError(e.to_string()),
-            }),
-        }
-    }
-    ResourceHealth {
-        checked: EXPECTED_RESOURCES.len(),
-        issues,
-    }
+    let specs = EXPECTED_RESOURCES
+        .iter()
+        .map(|expected| ResourceSpec {
+            rel: expected.rel,
+            size: expected.size,
+            sha256: expected.sha256,
+        })
+        .collect::<Vec<_>>();
+    generic_resource_integrity::check_resources(resources_dir, &specs)
 }
 
 pub fn issue_label(issue: &ResourceIssue) -> String {
+    let label = label_for_rel(issue.rel);
     match &issue.kind {
-        ResourceIssueKind::Missing => format!("{} 缺失", issue.label),
+        ResourceIssueKind::Missing => format!("{label} 缺失"),
         ResourceIssueKind::SizeMismatch { actual, expected } => {
-            format!(
-                "{} 大小异常：实际 {}，期望 {}",
-                issue.label, actual, expected
-            )
+            format!("{label} 大小异常：实际 {actual}，期望 {expected}")
         }
         ResourceIssueKind::HashMismatch { actual, expected } => {
-            format!(
-                "{} SHA256 不匹配：实际 {}，期望 {}",
-                issue.label, actual, expected
-            )
+            format!("{label} SHA256 不匹配：实际 {actual}，期望 {expected}")
         }
-        ResourceIssueKind::ReadError(e) => format!("{} 读取失败：{}", issue.label, e),
+        ResourceIssueKind::ReadError(e) => format!("{label} 读取失败：{e}"),
     }
 }
 
-pub(crate) fn sha256_file_hex(path: &Path) -> Result<String, io::Error> {
-    let mut file = File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    let digest = hasher.finalize();
-    let mut out = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        use std::fmt::Write as _;
-        let _ = write!(&mut out, "{byte:02X}");
-    }
-    Ok(out)
+fn label_for_rel(rel: &str) -> &str {
+    EXPECTED_RESOURCES
+        .iter()
+        .find(|item| item.rel == rel)
+        .map(|item| item.label)
+        .unwrap_or(rel)
 }
 
 #[cfg(test)]

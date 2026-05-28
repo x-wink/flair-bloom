@@ -1198,9 +1198,9 @@ dependencies = [
  "crypto",
  "qzh-format",
  "qzh-profile",
+ "resource-integrity",
  "serde",
  "serde_json",
- "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-autostart",
@@ -3277,6 +3277,14 @@ dependencies = [
  "wasm-bindgen-futures",
  "wasm-streams",
  "web-sys",
+]
+
+[[package]]
+name = "resource-integrity"
+version = "0.1.11"
+dependencies = [
+ "sha2",
+ "tempfile",
 ]
 
 [[package]]

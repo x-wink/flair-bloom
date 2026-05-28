@@ -4,6 +4,7 @@ members = [
     "packages/migrate",
     "packages/qzh-format",
     "packages/qzh-profile",
+    "packages/resource-integrity",
     "packages/win-sysinfo",
     "packages/win-input",
     "packages/burst-engine",

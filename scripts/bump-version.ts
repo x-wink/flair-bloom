@@ -71,6 +71,37 @@ for (const { path, currentVersion, update } of files) {
   console.log(`  已更新 ${path}`);
 }
 
+validateCargoWorkspaceMembers(version);
+
 console.log(`\n版本号已升至 v${version}`);
 console.log(`提示：在 CHANGELOG.md 的 [${version}] 节填写本次更新内容后再提交`);
 console.log(`提交：git add -p && git commit -m "chore(release): bump version to ${version}"`);
+
+function validateCargoWorkspaceMembers(expectedVersion: string) {
+  const workspaceToml = readFileSync(resolve(root, 'Cargo.toml'), 'utf8');
+  const membersMatch = workspaceToml.match(/members\s*=\s*\[([\s\S]*?)\]/m);
+  if (!membersMatch) {
+    throw new Error('Cargo.toml 未找到 workspace.members');
+  }
+
+  const members = Array.from(membersMatch[1].matchAll(/"([^"]+)"/g)).map((m) => m[1]);
+  const invalid: string[] = [];
+  for (const member of members) {
+    const cargoTomlPath = resolve(root, member, 'Cargo.toml');
+    const cargoToml = readFileSync(cargoTomlPath, 'utf8');
+    const usesWorkspaceVersion = /^\s*version\.workspace\s*=\s*true\s*$/m.test(cargoToml);
+    const explicitVersion = cargoToml.match(/^\s*version\s*=\s*"([^"]+)"\s*$/m)?.[1];
+    if (!usesWorkspaceVersion && explicitVersion !== expectedVersion) {
+      invalid.push(`${member}/Cargo.toml`);
+    }
+  }
+
+  if (invalid.length > 0) {
+    console.error('\n以下 Rust workspace 成员未跟随 workspace 版本，请同步更新：');
+    for (const path of invalid) {
+      console.error(`  - ${path}`);
+    }
+    process.exit(1);
+  }
+  console.log('  已校验 Rust workspace 成员版本');
+}
