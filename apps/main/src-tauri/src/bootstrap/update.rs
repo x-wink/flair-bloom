@@ -5,7 +5,10 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Manager;
+use tauri_plugin_updater::UpdaterExt;
 use tracing::{info, warn};
+
+pub const DEFAULT_GITHUB_PROXY: &str = "https://gh-proxy.com/";
 
 /// 保证同一时刻只有一个更新任务在运行。
 pub struct UpdateLock(pub AtomicBool);
@@ -51,10 +54,9 @@ pub async fn check_for_updates(app: tauri::AppHandle) {
 
 async fn do_silent_update(app: &tauri::AppHandle) -> Result<(), String> {
     use tauri::Emitter;
-    use tauri_plugin_updater::UpdaterExt;
 
-    let updater = app.updater().map_err(|e| format!("{e}"))?;
-    let update = match updater.check().await {
+    let updater = build_updater(app)?;
+    let mut update = match updater.check().await {
         Ok(Some(u)) => u,
         Ok(None) => {
             info!("app is up to date");
@@ -66,6 +68,7 @@ async fn do_silent_update(app: &tauri::AppHandle) -> Result<(), String> {
     let version = update.version.clone();
     let notes = update.body.clone();
     info!("update available: {}", version);
+    proxy_github_download_url(app, &mut update);
     let _ = app.emit("update-downloading", &version);
 
     let bytes = update
@@ -88,4 +91,138 @@ async fn do_silent_update(app: &tauri::AppHandle) -> Result<(), String> {
         serde_json::json!({ "version": version, "notes": notes }),
     );
     Ok(())
+}
+
+pub fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
+    let Some(proxy_prefix) = github_proxy_prefix(app) else {
+        return app.updater_builder().build().map_err(|e| format!("{e}"));
+    };
+    let endpoints = configured_update_endpoints(app)?
+        .into_iter()
+        .map(|url| proxy_github_url(&url, &proxy_prefix))
+        .collect();
+
+    app.updater_builder()
+        .endpoints(endpoints)
+        .map_err(|e| format!("{e}"))?
+        .build()
+        .map_err(|e| format!("{e}"))
+}
+
+pub fn proxy_github_download_url(
+    app: &tauri::AppHandle,
+    update: &mut tauri_plugin_updater::Update,
+) {
+    let Some(proxy_prefix) = github_proxy_prefix(app) else {
+        return;
+    };
+
+    let proxied = proxy_github_url(&update.download_url, &proxy_prefix);
+    if proxied != update.download_url {
+        info!("update download routed through GitHub proxy: {proxy_prefix}");
+        update.download_url = proxied;
+    }
+}
+
+fn github_proxy_prefix(_app: &tauri::AppHandle) -> Option<String> {
+    Some(DEFAULT_GITHUB_PROXY.to_string())
+}
+
+fn configured_update_endpoints(app: &tauri::AppHandle) -> Result<Vec<tauri::Url>, String> {
+    let config = app.config();
+    let updater = config
+        .plugins
+        .0
+        .get("updater")
+        .ok_or_else(|| "缺少 updater 配置".to_string())?;
+    let endpoints = updater
+        .get("endpoints")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "缺少 updater.endpoints 配置".to_string())?;
+    let endpoints = endpoints
+        .iter()
+        .filter_map(|endpoint| endpoint.as_str())
+        .map(parse_url)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(endpoints)
+}
+
+fn parse_url(url: &str) -> Result<tauri::Url, String> {
+    tauri::Url::parse(url).map_err(|e| format!("无效的更新地址: {e}"))
+}
+
+fn normalize_proxy_prefix(prefix: &str) -> String {
+    if prefix.ends_with('/') {
+        prefix.to_string()
+    } else {
+        format!("{prefix}/")
+    }
+}
+
+fn proxy_github_url(url: &tauri::Url, proxy_prefix: &str) -> tauri::Url {
+    let Some(host) = url.host_str() else {
+        return url.clone();
+    };
+    if proxy_host(proxy_prefix).is_some_and(|proxy_host| host.eq_ignore_ascii_case(&proxy_host))
+        || !is_github_host(host)
+    {
+        return url.clone();
+    }
+
+    let proxied = format!("{}{}", normalize_proxy_prefix(proxy_prefix), url.as_str());
+    match tauri::Url::parse(&proxied) {
+        Ok(url) => url,
+        Err(e) => {
+            warn!("invalid GitHub proxy URL: {}", e);
+            url.clone()
+        }
+    }
+}
+
+fn proxy_host(proxy_prefix: &str) -> Option<String> {
+    tauri::Url::parse(proxy_prefix)
+        .ok()
+        .and_then(|url| url.host_str().map(|host| host.to_string()))
+}
+
+fn is_github_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("github.com")
+        || host.eq_ignore_ascii_case("www.github.com")
+        || host.eq_ignore_ascii_case("api.github.com")
+        || host.eq_ignore_ascii_case("codeload.github.com")
+        || host.ends_with(".githubusercontent.com")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn proxies_github_release_url() {
+        let url =
+            tauri::Url::parse("https://github.com/x-wink/flair-bloom/releases/download/v1/a.zip")
+                .unwrap();
+
+        assert_eq!(
+            proxy_github_url(&url, "https://gh-proxy.com/").as_str(),
+            "https://gh-proxy.com/https://github.com/x-wink/flair-bloom/releases/download/v1/a.zip"
+        );
+    }
+
+    #[test]
+    fn leaves_non_github_url_unchanged() {
+        let url = tauri::Url::parse("https://example.com/latest.json").unwrap();
+
+        assert_eq!(proxy_github_url(&url, "https://gh-proxy.com/"), url);
+    }
+
+    #[test]
+    fn does_not_proxy_proxy_url_again() {
+        let url = tauri::Url::parse(
+            "https://gh-proxy.com/https://github.com/x-wink/flair-bloom/releases/latest/download/latest.json",
+        )
+        .unwrap();
+
+        assert_eq!(proxy_github_url(&url, "https://gh-proxy.com/"), url);
+    }
 }

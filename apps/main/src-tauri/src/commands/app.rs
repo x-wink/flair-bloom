@@ -2,10 +2,12 @@
 
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
-use tauri_plugin_updater::UpdaterExt;
 use tracing::{info, warn};
 
-use crate::bootstrap::{agreement::AGREEMENT_VERSION, update::UpdateLock};
+use crate::bootstrap::{
+    agreement::AGREEMENT_VERSION,
+    update::{build_updater, proxy_github_download_url, UpdateLock},
+};
 
 const PENDING_UPDATE_DIR: &str = "pending_update";
 
@@ -52,8 +54,8 @@ pub async fn check_update(app: AppHandle, lock: State<'_, UpdateLock>) -> Result
 }
 
 async fn do_check_update(app: &AppHandle) -> Result<(), String> {
-    let updater = app.updater().map_err(|e| format!("更新模块不可用: {e}"))?;
-    let update = match updater.check().await {
+    let updater = build_updater(app).map_err(|e| format!("更新模块不可用: {e}"))?;
+    let mut update = match updater.check().await {
         Ok(Some(u)) => u,
         Ok(None) => {
             let _ = app.emit("update-not-available", ());
@@ -68,10 +70,16 @@ async fn do_check_update(app: &AppHandle) -> Result<(), String> {
     let version = update.version.clone();
     let notes = update.body.clone();
     info!("update available: {}", version);
+    proxy_github_download_url(app, &mut update);
     let _ = app.emit("update-downloading", &version);
 
     let bytes = update
-        .download(|_chunk, _total| {}, || { info!("update downloaded"); })
+        .download(
+            |_chunk, _total| {},
+            || {
+                info!("update downloaded");
+            },
+        )
         .await
         .map_err(|e| {
             warn!("update download failed: {}", e);
@@ -146,7 +154,7 @@ pub async fn try_apply_pending_update(app: &AppHandle) -> bool {
         }
     };
 
-    let updater = match app.updater() {
+    let updater = match build_updater(app) {
         Ok(u) => u,
         Err(e) => {
             warn!("更新模块不可用: {}", e);
@@ -154,7 +162,7 @@ pub async fn try_apply_pending_update(app: &AppHandle) -> bool {
         }
     };
 
-    let update = match updater.check().await {
+    let mut update = match updater.check().await {
         Ok(Some(u)) if u.version == saved_version => u,
         Ok(Some(u)) => {
             info!(
@@ -174,6 +182,7 @@ pub async fn try_apply_pending_update(app: &AppHandle) -> bool {
             return false;
         }
     };
+    proxy_github_download_url(app, &mut update);
 
     match update.install(saved_bytes) {
         Ok(_) => {
