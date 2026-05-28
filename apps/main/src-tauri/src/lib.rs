@@ -21,6 +21,7 @@ use bootstrap::{
 };
 use commands::{
     app::{agree_license, check_update, exit_app, needs_agreement},
+    ddhid_diagnostic::export_dd_hid_diagnostic_report,
     driver::{
         install_dd_hid_driver, install_driver, is_dd_hid_driver_installed, is_driver_installed,
         is_elevated, relaunch_as_admin, uninstall_dd_hid_driver, uninstall_driver,
@@ -108,6 +109,7 @@ pub fn run() {
             repair_interception_residue,
             repair_corrupted_profiles,
             repair_clean_logs,
+            export_dd_hid_diagnostic_report,
         ])
         .setup(move |app| {
             let need_agreement = check_agreement(app.handle());

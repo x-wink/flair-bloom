@@ -69,6 +69,12 @@
   margin-top: var(--fb-space-5);
 }
 
+.repair-empty {
+  margin: var(--fb-space-6) 0;
+  color: var(--fb-text-regular);
+  font-size: var(--fb-fs-sm);
+}
+
 .repair-section-label {
   font-size: var(--fb-fs-xs);
   font-weight: var(--fb-fw-semibold);
@@ -243,8 +249,19 @@
 
 .repair-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   gap: var(--fb-space-3);
   padding: var(--fb-space-4) var(--fb-space-10) var(--fb-space-8);
   border-top: 1px solid var(--fb-border-soft);
+}
+
+.repair-actions .fb-btn:first-child {
+  margin-right: auto;
+}
+
+@media (max-width: 520px) {
+  .repair-actions .fb-btn {
+    flex: 1 1 auto;
+  }
 }

@@ -189,7 +189,13 @@ async fn diagnose_install_prerequisites(app: &AppHandle) -> Vec<DiagnosticItem> 
     let mut out = Vec::new();
 
     // ---- 资源完整性（先于一切其它检查，缺文件直接出错）----
-    let (resources_ok, missing) = collect_install_resources(app);
+    let resource_health = collect_install_resources(app);
+    let resources_ok = resource_health.ok();
+    let resource_issue_text = resource_health
+        .issues
+        .iter()
+        .map(crate::commands::resource_integrity::issue_label)
+        .collect::<Vec<_>>();
     out.push(DiagnosticItem {
         id: "prereq.resources".to_string(),
         category: "安装前置检查".to_string(),
@@ -201,13 +207,18 @@ async fn diagnose_install_prerequisites(app: &AppHandle) -> Vec<DiagnosticItem> 
         },
         status: if resources_ok {
             ItemStatus::Ok
-        } else {
+        } else if resource_health.has_missing() {
             ItemStatus::Missing
+        } else {
+            ItemStatus::Corrupted
         },
         detail: if resources_ok {
-            "ddc.exe / ddhid63340.sys / .inf / .cat 全部就位".to_string()
+            "驱动安装资源完整，DD-HID INF/CAT/SYS 与原始签名包匹配".to_string()
         } else {
-            format!("缺失或被拦截：{}", missing.join(", "))
+            format!(
+                "驱动资源异常：{}\n请覆盖安装新版，或用原始驱动包替换异常文件后重试。",
+                resource_issue_text.join("；")
+            )
         },
         recommended_action: None,
     });
@@ -364,25 +375,26 @@ async fn diagnose_install_prerequisites(app: &AppHandle) -> Vec<DiagnosticItem> 
 
 /// 资源完整性自检（独立于 status.rs 的结果，避免它被缓存）。
 #[cfg(windows)]
-fn collect_install_resources(app: &AppHandle) -> (bool, Vec<String>) {
+fn collect_install_resources(
+    app: &AppHandle,
+) -> crate::commands::resource_integrity::ResourceHealth {
     let resources = match app.path().resource_dir() {
         Ok(d) => d.join("resources"),
-        Err(_) => return (false, vec!["<resource_dir 不可达>".to_string()]),
-    };
-    let mut missing = Vec::new();
-    let expected = [
-        "install-interception.exe",
-        "ddhid-driver/ddc.exe",
-        "ddhid-driver/ddhid63340.sys",
-        "ddhid-driver/ddhid63340.inf",
-        "ddhid-driver/ddhid63340.cat",
-    ];
-    for rel in expected {
-        if !resources.join(rel).exists() {
-            missing.push(rel.to_string());
+        Err(e) => {
+            return crate::commands::resource_integrity::ResourceHealth {
+                checked: 0,
+                issues: vec![crate::commands::resource_integrity::ResourceIssue {
+                    rel: "<resource_dir>",
+                    label: "<resource_dir>",
+                    path: std::path::PathBuf::new(),
+                    kind: crate::commands::resource_integrity::ResourceIssueKind::ReadError(
+                        e.to_string(),
+                    ),
+                }],
+            }
         }
-    }
-    (missing.is_empty(), missing)
+    };
+    crate::commands::resource_integrity::check_resources(&resources)
 }
 
 #[cfg(windows)]

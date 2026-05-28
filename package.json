@@ -4,6 +4,8 @@
   "scripts": {
     "dev": "pnpm --filter main tauri dev",
     "build": "pnpm --filter main tauri build",
+    "check:resources": "tsx scripts/check-ddhid-resources.ts",
+    "hooks:install": "git config core.hooksPath .githooks",
     "lint": "oxlint apps/main/src",
     "lint:fix": "oxlint --fix apps/main/src",
     "format": "oxfmt apps/main/src",
@@ -14,8 +16,8 @@
     "bump-version": "tsx scripts/bump-version.ts"
   },
   "devDependencies": {
-    "oxlint": "latest",
     "oxfmt": "latest",
+    "oxlint": "latest",
     "tsx": "latest"
   }
 }

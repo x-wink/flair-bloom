@@ -150,7 +150,7 @@ fn collect_autostart_enabled(app: &AppHandle) -> bool {
     app.autolaunch().is_enabled().unwrap_or(false)
 }
 
-/// 资源完整性自检：检查驱动安装器是否齐全。
+/// 资源完整性自检：检查驱动安装器是否齐全且未被换行转换 / 杀软改写。
 ///
 /// Windows 安装包会把这些 exe 落到 `<resource_dir>/resources/`，杀软误删或解压不全
 /// 时会让"安装游戏模式驱动 / 究极HID"按下去就报错。把缺失项列出来给反馈链路用，
@@ -162,17 +162,13 @@ fn collect_resource_health(app: &AppHandle) -> (bool, Vec<String>) {
             Ok(d) => d.join("resources"),
             Err(_) => return (false, vec!["<resource_dir 不可达>".to_string()]),
         };
-        let mut missing = Vec::new();
-        let expected = [
-            ("install-interception.exe", "install-interception.exe"),
-            ("ddhid-driver/ddc.exe", "ddhid-driver/ddc.exe"),
-        ];
-        for (rel, label) in expected {
-            if !resources.join(rel).exists() {
-                missing.push(label.to_string());
-            }
-        }
-        (missing.is_empty(), missing)
+        let health = crate::commands::resource_integrity::check_resources(&resources);
+        let issues = health
+            .issues
+            .iter()
+            .map(crate::commands::resource_integrity::issue_label)
+            .collect::<Vec<_>>();
+        (health.ok(), issues)
     }
     #[cfg(not(windows))]
     {

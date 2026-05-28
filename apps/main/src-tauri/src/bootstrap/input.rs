@@ -1,6 +1,8 @@
 //! 输入后端初始化：从 settings.json 读取 input_mode，或优先使用 CLI 参数。
 
 #[cfg(windows)]
+use tauri::Manager;
+#[cfg(windows)]
 use tauri_plugin_store::StoreExt;
 
 pub fn init_input_backend(app: &tauri::AppHandle) {

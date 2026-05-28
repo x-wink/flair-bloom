@@ -43,31 +43,17 @@ interface RepairOutcome {
   backup_dir: string | null;
 }
 
+interface DisplayIssue {
+  id: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+  action: RepairCommand | null;
+}
+
 interface Props {
   onClose: () => void;
   onToast: (kind: 'success' | 'warn' | 'error', message: string) => void;
-}
-
-const SEVERITY_LABEL: Record<Severity, string> = {
-  info: '正常',
-  warn: '注意',
-  error: '异常',
-};
-
-const STATUS_LABEL: Record<ItemStatus, string> = {
-  ok: '正常',
-  orphan: '残留',
-  missing: '缺失',
-  corrupted: '损坏',
-  unknown: '未知',
-};
-
-/// 仅当确有异常（severity 非 info 或 status 非 ok）时返回 chip 文案，
-/// 正常项整体不挂 chip——卡片底色和边框已经传达「无异常」。
-function itemChipLabel(severity: Severity, status: ItemStatus): string | null {
-  if (status !== 'ok') return STATUS_LABEL[status];
-  if (severity !== 'info') return SEVERITY_LABEL[severity];
-  return null;
 }
 
 const STEP_LABEL: Record<StepStatus, string> = {
@@ -78,20 +64,17 @@ const STEP_LABEL: Record<StepStatus, string> = {
 };
 
 const ACTION_LABEL: Record<RepairCommand, string> = {
-  repair_dd_hid_residue: '清理究极HID 残留',
-  repair_interception_residue: '清理 Interception 残留',
-  repair_corrupted_profiles: '隔离损坏配置',
-  repair_clean_logs: '清理旧日志',
+  repair_dd_hid_residue: '清理驱动残留',
+  repair_interception_residue: '清理旧驱动残留',
+  repair_corrupted_profiles: '修复配置',
+  repair_clean_logs: '清理日志',
 };
 
 const ACTION_CONFIRM: Record<RepairCommand, string> = {
-  repair_dd_hid_residue:
-    '将提权清理 PnP 注册、服务键、Driver Store 副本和驱动文件，并自动备份注册表。可能需要重启电脑。',
-  repair_interception_residue:
-    '将提权删除 Interception 的 keyboard / mouse 服务键并备份。完成后必须重启电脑。',
-  repair_corrupted_profiles:
-    '把无法解密的 .qzh 配置移到 corrupted/ 子目录，原文件保留可手动追回，不会删除。',
-  repair_clean_logs: '将删除 7 天前的旧日志文件，崩溃日志（crash-*.log）会保留。',
+  repair_dd_hid_residue: '会清理 DD-HID 残留并自动备份，完成后可能需要重启电脑。',
+  repair_interception_residue: '会清理旧输入驱动残留并自动备份，完成后需要重启电脑。',
+  repair_corrupted_profiles: '会把损坏配置移到隔离目录，不会删除原文件。',
+  repair_clean_logs: '会清理 7 天前的旧日志，崩溃日志会保留。',
 };
 
 export default function RepairDialog({ onClose, onToast }: Props) {
@@ -99,6 +82,7 @@ export default function RepairDialog({ onClose, onToast }: Props) {
   const [report, setReport] = useState<RepairReport | null>(null);
   const [scanning, setScanning] = useState(false);
   const [running, setRunning] = useState<RepairCommand | null>(null);
+  const [exportingReport, setExportingReport] = useState(false);
   const [outcomes, setOutcomes] = useState<Record<RepairCommand, RepairOutcome | null>>({
     repair_dd_hid_residue: null,
     repair_interception_residue: null,
@@ -165,16 +149,27 @@ export default function RepairDialog({ onClose, onToast }: Props) {
     [confirm, running, scan],
   );
 
-  const grouped = groupByCategory(report?.items ?? []);
+  const exportDiagnosticReport = useCallback(async () => {
+    if (exportingReport) return;
+    setExportingReport(true);
+    try {
+      const path = await invoke<string>('export_dd_hid_diagnostic_report');
+      onToastRef.current('success', `诊断报告已导出：${path}`);
+    } catch (e) {
+      onToastRef.current('error', `导出诊断报告失败：${e}`);
+    } finally {
+      setExportingReport(false);
+    }
+  }, [exportingReport]);
+
+  const displayIssues = buildDisplayIssues(report?.items ?? []);
   const hasIssues = (report?.items ?? []).some((i) => i.severity !== 'info');
 
   return (
     <div className="repair-card">
       <header className="repair-header">
         <h2 className="repair-title">环境修复</h2>
-        <p className="repair-tagline">
-          检查驱动残留、配置文件完整性和日志体积。所有修复操作都先备份再执行。
-        </p>
+        <p className="repair-tagline">自动检查影响安装和运行的常见问题。修复前会先备份。</p>
       </header>
 
       <div className="repair-body">
@@ -190,52 +185,55 @@ export default function RepairDialog({ onClose, onToast }: Props) {
               )}
               <span className="repair-meta">扫描时间 {report.timestamp}</span>
             </p>
-            {grouped.map(([category, items]) => (
-              <section className="repair-section" key={category}>
-                <p className="repair-section-label">{category}</p>
+            {displayIssues.length === 0 ? (
+              <p className="repair-empty">当前没有需要处理的问题。</p>
+            ) : (
+              <section className="repair-section">
                 <ul className="repair-list">
-                  {items.map((it) => (
+                  {displayIssues.map((it) => (
                     <li key={it.id} className={`repair-item repair-item--${it.severity}`}>
                       <div className="repair-item-head">
-                        <span className="repair-item-label">{it.label}</span>
-                        {(() => {
-                          const chip = itemChipLabel(it.severity, it.status);
-                          return chip ? (
-                            <span className={`repair-flag repair-flag--${it.severity}`}>
-                              {chip}
-                            </span>
-                          ) : null;
-                        })()}
+                        <span className="repair-item-label">{it.title}</span>
+                        <span className={`repair-flag repair-flag--${it.severity}`}>
+                          {it.severity === 'error' ? '需要处理' : '建议处理'}
+                        </span>
                       </div>
                       <p className="repair-item-detail">{it.detail}</p>
-                      {it.recommended_action && (
+                      {it.action && (
                         <div className="repair-item-action">
                           <Button
                             size="sm"
                             variant="outline"
                             tone={it.severity === 'error' ? 'danger' : 'primary'}
-                            loading={running === it.recommended_action}
-                            disabled={running !== null && running !== it.recommended_action}
-                            onClick={() => runRepair(it.recommended_action!)}
+                            loading={running === it.action}
+                            disabled={running !== null && running !== it.action}
+                            onClick={() => runRepair(it.action!)}
                           >
-                            {ACTION_LABEL[it.recommended_action]}
+                            {ACTION_LABEL[it.action]}
                           </Button>
                         </div>
                       )}
-                      {outcomes[it.recommended_action ?? 'repair_clean_logs'] &&
-                        it.recommended_action && (
-                          <RepairLog outcome={outcomes[it.recommended_action]!} />
-                        )}
+                      {it.action && outcomes[it.action] && (
+                        <RepairLog outcome={outcomes[it.action]!} />
+                      )}
                     </li>
                   ))}
                 </ul>
               </section>
-            ))}
+            )}
           </>
         )}
       </div>
 
       <div className="repair-actions">
+        <Button
+          variant="outline"
+          tone="neutral"
+          onClick={() => void exportDiagnosticReport()}
+          loading={exportingReport}
+        >
+          导出诊断报告
+        </Button>
         <Button variant="outline" onClick={() => void scan()} loading={scanning}>
           重新诊断
         </Button>
@@ -267,12 +265,133 @@ function RepairLog({ outcome }: { outcome: RepairOutcome }) {
   );
 }
 
-function groupByCategory(items: DiagnosticItem[]): Array<[string, DiagnosticItem[]]> {
-  const map = new Map<string, DiagnosticItem[]>();
-  for (const it of items) {
-    const list = map.get(it.category) ?? [];
-    list.push(it);
-    map.set(it.category, list);
+function buildDisplayIssues(items: DiagnosticItem[]): DisplayIssue[] {
+  const byKey = new Map<string, DisplayIssue>();
+  for (const item of items) {
+    if (item.severity === 'info') continue;
+    const issue = toDisplayIssue(item);
+    const existing = byKey.get(issue.id);
+    if (!existing) {
+      byKey.set(issue.id, issue);
+      continue;
+    }
+    if (severityRank(issue.severity) > severityRank(existing.severity)) {
+      existing.severity = issue.severity;
+    }
+    if (!existing.action) {
+      existing.action = issue.action;
+    }
   }
-  return Array.from(map.entries());
+  return Array.from(byKey.values()).sort(
+    (a, b) => severityRank(b.severity) - severityRank(a.severity),
+  );
+}
+
+function toDisplayIssue(item: DiagnosticItem): DisplayIssue {
+  if (item.recommended_action === 'repair_dd_hid_residue' || item.id.startsWith('dd_hid.')) {
+    return {
+      id: 'dd_hid_residue',
+      title: 'DD-HID 驱动残留',
+      detail: '检测到驱动残留，可能导致重新安装失败。先清理残留，再重启电脑后重试。',
+      severity: item.severity,
+      action: item.recommended_action,
+    };
+  }
+  if (
+    item.recommended_action === 'repair_interception_residue' ||
+    item.id.startsWith('interception.')
+  ) {
+    return {
+      id: 'interception_residue',
+      title: '旧输入驱动残留',
+      detail: '检测到旧输入驱动残留，可能影响输入模式切换。清理后需要重启电脑。',
+      severity: item.severity,
+      action: item.recommended_action,
+    };
+  }
+  if (item.id === 'prereq.resources') {
+    return {
+      id: item.id,
+      title: '驱动文件异常',
+      detail: '安装包里的驱动文件不完整或被修改。请重新安装最新版后再安装驱动。',
+      severity: item.severity,
+      action: null,
+    };
+  }
+  if (item.id === 'prereq.hvci') {
+    return {
+      id: item.id,
+      title: '需要关闭内存完整性',
+      detail: 'Windows 的内存完整性会阻止这个驱动加载。关闭后重启电脑，再安装驱动。',
+      severity: item.severity,
+      action: null,
+    };
+  }
+  if (item.id === 'prereq.sac') {
+    return {
+      id: item.id,
+      title: 'Windows 安全策略可能拦截',
+      detail: '当前安全策略可能拦截驱动安装程序。请先调整 Windows 安全设置后重试。',
+      severity: item.severity,
+      action: null,
+    };
+  }
+  if (item.id === 'prereq.pending_reboot') {
+    return {
+      id: item.id,
+      title: '需要重启电脑',
+      detail: '系统有未完成的驱动或更新操作。请重启电脑后再安装驱动。',
+      severity: item.severity,
+      action: null,
+    };
+  }
+  if (item.id === 'prereq.arch') {
+    return {
+      id: item.id,
+      title: '当前系统不支持该驱动',
+      detail: 'DD-HID 驱动只支持 64 位 Windows。',
+      severity: item.severity,
+      action: null,
+    };
+  }
+  if (item.id === 'prereq.defender_exclusion') {
+    return {
+      id: item.id,
+      title: '建议添加安全软件白名单',
+      detail: '安全软件可能会拦截驱动安装文件。把安装目录加入白名单后再重试。',
+      severity: item.severity,
+      action: null,
+    };
+  }
+  if (item.recommended_action === 'repair_corrupted_profiles') {
+    return {
+      id: 'corrupted_profiles',
+      title: '配置文件损坏',
+      detail: '检测到无法读取的配置文件。可以先修复配置，再重新打开应用。',
+      severity: item.severity,
+      action: item.recommended_action,
+    };
+  }
+  if (item.recommended_action === 'repair_clean_logs') {
+    return {
+      id: 'old_logs',
+      title: '日志占用较大',
+      detail: '本地日志较多，可以清理旧日志释放空间。',
+      severity: item.severity,
+      action: item.recommended_action,
+    };
+  }
+  return {
+    id: item.id,
+    title: item.label,
+    detail: '检测到一个需要处理的问题。详细信息已写入诊断报告。',
+    severity: item.severity,
+    action: item.recommended_action,
+  };
+}
+
+function severityRank(severity: Severity): number {
+  if (severity === 'error') return 2;
+  if (severity === 'warn') return 1;
+  return 0;
 }
