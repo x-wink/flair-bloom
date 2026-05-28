@@ -22,6 +22,8 @@
 use serde::Serialize;
 #[allow(unused_imports)]
 use tauri::{AppHandle, Manager};
+#[cfg(windows)]
+use win_sysinfo::{prereq, registry};
 
 // ===== 公共数据结构 =====
 
@@ -182,298 +184,6 @@ pub async fn diagnose_environment(app: AppHandle) -> Result<RepairReport, String
 
 // ===== 安装前置检查（Windows 安全策略 / 杀软 / 资源 / 架构）=====
 
-/// HVCI / 内存完整性是否启用。
-///
-/// 注册表里 `Enabled=1` 表示策略要求启用；但 Windows 重启后 HVCI 才真正激活，
-/// 因此还要看 `RunningEnforcement` 状态。两个都为 1 才是"已生效"。
-/// 任何一个非 0 就要给用户提示——它会拒绝加载非 HVCI 兼容的内核驱动。
-#[cfg(windows)]
-fn detect_hvci_active() -> Option<bool> {
-    let policy = read_hklm_dword(
-        "SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity",
-        "Enabled",
-    );
-    let running = read_hklm_dword(
-        "SYSTEM\\CurrentControlSet\\Control\\DeviceGuard\\Scenarios\\HypervisorEnforcedCodeIntegrity",
-        "RunningEnforcement",
-    );
-    match (policy, running) {
-        (None, None) => None,
-        (p, r) => Some(p.unwrap_or(0) == 1 || r.unwrap_or(0) == 1),
-    }
-}
-
-/// Smart App Control 状态。
-///
-/// `VerifiedAndReputablePolicyState` 取值：
-///   0 = Off, 1 = Enforce, 2 = Evaluation
-/// Enforce / Evaluation 都会阻止 ddc.exe 这类无强信誉的可执行文件运行。
-#[cfg(windows)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SacState {
-    Off,
-    Enforce,
-    Evaluation,
-    Unknown,
-}
-
-#[cfg(windows)]
-fn detect_sac_state() -> SacState {
-    match read_hklm_dword(
-        "SYSTEM\\CurrentControlSet\\Control\\CI\\Policy",
-        "VerifiedAndReputablePolicyState",
-    ) {
-        Some(0) => SacState::Off,
-        Some(1) => SacState::Enforce,
-        Some(2) => SacState::Evaluation,
-        Some(_) => SacState::Unknown,
-        None => SacState::Off, // 多数设备不存在该键 = 未启用
-    }
-}
-
-/// 系统是否有挂起的重启请求。
-///
-/// 任何一个常见标记命中即视为 pending：
-/// - `PendingFileRenameOperations` (SessionManager)
-/// - `RebootPending` 子键（Component Based Servicing）
-/// - `RebootRequired` 子键（WindowsUpdate / AutoUpdate）
-///
-/// 这种状态下任何 PnP 安装事务都会被推迟到下次开机，重装驱动必然失败。
-#[cfg(windows)]
-fn detect_pending_reboot() -> bool {
-    use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
-    };
-    // 1. PendingFileRenameOperations（REG_MULTI_SZ，存在即代表有 pending 文件改名）
-    let mut sm: HKEY = std::ptr::null_mut();
-    let path = wide("SYSTEM\\CurrentControlSet\\Control\\Session Manager");
-    // SAFETY: path NUL 结尾；sm 是栈上出参指针
-    let r = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, path.as_ptr(), 0, KEY_READ, &mut sm) };
-    if r == 0 {
-        let name = wide("PendingFileRenameOperations");
-        let mut ty: u32 = 0;
-        let mut len: u32 = 0;
-        // SAFETY: sm 已 open；data 传 null 仅探测大小
-        let q = unsafe {
-            RegQueryValueExW(
-                sm,
-                name.as_ptr(),
-                std::ptr::null_mut(),
-                &mut ty,
-                std::ptr::null_mut(),
-                &mut len,
-            )
-        };
-        // SAFETY: sm 上面 open 成功
-        unsafe { RegCloseKey(sm) };
-        if q == 0 && len > 2 {
-            return true;
-        }
-    }
-    // 2. CBS / WindowsUpdate 的 RebootPending 子键
-    if hklm_subkey_present(
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Component Based Servicing\\RebootPending",
-    ) {
-        return true;
-    }
-    if hklm_subkey_present(
-        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\WindowsUpdate\\Auto Update\\RebootRequired",
-    ) {
-        return true;
-    }
-    false
-}
-
-/// 用 `Get-MpPreference` 异步查询 Defender 排除路径列表。
-///
-/// 返回 None 表示查询失败（PowerShell 不可用 / 进程被卡住等），UI 应显示"无法判断"。
-/// 正常返回的字符串列表里每行是一条排除路径，调用方对比 install_path 即可。
-#[cfg(windows)]
-async fn read_defender_exclusion_paths() -> Option<Vec<String>> {
-    use std::os::windows::process::CommandExt;
-    use std::process::{Command, Stdio};
-    // 单行管道：用 ConvertTo-Json 避免本地化和换行差异，失败时不打印噪音
-    // -Compress 让输出贴一行，更好解析；-Depth 1 足够字符串数组
-    let script = "$ErrorActionPreference='Stop'; \
-                  try { \
-                      $p = Get-MpPreference -ErrorAction Stop; \
-                      $arr = @($p.ExclusionPath); \
-                      ConvertTo-Json -InputObject $arr -Compress -Depth 2 \
-                  } catch { '[]' }";
-
-    // 不提权运行：Get-MpPreference 普通用户即可读
-    // 用 spawn_blocking 隔离阻塞调用，避免堵 Tauri 异步执行器
-    tauri::async_runtime::spawn_blocking(move || {
-        let out = Command::new("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
-            .args([
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                script,
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null())
-            .stdin(Stdio::null())
-            .creation_flags(0x08000000) // CREATE_NO_WINDOW
-            .output()
-            .ok()?;
-        if !out.status.success() {
-            return None;
-        }
-        let text = String::from_utf8_lossy(&out.stdout).trim().to_string();
-        parse_exclusion_json(&text)
-    })
-    .await
-    .ok()
-    .flatten()
-}
-///
-/// 为了不引入完整 JSON parser，这里只识别 `[..]` 内被双引号括起来的字段；
-/// 非数组形式（PowerShell 在数组只有一个元素时输出裸字符串）直接当成单元素。
-#[cfg(windows)]
-/// 简单 JSON 字符串数组解析：能容忍 `null` / `""` / 单字符串退化为非数组。
-///
-/// 为了不引入完整 JSON parser，这里只识别 `[..]` 内被双引号括起来的字段；
-/// 非数组形式（PowerShell 在数组只有一个元素时输出裸字符串）直接当成单元素。
-pub(crate) fn parse_exclusion_json(text: &str) -> Option<Vec<String>> {
-    let trimmed = text.trim();
-    if trimmed.is_empty() || trimmed == "null" {
-        return Some(Vec::new());
-    }
-    // PowerShell ConvertTo-Json 单元素数组 + -Compress 仍会输出 `["x"]`，
-    // 但更老的版本会退化成裸字符串，这里两路都接住
-    if trimmed.starts_with('"') && trimmed.ends_with('"') && trimmed.len() >= 2 {
-        let inner = &trimmed[1..trimmed.len() - 1];
-        return Some(vec![unescape_json_string(inner)]);
-    }
-    if !trimmed.starts_with('[') || !trimmed.ends_with(']') {
-        return None;
-    }
-    let mut out = Vec::new();
-    let bytes = trimmed.as_bytes();
-    let mut i = 1usize;
-    while i < bytes.len() - 1 {
-        // 跳过空白与逗号
-        while i < bytes.len() - 1
-            && (bytes[i] == b' '
-                || bytes[i] == b','
-                || bytes[i] == b'\n'
-                || bytes[i] == b'\r'
-                || bytes[i] == b'\t')
-        {
-            i += 1;
-        }
-        if i >= bytes.len() - 1 {
-            break;
-        }
-        if bytes[i] != b'"' {
-            // 非引号开头视为格式异常
-            return None;
-        }
-        i += 1;
-        let start = i;
-        while i < bytes.len() - 1 {
-            if bytes[i] == b'\\' && i + 1 < bytes.len() - 1 {
-                i += 2;
-                continue;
-            }
-            if bytes[i] == b'"' {
-                break;
-            }
-            i += 1;
-        }
-        if i >= bytes.len() - 1 {
-            return None;
-        }
-        let raw = &trimmed[start..i];
-        out.push(unescape_json_string(raw));
-        i += 1; // 跳过结束引号
-    }
-    Some(out)
-}
-
-#[cfg(windows)]
-fn unescape_json_string(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len());
-    let mut chars = raw.chars();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-        match chars.next() {
-            Some('\\') => out.push('\\'),
-            Some('"') => out.push('"'),
-            Some('/') => out.push('/'),
-            Some('n') => out.push('\n'),
-            Some('r') => out.push('\r'),
-            Some('t') => out.push('\t'),
-            Some('b') => out.push('\u{0008}'),
-            Some('f') => out.push('\u{000C}'),
-            Some(other) => {
-                out.push('\\');
-                out.push(other);
-            }
-            None => out.push('\\'),
-        }
-    }
-    out
-}
-
-/// 给定排除路径列表，判断 `target_dir` 是否已被覆盖。
-///
-/// 命中规则：忽略大小写 + 去尾斜杠后，target 必须等于某条排除项，
-/// 或 target 以"排除项 + `\`"开头（排除项是父目录）。
-/// 这样既支持用户加了具体安装目录，也支持加了上级 ProgramFiles 目录。
-pub(crate) fn is_path_excluded(target: &str, exclusions: &[String]) -> bool {
-    let t = normalize_path(target);
-    if t.is_empty() {
-        return false;
-    }
-    for e in exclusions {
-        let n = normalize_path(e);
-        if n.is_empty() {
-            continue;
-        }
-        if t == n {
-            return true;
-        }
-        let prefix = format!("{n}\\");
-        if t.starts_with(&prefix) {
-            return true;
-        }
-    }
-    false
-}
-
-fn normalize_path(p: &str) -> String {
-    let mut s = p.trim().replace('/', "\\").to_lowercase();
-    while s.ends_with('\\') {
-        s.pop();
-    }
-    s
-}
-
-/// 把架构与 sys 文件位宽匹配为友好状态。
-///
-/// 仓库内目前只发 `ddhid63340.sys` 的 x64 版本，ARM64 设备无法加载。
-/// 返回 (是否兼容, 详情文案)。
-fn classify_arch_compat(arch: &str) -> (bool, String) {
-    let lower = arch.to_lowercase();
-    if lower == "x64" || lower == "amd64" {
-        (true, format!("当前架构 {arch}，与 x64 驱动匹配"))
-    } else if lower == "arm64" || lower == "aarch64" {
-        (
-            false,
-            format!("当前架构 {arch}，DD-HID 仅提供 x64 驱动，无法加载"),
-        )
-    } else {
-        (false, format!("当前架构 {arch}，DD-HID 仅适用于 x64 系统"))
-    }
-}
-
 #[cfg(windows)]
 async fn diagnose_install_prerequisites(app: &AppHandle) -> Vec<DiagnosticItem> {
     let mut out = Vec::new();
@@ -503,8 +213,8 @@ async fn diagnose_install_prerequisites(app: &AppHandle) -> Vec<DiagnosticItem> 
     });
 
     // ---- 系统架构 ----
-    let arch = crate::commands::sysinfo::host_arch();
-    let (arch_ok, arch_detail) = classify_arch_compat(&arch);
+    let arch = win_sysinfo::host_arch();
+    let (arch_ok, arch_detail) = prereq::classify_arch_compat(&arch);
     out.push(DiagnosticItem {
         id: "prereq.arch".to_string(),
         category: "安装前置检查".to_string(),
@@ -524,7 +234,7 @@ async fn diagnose_install_prerequisites(app: &AppHandle) -> Vec<DiagnosticItem> 
     });
 
     // ---- HVCI / 内存完整性 ----
-    let hvci = detect_hvci_active();
+    let hvci = prereq::detect_hvci_active();
     out.push(DiagnosticItem {
         id: "prereq.hvci".to_string(),
         category: "安装前置检查".to_string(),
@@ -549,35 +259,35 @@ async fn diagnose_install_prerequisites(app: &AppHandle) -> Vec<DiagnosticItem> 
     });
 
     // ---- Smart App Control ----
-    let sac = detect_sac_state();
+    let sac = prereq::detect_sac_state();
     out.push(DiagnosticItem {
         id: "prereq.sac".to_string(),
         category: "安装前置检查".to_string(),
         label: "Smart App Control".to_string(),
         severity: match sac {
-            SacState::Enforce | SacState::Evaluation => Severity::Error,
+            prereq::SacState::Enforce | prereq::SacState::Evaluation => Severity::Error,
             _ => Severity::Info,
         },
         status: match sac {
-            SacState::Enforce | SacState::Evaluation => ItemStatus::Orphan,
-            SacState::Off => ItemStatus::Ok,
-            SacState::Unknown => ItemStatus::Unknown,
+            prereq::SacState::Enforce | prereq::SacState::Evaluation => ItemStatus::Orphan,
+            prereq::SacState::Off => ItemStatus::Ok,
+            prereq::SacState::Unknown => ItemStatus::Unknown,
         },
         detail: match sac {
-            SacState::Enforce => "已强制启用，会拦截无强信誉的 ddc.exe。\
+            prereq::SacState::Enforce => "已强制启用，会拦截无强信誉的 ddc.exe。\
                 请在 Windows 设置 → 隐私与安全 → 应用控制中关闭"
                 .to_string(),
-            SacState::Evaluation => "处于评估模式，仍会拦截未知信誉应用。\
+            prereq::SacState::Evaluation => "处于评估模式，仍会拦截未知信誉应用。\
                 请在 Windows 设置 → 隐私与安全 → 应用控制中关闭"
                 .to_string(),
-            SacState::Off => "未启用".to_string(),
-            SacState::Unknown => "状态未知".to_string(),
+            prereq::SacState::Off => "未启用".to_string(),
+            prereq::SacState::Unknown => "状态未知".to_string(),
         },
         recommended_action: None,
     });
 
     // ---- 待重启 ----
-    let pending = detect_pending_reboot();
+    let pending = prereq::detect_pending_reboot();
     out.push(DiagnosticItem {
         id: "prereq.pending_reboot".to_string(),
         category: "安装前置检查".to_string(),
@@ -605,8 +315,8 @@ async fn diagnose_install_prerequisites(app: &AppHandle) -> Vec<DiagnosticItem> 
     // 不提供一键加白：调用 Add-MpPreference 容易被 Defender 自身的"行为分析"或第三方
     // 杀软拦截，反而把 FlairBloom 标红。这里只做检测和文字引导，让用户自己去
     // Windows 安全中心 → 病毒和威胁防护 → 排除项 添加。
-    let install_dir = crate::commands::sysinfo::install_path();
-    let exclusions = read_defender_exclusion_paths().await;
+    let install_dir = win_sysinfo::install_path();
+    let exclusions = prereq::read_defender_exclusion_paths().await;
     let (severity, status, detail) = match &exclusions {
         None => (
             Severity::Warn,
@@ -620,7 +330,7 @@ async fn diagnose_install_prerequisites(app: &AppHandle) -> Vec<DiagnosticItem> 
                     ItemStatus::Unknown,
                     "无法定位安装目录，跳过白名单核对".to_string(),
                 )
-            } else if is_path_excluded(&install_dir, list) {
+            } else if prereq::is_path_excluded(&install_dir, list) {
                 (
                     Severity::Info,
                     ItemStatus::Ok,
@@ -678,10 +388,10 @@ fn collect_install_resources(app: &AppHandle) -> (bool, Vec<String>) {
 #[cfg(windows)]
 fn diagnose_dd_hid(_app: &AppHandle) -> Vec<DiagnosticItem> {
     let mut out = Vec::new();
-    let sys_present = crate::commands::engine::dd_hid_sys_installed();
-    let service_present = service_key_present("ddhid63340");
-    let oem_inf = find_dd_hid_oem_inf();
-    let driverstore = list_dd_hid_driverstore();
+    let sys_present = win_driver::dd_hid::dd_hid_sys_installed();
+    let service_present = registry::service_key_present("ddhid63340");
+    let oem_inf = win_driver::dd_hid::find_dd_hid_oem_inf();
+    let driverstore = win_driver::dd_hid::list_dd_hid_driverstore();
 
     out.push(DiagnosticItem {
         id: "dd_hid.sys".to_string(),
@@ -783,13 +493,13 @@ fn diagnose_dd_hid(_app: &AppHandle) -> Vec<DiagnosticItem> {
 #[cfg(windows)]
 fn diagnose_interception(_app: &AppHandle) -> Vec<DiagnosticItem> {
     let mut out = Vec::new();
-    let api_ok = crate::engine::interception::is_driver_installed();
+    let api_ok = win_input::interception::is_driver_installed();
     // 仅当服务键 ImagePath 指向 Interception 的 keyboard.sys / mouse.sys 才视为残留，
     // 避免把同名第三方服务误判
-    let kbd = is_interception_service("keyboard", "keyboard.sys");
-    let mouse = is_interception_service("mouse", "mouse.sys");
-    let kbd_present_raw = service_key_present("keyboard");
-    let mouse_present_raw = service_key_present("mouse");
+    let kbd = registry::is_interception_service("keyboard", "keyboard.sys");
+    let mouse = registry::is_interception_service("mouse", "mouse.sys");
+    let kbd_present_raw = registry::service_key_present("keyboard");
+    let mouse_present_raw = registry::service_key_present("mouse");
     let foreign_kbd = kbd_present_raw && !kbd;
     let foreign_mouse = mouse_present_raw && !mouse;
 
@@ -988,229 +698,9 @@ fn is_profile_readable(path: &std::path::Path) -> bool {
     crypto::aes::decrypt(ciphertext, &header.nonce, &aad).is_ok()
 }
 
-// ===== Windows 注册表辅助 =====
+// ===== Windows 注册表辅助（已迁至 win-sysinfo::registry）=====
 
-#[cfg(windows)]
-fn wide(s: &str) -> Vec<u16> {
-    s.encode_utf16().chain(std::iter::once(0)).collect()
-}
-
-#[cfg(windows)]
-pub(crate) fn service_key_present(name: &str) -> bool {
-    use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegOpenKeyExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
-    };
-    let path = format!("SYSTEM\\CurrentControlSet\\Services\\{name}");
-    let wpath = wide(&path);
-    let mut hkey: HKEY = std::ptr::null_mut();
-    // SAFETY: wpath NUL 结尾；hkey 是栈上出参指针
-    let r = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, wpath.as_ptr(), 0, KEY_READ, &mut hkey) };
-    if r != 0 {
-        return false;
-    }
-    // SAFETY: 上面 RegOpenKeyExW 成功
-    unsafe { RegCloseKey(hkey) };
-    true
-}
-
-/// 读取 HKLM 下指定子键的 DWORD 值。读不到（键不存在 / 值不存在 / 类型不符）返回 None。
-///
-/// 用于 HVCI / Smart App Control / Pending Reboot 这类只看一个 DWORD 标志位的检测。
-#[cfg(windows)]
-fn read_hklm_dword(subkey: &str, name: &str) -> Option<u32> {
-    use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ, REG_DWORD,
-    };
-    let wpath = wide(subkey);
-    let mut hkey: HKEY = std::ptr::null_mut();
-    // SAFETY: wpath NUL 结尾；hkey 是栈上出参指针
-    let r = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, wpath.as_ptr(), 0, KEY_READ, &mut hkey) };
-    if r != 0 {
-        return None;
-    }
-    let wname = wide(name);
-    let mut ty: u32 = 0;
-    let mut data: u32 = 0;
-    let mut len: u32 = std::mem::size_of::<u32>() as u32;
-    // SAFETY: hkey 已 open；data 是栈上 u32 与 len 匹配
-    let q = unsafe {
-        RegQueryValueExW(
-            hkey,
-            wname.as_ptr(),
-            std::ptr::null_mut(),
-            &mut ty,
-            &mut data as *mut u32 as *mut u8,
-            &mut len,
-        )
-    };
-    // SAFETY: hkey 上面 open 成功
-    unsafe { RegCloseKey(hkey) };
-    if q == 0 && ty == REG_DWORD {
-        Some(data)
-    } else {
-        None
-    }
-}
-
-/// HKLM 子键是否存在（仅判存，不关心内容）。
-#[cfg(windows)]
-fn hklm_subkey_present(subkey: &str) -> bool {
-    use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegOpenKeyExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
-    };
-    let wpath = wide(subkey);
-    let mut hkey: HKEY = std::ptr::null_mut();
-    // SAFETY: wpath NUL 结尾；hkey 是栈上出参指针
-    let r = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, wpath.as_ptr(), 0, KEY_READ, &mut hkey) };
-    if r != 0 {
-        return false;
-    }
-    // SAFETY: 上面 RegOpenKeyExW 成功
-    unsafe { RegCloseKey(hkey) };
-    true
-}
-
-/// 读取服务键 `ImagePath`（REG_SZ / REG_EXPAND_SZ），返回小写形式。
-///
-/// 用于在删除 keyboard / mouse 这种通用名服务前校验它确实是 Interception
-/// 注册的——Interception 的硬编码 ImagePath 永远以 `\keyboard.sys` / `\mouse.sys`
-/// 结尾。
-#[cfg(windows)]
-fn read_service_image_path(name: &str) -> Option<String> {
-    use windows_sys::Win32::System::Registry::{
-        RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
-    };
-    let path = format!("SYSTEM\\CurrentControlSet\\Services\\{name}");
-    let wpath = wide(&path);
-    let mut hkey: HKEY = std::ptr::null_mut();
-    // SAFETY: wpath NUL 结尾；hkey 是栈上出参指针
-    let r = unsafe { RegOpenKeyExW(HKEY_LOCAL_MACHINE, wpath.as_ptr(), 0, KEY_READ, &mut hkey) };
-    if r != 0 {
-        return None;
-    }
-    let value_name = wide("ImagePath");
-    let mut buf: [u16; 1024] = [0; 1024];
-    let mut size: u32 = (buf.len() * 2) as u32;
-    let mut ty: u32 = 0;
-    // SAFETY: hkey 已 open，buf/size/ty 都是栈上出参；buf 容量足以容纳常规 ImagePath
-    let q = unsafe {
-        RegQueryValueExW(
-            hkey,
-            value_name.as_ptr(),
-            std::ptr::null_mut(),
-            &mut ty,
-            buf.as_mut_ptr() as *mut u8,
-            &mut size,
-        )
-    };
-    // SAFETY: hkey 上面 open 成功
-    unsafe { RegCloseKey(hkey) };
-    if q != 0 {
-        return None;
-    }
-    let chars = (size as usize).saturating_div(2);
-    // 去掉末尾 NUL
-    let trimmed: Vec<u16> = buf
-        .iter()
-        .take(chars)
-        .copied()
-        .take_while(|&c| c != 0)
-        .collect();
-    Some(String::from_utf16_lossy(&trimmed).to_lowercase())
-}
-
-/// 服务键名 + 期望的驱动文件名后缀（如 `keyboard.sys`），同时满足才视为 Interception 服务。
-#[cfg(windows)]
-pub(crate) fn is_interception_service(name: &str, expected_sys: &str) -> bool {
-    if !service_key_present(name) {
-        return false;
-    }
-    match read_service_image_path(name) {
-        Some(p) => {
-            // ImagePath 形如 `\??\C:\Windows\system32\drivers\keyboard.sys`，
-            // 兼容大小写差异及驱动安装器使用的几种路径变体
-            let needle = format!("\\{expected_sys}");
-            p.ends_with(&needle) || p.ends_with(expected_sys)
-        }
-        None => false,
-    }
-}
-
-/// 列出 PnP OEM INF 中匹配 ddhid 的 oem 编号（如 `["oem15.inf"]`）。
-///
-/// 用 `pnputil /enum-drivers` 取数据。pnputil 的输出是本地化文本，所以这里
-/// 不解析它而是直接扫 `%SystemRoot%\INF\` 下所有 `oem*.inf` 文件，看 INF 内容
-/// 是否含 ddhid63340 关键字——这是它唯一稳定且与语言无关的标识。
-#[cfg(windows)]
-fn find_dd_hid_oem_inf() -> Vec<String> {
-    let inf_dir = std::env::var("SystemRoot")
-        .map(|r| std::path::Path::new(&r).join("INF"))
-        .unwrap_or_else(|_| std::path::PathBuf::from("C:\\Windows\\INF"));
-    let entries = match std::fs::read_dir(&inf_dir) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
-    };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy().to_lowercase();
-        if !name_str.starts_with("oem") || !name_str.ends_with(".inf") {
-            continue;
-        }
-        let path = entry.path();
-        // INF 文件较小（通常 < 16 KB），全量读后做大小写无关匹配
-        let Ok(content) = std::fs::read(&path) else {
-            continue;
-        };
-        // INF 多为 UTF-16 LE 或 ANSI；这里两路都试一遍
-        let utf8 = String::from_utf8_lossy(&content).to_lowercase();
-        let utf16 = if content.len() >= 2 && content[0] == 0xFF && content[1] == 0xFE {
-            let u16s: Vec<u16> = content[2..]
-                .chunks_exact(2)
-                .map(|c| u16::from_le_bytes([c[0], c[1]]))
-                .collect();
-            String::from_utf16_lossy(&u16s).to_lowercase()
-        } else {
-            String::new()
-        };
-        if utf8.contains("ddhid63340") || utf16.contains("ddhid63340") {
-            out.push(name_str);
-        }
-    }
-    out.sort();
-    out
-}
-
-/// 扫描 `%SystemRoot%\System32\DriverStore\FileRepository\` 下所有
-/// `ddhid*.inf_amd64_*` 目录。重装失败的另一个常见原因。
-#[cfg(windows)]
-fn list_dd_hid_driverstore() -> Vec<String> {
-    let base = std::env::var("SystemRoot")
-        .map(|r| {
-            std::path::Path::new(&r)
-                .join("System32")
-                .join("DriverStore")
-                .join("FileRepository")
-        })
-        .unwrap_or_else(|_| {
-            std::path::PathBuf::from("C:\\Windows\\System32\\DriverStore\\FileRepository")
-        });
-    let entries = match std::fs::read_dir(&base) {
-        Ok(e) => e,
-        Err(_) => return Vec::new(),
-    };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().to_lowercase();
-        if name.starts_with("ddhid") {
-            out.push(name);
-        }
-    }
-    out.sort();
-    out
-}
-
-// ===== 修复：DD-HID 深度清理 =====
+// ===== 修复：DD-HID 深度清理（find_dd_hid_oem_inf / list_dd_hid_driverstore 已迁至 win-driver）=====
 
 #[tauri::command]
 pub async fn repair_dd_hid_residue(app: AppHandle) -> Result<RepairOutcome, String> {
@@ -1227,7 +717,7 @@ pub async fn repair_dd_hid_residue(app: AppHandle) -> Result<RepairOutcome, Stri
 
 #[cfg(windows)]
 async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
-    use crate::engine::input::{init_backend, InputMode};
+    use win_input::{init_backend, InputMode};
     use tauri_plugin_store::StoreExt;
 
     // 修复前先切回 SendInput，避免修复进行时 DLL 仍持有 sys 句柄
@@ -1238,13 +728,13 @@ async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
     }
 
     let backup = ensure_backup_dir(&app)?;
-    let oem_inf = find_dd_hid_oem_inf();
-    let driverstore = list_dd_hid_driverstore();
-    let service_present_before = service_key_present("ddhid63340");
-    let sys_present_before = crate::commands::engine::dd_hid_sys_installed();
+    let oem_inf = win_driver::dd_hid::find_dd_hid_oem_inf();
+    let driverstore = win_driver::dd_hid::list_dd_hid_driverstore();
+    let service_present_before = registry::service_key_present("ddhid63340");
+    let sys_present_before = win_driver::dd_hid::dd_hid_sys_installed();
 
-    let backup_lit = ps_single_quoted(&backup.display().to_string());
-    let oem_inf_array = ps_string_array(&oem_inf);
+    let backup_lit = win_driver::powershell::ps_single_quoted(&backup.display().to_string());
+    let oem_inf_array = win_driver::powershell::ps_string_array(&oem_inf);
 
     // 单脚本：备份 → pnputil 标准卸载 → 仅在 PnP 未清干净时移除注册表残留键。
     // 关键设计：不再 takeown / icacls / Remove-Item / PendingFileRenameOperations
@@ -1293,11 +783,11 @@ async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
          exit 0",
     );
 
-    let exit = run_powershell_script_elevated(&app, &script).await;
+    let exit = win_driver::powershell::run_script_elevated(&script).await;
     crate::commands::status::emit_status_changed(&app);
 
-    let sys_present_after = crate::commands::engine::dd_hid_sys_installed();
-    let service_present_after = service_key_present("ddhid63340");
+    let sys_present_after = win_driver::dd_hid::dd_hid_sys_installed();
+    let service_present_after = registry::service_key_present("ddhid63340");
     let oem_inf_after = find_dd_hid_oem_inf();
     let driverstore_after = list_dd_hid_driverstore();
 
@@ -1396,11 +886,11 @@ async fn run_interception_repair(app: AppHandle) -> Result<RepairOutcome, String
     let backup = ensure_backup_dir(&app)?;
     // 严格识别：仅当服务键 ImagePath 指向 Interception 自带的 keyboard.sys / mouse.sys
     // 才允许清理，绝不动同名的第三方服务
-    let kbd_before = is_interception_service("keyboard", "keyboard.sys");
-    let mouse_before = is_interception_service("mouse", "mouse.sys");
-    let kbd_raw = service_key_present("keyboard");
-    let mouse_raw = service_key_present("mouse");
-    let api_before = crate::engine::interception::is_driver_installed();
+    let kbd_before = registry::is_interception_service("keyboard", "keyboard.sys");
+    let mouse_before = registry::is_interception_service("mouse", "mouse.sys");
+    let kbd_raw = registry::service_key_present("keyboard");
+    let mouse_raw = registry::service_key_present("mouse");
+    let api_before = win_input::interception::is_driver_installed();
 
     // 仅在驱动 API 不可用、但服务键残留时才动手清理；其它情况保守跳过
     if api_before {
@@ -1435,7 +925,7 @@ async fn run_interception_repair(app: AppHandle) -> Result<RepairOutcome, String
         });
     }
 
-    let backup_lit = ps_single_quoted(&backup.display().to_string());
+    let backup_lit = win_driver::powershell::ps_single_quoted(&backup.display().to_string());
     // 注意：Windows 自带的 `kbdclass` / `mouclass` 服务名是别的；
     // Interception 注册的是 `keyboard` / `mouse`（小写、无后缀），与系统服务并存。
     // 这里只删确认是 Interception 的 key，由 PowerShell 脚本再次校验 ImagePath
@@ -1444,7 +934,7 @@ async fn run_interception_repair(app: AppHandle) -> Result<RepairOutcome, String
         .iter()
         .filter_map(|(n, ok)| if *ok { Some((*n).to_string()) } else { None })
         .collect();
-    let target_array = ps_string_array(&targets);
+    let target_array = win_driver::powershell::ps_string_array(&targets);
     let script = format!(
         "$ErrorActionPreference='Continue';\n\
          $backup={backup_lit};\n\
@@ -1466,11 +956,11 @@ async fn run_interception_repair(app: AppHandle) -> Result<RepairOutcome, String
          exit 0",
     );
 
-    let exit = run_powershell_script_elevated(&app, &script).await;
+    let exit = win_driver::powershell::run_script_elevated(&script).await;
     crate::commands::status::emit_status_changed(&app);
 
-    let kbd_after = is_interception_service("keyboard", "keyboard.sys");
-    let mouse_after = is_interception_service("mouse", "mouse.sys");
+    let kbd_after = registry::is_interception_service("keyboard", "keyboard.sys");
+    let mouse_after = registry::is_interception_service("mouse", "mouse.sys");
 
     let steps = vec![
         make_step(
@@ -1724,84 +1214,7 @@ fn pnp_sys_step(before: bool, after: bool) -> RepairStep {
     }
 }
 
-// ===== PowerShell 调用封装 =====
-
-/// 把 [String] 编为 PowerShell 字面量数组：`@('a','b')`。
-fn ps_string_array(items: &[String]) -> String {
-    if items.is_empty() {
-        return "@()".to_string();
-    }
-    let mut buf = String::from("@(");
-    for (i, s) in items.iter().enumerate() {
-        if i > 0 {
-            buf.push(',');
-        }
-        buf.push_str(&ps_single_quoted(s));
-    }
-    buf.push(')');
-    buf
-}
-
-/// 把字符串包成 PowerShell 单引号字面量，单引号转义为两个单引号。
-///
-/// 例如 `O'Brien\path` → `'O''Brien\path'`。Windows 用户名 / 路径里夹带的
-/// 单引号不会再截断脚本。
-fn ps_single_quoted(s: &str) -> String {
-    let mut out = String::with_capacity(s.len() + 2);
-    out.push('\'');
-    out.push_str(&s.replace('\'', "''"));
-    out.push('\'');
-    out
-}
-
-/// 把脚本编码成 `-EncodedCommand` 形式并提权执行，返回真实退出码。
-#[cfg(windows)]
-async fn run_powershell_script_elevated(app: &AppHandle, script: &str) -> Result<u32, String> {
-    let utf16: Vec<u16> = script.encode_utf16().collect();
-    let bytes: Vec<u8> = utf16.iter().flat_map(|c| c.to_le_bytes()).collect();
-    let encoded = base64_std_encode(&bytes);
-    let arg =
-        format!("-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand {encoded}");
-    let exe =
-        std::path::PathBuf::from("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
-    crate::commands::engine::run_elevated_exe_capture(app.clone(), exe, Some(&arg)).await
-}
-
-/// 复用 engine.rs 的 base64 实现，避免新增依赖
-#[cfg(windows)]
-fn base64_std_encode(input: &[u8]) -> String {
-    const TBL: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    let mut chunks = input.chunks_exact(3);
-    for c in chunks.by_ref() {
-        let n = ((c[0] as u32) << 16) | ((c[1] as u32) << 8) | (c[2] as u32);
-        out.push(TBL[((n >> 18) & 0x3F) as usize] as char);
-        out.push(TBL[((n >> 12) & 0x3F) as usize] as char);
-        out.push(TBL[((n >> 6) & 0x3F) as usize] as char);
-        out.push(TBL[(n & 0x3F) as usize] as char);
-    }
-    let rem = chunks.remainder();
-    match rem.len() {
-        1 => {
-            let n = (rem[0] as u32) << 16;
-            out.push(TBL[((n >> 18) & 0x3F) as usize] as char);
-            out.push(TBL[((n >> 12) & 0x3F) as usize] as char);
-            out.push('=');
-            out.push('=');
-        }
-        2 => {
-            let n = ((rem[0] as u32) << 16) | ((rem[1] as u32) << 8);
-            out.push(TBL[((n >> 18) & 0x3F) as usize] as char);
-            out.push(TBL[((n >> 12) & 0x3F) as usize] as char);
-            out.push(TBL[((n >> 6) & 0x3F) as usize] as char);
-            out.push('=');
-        }
-        _ => {}
-    }
-    out
-}
-
-// ===== 单元测试：纯逻辑路径 =====
+// ===== 单元测试：纯逻辑路径（ps_* 测试已迁至 win-driver::powershell）=====
 
 #[cfg(test)]
 mod tests {
@@ -1827,30 +1240,6 @@ mod tests {
     }
 
     #[test]
-    fn ps_string_array_escapes_quotes() {
-        assert_eq!(ps_string_array(&[]), "@()");
-        assert_eq!(
-            ps_string_array(&["oem15.inf".to_string(), "oem99.inf".to_string()]),
-            "@('oem15.inf','oem99.inf')"
-        );
-        // 单引号转义为两个单引号
-        assert_eq!(ps_string_array(&["a'b".to_string()]), "@('a''b')");
-    }
-
-    #[test]
-    fn ps_single_quoted_escapes_inner_quotes() {
-        assert_eq!(ps_single_quoted("plain"), "'plain'");
-        assert_eq!(ps_single_quoted(""), "''");
-        // 路径中含单引号（如 Windows 用户名 O'Brien）必须被转义
-        assert_eq!(
-            ps_single_quoted("C:\\Users\\O'Brien\\Local"),
-            "'C:\\Users\\O''Brien\\Local'"
-        );
-        // 多个单引号连续转义
-        assert_eq!(ps_single_quoted("a''b"), "'a''''b'");
-    }
-
-    #[test]
     fn timestamp_slug_format() {
         let s = timestamp_slug();
         // 形如 20260527-153045，长度固定 15
@@ -1871,77 +1260,4 @@ mod tests {
         assert_eq!(d_2026_01_01, (2026, 1, 1));
     }
 
-    // ===== 安装前置检查 =====
-
-    #[cfg(windows)]
-    #[test]
-    fn parse_exclusion_json_handles_common_shapes() {
-        // 常规数组
-        assert_eq!(
-            parse_exclusion_json(r#"["C:\\Foo","C:\\Bar"]"#).unwrap(),
-            vec!["C:\\Foo".to_string(), "C:\\Bar".to_string()]
-        );
-        // 空数组 / null / 空串
-        assert_eq!(parse_exclusion_json("[]").unwrap(), Vec::<String>::new());
-        assert_eq!(parse_exclusion_json("null").unwrap(), Vec::<String>::new());
-        assert_eq!(parse_exclusion_json("").unwrap(), Vec::<String>::new());
-        // PowerShell 单元素退化为裸字符串
-        assert_eq!(
-            parse_exclusion_json(r#""C:\\Only One""#).unwrap(),
-            vec!["C:\\Only One".to_string()]
-        );
-        // 含转义引号
-        assert_eq!(
-            parse_exclusion_json(r#"["C:\\O\"B"]"#).unwrap(),
-            vec!["C:\\O\"B".to_string()]
-        );
-        // 非法格式返回 None
-        assert!(parse_exclusion_json("garbage").is_none());
-    }
-
-    #[test]
-    fn is_path_excluded_matches_dir_and_parent() {
-        // 完全等价（大小写无关 + 斜杠归一化）
-        assert!(is_path_excluded(
-            "C:\\Program Files\\FlairBloom",
-            &["c:\\program files\\flairbloom".to_string()]
-        ));
-        // 父目录覆盖子目录
-        assert!(is_path_excluded(
-            "C:\\Program Files\\FlairBloom\\bin",
-            &["C:\\Program Files\\FlairBloom".to_string()]
-        ));
-        // 子目录不覆盖父目录
-        assert!(!is_path_excluded(
-            "C:\\Program Files\\FlairBloom",
-            &["C:\\Program Files\\FlairBloom\\bin".to_string()]
-        ));
-        // 前缀字符串相同但不是父目录
-        assert!(!is_path_excluded(
-            "C:\\Program Files\\FlairBloomCorp",
-            &["C:\\Program Files\\FlairBloom".to_string()]
-        ));
-        // 排除项尾部带反斜杠也能匹配
-        assert!(is_path_excluded("C:\\App", &["C:\\App\\".to_string()]));
-        // 空目标 / 空排除项不会误判
-        assert!(!is_path_excluded("", &["C:\\App".to_string()]));
-        assert!(!is_path_excluded("C:\\App", &["".to_string()]));
-        // 正反斜杠混用归一化
-        assert!(is_path_excluded("C:/App/Bin", &["C:\\App".to_string()]));
-    }
-
-    #[test]
-    fn classify_arch_compat_matrix() {
-        let (ok, _) = classify_arch_compat("x64");
-        assert!(ok);
-        let (ok, _) = classify_arch_compat("AMD64");
-        assert!(ok);
-        let (ok, msg) = classify_arch_compat("ARM64");
-        assert!(!ok);
-        assert!(msg.contains("ARM64"));
-        let (ok, _) = classify_arch_compat("x86");
-        assert!(!ok);
-        let (ok, _) = classify_arch_compat("unknown(99)");
-        assert!(!ok);
-    }
 }

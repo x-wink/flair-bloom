@@ -1,11 +1,8 @@
 use crypto::aes;
-use qzh_format::{
-    header::{FileHeader, MAGIC, VERSION},
-    key_id::KeyId,
-    migrate::migrate_profile,
-    profile::{
-        Advanced, BurstMode, BurstRule, Hotkeys, Profile, ProfileMeta, CURRENT_SCHEMA_VERSION,
-    },
+use qzh_format::header::{FileHeader, MAGIC, VERSION};
+use qzh_profile::{
+    Advanced, BurstMode, BurstRule, Hotkeys, KeyId, Profile, ProfileMeta, CURRENT_SCHEMA_VERSION,
+    migrate_profile,
 };
 use std::{
     path::{Path, PathBuf},

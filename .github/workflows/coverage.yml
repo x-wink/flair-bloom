@@ -25,6 +25,7 @@ jobs:
         run: |
           cargo llvm-cov \
             --package qzh-format \
+            --package qzh-profile \
             --package crypto \
             --package migrate \
             --lcov --output-path coverage.lcov \

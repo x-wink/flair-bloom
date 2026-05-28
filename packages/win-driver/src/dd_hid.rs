@@ -1,0 +1,139 @@
+//! DD-HID 驱动安装/卸载 + 残留检测。
+
+#[cfg(windows)]
+use crate::{elevation::run_elevated_exe, powershell};
+#[cfg(windows)]
+use tracing::warn;
+
+/// `ddhid63340.sys` 的绝对路径（基于 `%SystemRoot%`）。
+#[cfg(windows)]
+pub fn dd_hid_sys_path() -> std::path::PathBuf {
+    let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
+    std::path::Path::new(&sysroot)
+        .join("System32")
+        .join("drivers")
+        .join("ddhid63340.sys")
+}
+
+/// `ddhid63340.sys` 是否已落盘。
+#[cfg(windows)]
+pub fn dd_hid_sys_installed() -> bool {
+    dd_hid_sys_path().exists()
+}
+
+#[cfg(not(windows))]
+pub fn dd_hid_sys_installed() -> bool {
+    false
+}
+
+/// 安装 DD-HID 驱动（调用 `ddc.exe`）。
+#[cfg(windows)]
+pub async fn install(resource_dir: &Path) -> Result<(), String> {
+    let exe = resource_dir.join("ddhid-driver").join("ddc.exe");
+    run_elevated_exe(exe, None).await
+}
+
+/// 卸载 DD-HID 驱动（调用 `ddc.exe -u`），失败时兜底调用 pnputil。
+#[cfg(windows)]
+pub async fn uninstall(resource_dir: &Path) -> Result<(bool, Result<(), String>), String> {
+    let exe = resource_dir.join("ddhid-driver").join("ddc.exe");
+    let exe_result = run_elevated_exe(exe, Some("-u")).await;
+    let mut pending_reboot = false;
+    if dd_hid_sys_installed() {
+        match pnputil_uninstall().await {
+            Ok(0) | Ok(1) => {}
+            Ok(2) => pending_reboot = true,
+            Ok(n) => warn!("pnputil 卸载返回未知退出码 {n}"),
+            Err(e) => warn!("pnputil 卸载兜底失败：{}", e),
+        }
+        if dd_hid_sys_installed() {
+            pending_reboot = true;
+        }
+    }
+    Ok((pending_reboot, exe_result))
+}
+
+#[cfg(windows)]
+async fn pnputil_uninstall() -> Result<u32, String> {
+    let oem_list = find_dd_hid_oem_inf();
+    if oem_list.is_empty() {
+        return Ok(1);
+    }
+    let oem_array = powershell::ps_string_array(&oem_list);
+    let script = format!(
+        "$ErrorActionPreference='Continue';\n\
+         $hardFail=$false;\n\
+         foreach ($oem in {oem_array}) {{\n\
+             try {{ & pnputil.exe /delete-driver $oem /uninstall /force | Out-Null }}\n\
+             catch {{ $hardFail=$true }}\n\
+             if ($LASTEXITCODE -ne 0) {{ $hardFail=$true }}\n\
+         }}\n\
+         if ($hardFail) {{ exit 2 }}\n\
+         exit 0",
+    );
+    powershell::run_script_elevated(&script).await
+}
+
+/// 列出 `%SystemRoot%\INF\` 下归属 ddhid63340 的 OEM INF 编号。
+pub fn find_dd_hid_oem_inf() -> Vec<String> {
+    let inf_dir = std::env::var("SystemRoot")
+        .map(|r| std::path::Path::new(&r).join("INF"))
+        .unwrap_or_else(|_| std::path::PathBuf::from("C:\\Windows\\INF"));
+    let entries = match std::fs::read_dir(&inf_dir) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy().to_lowercase();
+        if !name_str.starts_with("oem") || !name_str.ends_with(".inf") {
+            continue;
+        }
+        let Ok(content) = std::fs::read(entry.path()) else {
+            continue;
+        };
+        let utf8 = String::from_utf8_lossy(&content).to_lowercase();
+        let utf16 = if content.len() >= 2 && content[0] == 0xFF && content[1] == 0xFE {
+            let u16s: Vec<u16> = content[2..]
+                .chunks_exact(2)
+                .map(|c| u16::from_le_bytes([c[0], c[1]]))
+                .collect();
+            String::from_utf16_lossy(&u16s).to_lowercase()
+        } else {
+            String::new()
+        };
+        if utf8.contains("ddhid63340") || utf16.contains("ddhid63340") {
+            out.push(name_str);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// 扫描 `%SystemRoot%\System32\DriverStore\FileRepository\` 下的 ddhid 目录。
+pub fn list_dd_hid_driverstore() -> Vec<String> {
+    let base = std::env::var("SystemRoot")
+        .map(|r| {
+            std::path::Path::new(&r)
+                .join("System32")
+                .join("DriverStore")
+                .join("FileRepository")
+        })
+        .unwrap_or_else(|_| {
+            std::path::PathBuf::from("C:\\Windows\\System32\\DriverStore\\FileRepository")
+        });
+    let entries = match std::fs::read_dir(&base) {
+        Ok(e) => e,
+        Err(_) => return Vec::new(),
+    };
+    let mut out = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if name.starts_with("ddhid") {
+            out.push(name);
+        }
+    }
+    out.sort();
+    out
+}

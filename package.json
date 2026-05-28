@@ -8,8 +8,8 @@
     "lint:fix": "oxlint --fix apps/main/src",
     "format": "oxfmt apps/main/src",
     "format:check": "oxfmt --check apps/main/src",
-    "coverage": "cargo llvm-cov --package qzh-format --package crypto --package migrate --summary-only",
-    "coverage:html": "cargo llvm-cov --package qzh-format --package crypto --package migrate --html --open",
+    "coverage": "cargo llvm-cov --package qzh-format --package qzh-profile --package crypto --package migrate --summary-only",
+    "coverage:html": "cargo llvm-cov --package qzh-format --package qzh-profile --package crypto --package migrate --html --open",
     "icon": "pnpm --filter main tauri icon src/assets/icon.png",
     "bump-version": "tsx scripts/bump-version.ts"
   },

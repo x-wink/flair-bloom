@@ -3,6 +3,11 @@ members = [
     "packages/crypto",
     "packages/migrate",
     "packages/qzh-format",
+    "packages/qzh-profile",
+    "packages/win-sysinfo",
+    "packages/win-input",
+    "packages/burst-engine",
+    "packages/win-driver",
     "apps/keygen",
     "apps/main/src-tauri",
 ]

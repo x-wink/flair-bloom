@@ -1,12 +1,10 @@
 #[cfg(windows)]
-use super::input::SIM_MARKER;
+use win_input::{clear_pending_injections, try_consume_injection, SIM_MARKER};
+use win_input::{key_down, key_up};
+use qzh_profile::key_id::KeyId;
 #[cfg(windows)]
-use super::input::{clear_pending_injections, try_consume_injection};
-use super::input::{key_down, key_up};
-use qzh_format::key_id::KeyId;
-#[cfg(windows)]
-use qzh_format::key_id::MouseButton;
-use qzh_format::profile::{BurstMode, BurstRule};
+use qzh_profile::key_id::MouseButton;
+use qzh_profile::profile::{BurstMode, BurstRule};
 #[cfg(windows)]
 use std::sync::{RwLock, Weak};
 use std::{
@@ -64,6 +62,12 @@ pub struct BurstEngine {
     /// rule_id -> (cancel_flag, thread_handle, target_key, join_handle)
     active_loops: ActiveLoops,
     toggle_states: Arc<Mutex<HashMap<String, bool>>>,
+}
+
+impl Default for BurstEngine {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl BurstEngine {

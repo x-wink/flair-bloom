@@ -1,0 +1,58 @@
+//! 启动期配置文件加载与初始化。
+
+use std::sync::Arc;
+use tauri::Manager;
+use tauri_plugin_store::StoreExt;
+use tracing::{error, info, warn};
+
+use crate::engine::BurstEngine;
+
+pub fn load_or_init_profile(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
+    let active_path: Option<String> = app.store(crate::STORE_PATH).ok().and_then(|store| {
+        store
+            .get(crate::commands::profile::ACTIVE_PATH_KEY)
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+    });
+
+    let profiles_dir = match app.path().app_data_dir() {
+        Ok(d) => d.join("profiles"),
+        Err(e) => {
+            error!("无法获取应用数据目录: {}", e);
+            return;
+        }
+    };
+
+    match active_path {
+        Some(path) => {
+            match load_profile_from_path(&path, &profiles_dir) {
+                Ok(profile) => {
+                    engine.set_rules(profile.rules);
+                    info!("已加载配置: {}", path);
+                }
+                Err(e) => {
+                    warn!("加载配置失败 ({}): {}，回退到默认配置", path, e);
+                    if let Err(e2) = crate::commands::profile::create_default_profile(app, engine) {
+                        error!("回退默认配置也失败: {}", e2);
+                    }
+                }
+            }
+        }
+        None => {
+            if let Err(e) = crate::commands::profile::create_default_profile(app, engine) {
+                error!("初始化默认配置失败: {}", e);
+            }
+        }
+    }
+}
+
+fn load_profile_from_path(
+    path: &str,
+    profiles_dir: &std::path::Path,
+) -> Result<qzh_profile::Profile, String> {
+    let file_name = std::path::Path::new(path)
+        .file_name()
+        .ok_or("无效文件路径")?
+        .to_string_lossy();
+    let safe_path = profiles_dir.join(file_name.as_ref());
+    qzh_profile::load_from_path(&safe_path).map_err(|e| e.to_string())
+}

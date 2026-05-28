@@ -1,10 +1,3 @@
-pub mod burst;
+pub use burst_engine::{start_listener, BurstEngine};
 #[cfg(windows)]
-pub mod dd_common;
-#[cfg(windows)]
-pub mod ddhid;
-pub mod input;
-#[cfg(windows)]
-pub mod interception;
-
-pub use burst::BurstEngine;
+pub use win_input::{clear_pending_injections, try_consume_injection, SIM_MARKER};

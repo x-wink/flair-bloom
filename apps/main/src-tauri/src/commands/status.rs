@@ -16,6 +16,7 @@ pub const STATUS_CHANGED_EVENT: &str = "app-status-changed";
 /// （会撞 install error），也不能直接当作"已安装"使用。
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
+#[cfg_attr(not(windows), allow(dead_code))]
 pub enum DriverStatus {
     Installed,
     PendingReboot,
@@ -44,7 +45,6 @@ pub struct AppStatus {
 
 impl AppStatus {
     pub fn collect(app: &AppHandle) -> Self {
-        use crate::commands::sysinfo;
         let (resources_ok, missing_resources) = collect_resource_health(app);
         Self {
             elevated: collect_elevated(),
@@ -53,11 +53,11 @@ impl AppStatus {
             input_mode: collect_input_mode(),
             platform: std::env::consts::OS,
             os_family: std::env::consts::FAMILY,
-            os_version: sysinfo::os_version(),
-            webview_version: sysinfo::webview2_version(),
-            arch: sysinfo::host_arch(),
-            locale: sysinfo::user_locale(),
-            install_path: sysinfo::install_path(),
+            os_version: win_sysinfo::os_version(),
+            webview_version: win_sysinfo::webview2_version(),
+            arch: win_sysinfo::host_arch(),
+            locale: win_sysinfo::user_locale(),
+            install_path: win_sysinfo::install_path(),
             log_dir: crate::log_dir().to_string_lossy().into_owned(),
             app_data_dir: app
                 .path()
@@ -99,13 +99,13 @@ fn collect_elevated() -> bool {
 
 #[cfg(windows)]
 fn collect_interception_installed() -> DriverStatus {
-    let api_ok = crate::engine::interception::is_driver_installed();
+    let api_ok = win_input::interception::is_driver_installed();
     if api_ok {
         return DriverStatus::Installed;
     }
     // API 不可用但服务键残留 → 卸载未完成或装了未重启
-    let kbd = crate::commands::repair::is_interception_service("keyboard", "keyboard.sys");
-    let mouse = crate::commands::repair::is_interception_service("mouse", "mouse.sys");
+    let kbd = win_sysinfo::registry::is_interception_service("keyboard", "keyboard.sys");
+    let mouse = win_sysinfo::registry::is_interception_service("mouse", "mouse.sys");
     if kbd || mouse {
         DriverStatus::PendingReboot
     } else {
@@ -121,7 +121,7 @@ fn collect_interception_installed() -> DriverStatus {
 #[cfg(windows)]
 fn collect_dd_hid_installed() -> DriverStatus {
     let sys = crate::commands::engine::dd_hid_sys_installed();
-    let service = crate::commands::repair::service_key_present("ddhid63340");
+    let service = win_sysinfo::registry::service_key_present("ddhid63340");
     match (sys, service) {
         (true, true) => DriverStatus::Installed,
         (false, false) => DriverStatus::NotInstalled,
@@ -137,7 +137,7 @@ fn collect_dd_hid_installed() -> DriverStatus {
 
 #[cfg(windows)]
 fn collect_input_mode() -> String {
-    crate::engine::input::current_mode().as_str().to_string()
+    win_input::current_mode().as_str().to_string()
 }
 
 #[cfg(not(windows))]

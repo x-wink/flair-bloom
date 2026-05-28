@@ -68,5 +68,5 @@ fn wrap_optional_keyboard_field(obj: &mut Value, field: &str) {
 }
 
 #[cfg(test)]
-#[path = "migrate_tests.rs"]
+#[path = "schema_migrate_tests.rs"]
 mod tests;

@@ -1,10 +1,12 @@
 [package]
-name = "qzh-format"
+name = "qzh-profile"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
+qzh-format = { path = "../qzh-format" }
 crypto = { path = "../crypto" }
+migrate = { path = "../migrate" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
