@@ -395,10 +395,16 @@ fn dispatch(key: KeyId, is_up: bool) {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     backend_seen = true;
                     log_dd_route(is_up, key);
+                    // 先登记再发送：hook 可能在 send_mouse 返回前就收到 LL 事件，
+                    // 若顺序颠倒会把模拟事件误判为物理输入触发连发或停止连发。
+                    // 若 DD 不支持此按钮（X1/X2）会返回 false，随即撤销登记，
+                    // 避免 50ms TTL 内把后续物理 X1/X2 事件误消费。
+                    record_injection(key, is_up);
                     if backend.send_mouse(btn, is_up) {
-                        record_injection(key, is_up);
                         return;
                     }
+                    // DD 不支持（X1/X2）→ 回退 SendInput（SIM_MARKER 路径），撤销预登记
+                    try_consume_injection(key, is_up);
                 }
             }
             if !backend_seen

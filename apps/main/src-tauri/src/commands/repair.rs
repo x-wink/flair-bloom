@@ -788,8 +788,8 @@ async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
 
     let sys_present_after = win_driver::dd_hid::dd_hid_sys_installed();
     let service_present_after = registry::service_key_present("ddhid63340");
-    let oem_inf_after = find_dd_hid_oem_inf();
-    let driverstore_after = list_dd_hid_driverstore();
+    let oem_inf_after = win_driver::dd_hid::find_dd_hid_oem_inf();
+    let driverstore_after = win_driver::dd_hid::list_dd_hid_driverstore();
 
     let mut steps = Vec::new();
     steps.push(make_step(
