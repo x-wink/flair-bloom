@@ -654,11 +654,11 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **连发引擎**
 
-- [x] `rdev` 全局键盘监听 + `enigo` 按键模拟
-- [x] `AtomicUsize` sim_count 过滤事件循环
+- [x] `windows_sys` `WH_KEYBOARD_LL` / `WH_MOUSE_LL` 全局键鼠监听 + `SendInput` / Interception / DD-HID 三通道模拟
+- [x] `SIM_MARKER` + `PENDING_INJECTIONS` 过滤模拟事件循环，`pressed_keys` 过滤 OS key-repeat
 - [x] `catch_unwind` 包裹引擎主循环，panic 后自动重启
 - [x] 按压连发状态机（持键发送，抬键停止）
-- [x] Toggle 连发状态机（热键开关，与 Hold 模式统一由 rdev 驱动；`tauri-plugin-global-shortcut` 留作全局功能快捷键，如一键切换全局开关、切换配置文件）
+- [x] Toggle 连发状态机（热键开关，与 Hold 模式统一由 `burst-engine` 低级 hook 驱动）
 - [x] 多规则并行支持
 
 **配置持久化**
@@ -742,7 +742,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] `set_rules` Tauri 命令加入入参校验（规则数 ≤ 64、`interval_ms` 在 `[10, 10000]`），防止非法值绕过 `profile.rs::validate()` 进入引擎导致忙循环（`commands/engine.rs:19`）
 - [x] Hold 连发中模拟 KeyRelease 未过滤：已改用 `dwExtraInfo = SIM_MARKER` 标记所有 SendInput 事件，hook 统一过滤，不再误触发 `on_key_release`
 - [x] 跨规则干扰：同上，模拟 target_key 的 release 带 SIM_MARKER，不会进入其他规则的 stop_burst
-- [x] Toggle 连发未过滤 OS key-repeat：hook 回调中 `LLKHF_REPEAT` 标志位检测，仅首次按下进入 `on_key_press`
+- [x] Toggle / 全局热键未过滤 OS key-repeat：引擎用 `pressed_keys: HashSet<KeyId>` 记录物理按下状态，仅首次 down 进入 `on_key_press`，up 后释放；不依赖 `KBDLLHOOKSTRUCT.flags` 保留位
 
 **键盘全键位 + 鼠标连发（v0.2.0）**
 
@@ -847,7 +847,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 | 全局鼠标监听      | `windows_sys` `WH_MOUSE_LL`（Windows，含 X1/X2 侧键）；macOS 待定 |
 | 按键模拟          | `windows_sys` `SendInput` + `KEYEVENTF_SCANCODE`（Windows）；macOS 待定 |
 | 鼠标按钮模拟      | `windows_sys` `SendInput INPUT_MOUSE` + `MOUSEEVENTF_*`（Windows） |
-| 全局热键注册      | `tauri-plugin-global-shortcut`                             |
+| 全局热键监听      | `burst-engine` 共用 `WH_KEYBOARD_LL` / `WH_MOUSE_LL`，热键优先于规则处理 |
 | 点击穿透          | `Window::set_ignore_cursor_events()`（Tauri 内置，跨平台） |
 | 自动升级          | `tauri-plugin-updater`                                     |
 | 配置文件加密      | `aes-gcm`                                                  |

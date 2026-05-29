@@ -103,7 +103,7 @@ packages/win-driver/src/
 
 文件读写高层入口：`qzh_format::read_encrypted(path)` / `qzh_format::write_encrypted(path, &T)` 封装了 header+aad+decrypt+parse / serialize+encrypt+atomic-rename 五连段；`qzh_profile::load_from_path(path)` / `qzh_profile::save_to_path(path, &profile)` 在此基础上再叠加 schema 迁移与业务校验。
 
-**按键标识 [`KeyId`]**：tagged union，前后端共享 wire format `{kind:"keyboard",code:81}` / `{kind:"mouse",code:"left"}`。`MouseButton` 含 `Left/Right/Middle/X1/X2`。所有连发规则字段（`trigger_key`/`target_key`/`stop_key`）与全局热键 `global_toggle` 都用 `KeyId`，`PENDING_INJECTIONS` 注入事件队列也以 `(KeyId, is_up)` 为键。定义在 `packages/qzh-profile/src/key_id.rs`。
+**按键标识 [`KeyId`]**：tagged union，前后端共享 wire format `{kind:"keyboard",code:81}` / `{kind:"mouse",code:"left"}`。`MouseButton` 含 `Left/Right/Middle/X1/X2`。所有连发规则字段（`trigger_key`/`target_key`/`stop_key`）与全局热键字段（`global_toggle`/`global_stop`/`panel_toggle`）都用 `KeyId`，`PENDING_INJECTIONS` 注入事件队列也以 `(KeyId, is_up)` 为键。定义在 `packages/qzh-profile/src/key_id.rs`。
 
 **AES 主密钥**：当前为编译期常量占位符（`packages/crypto/src/aes.rs` 顶部 `MASTER_KEY`），发布前需替换为 build script 注入的真实密钥。
 
@@ -116,6 +116,8 @@ packages/win-driver/src/
 - **Interception 驱动**（`win-input/src/interception.rs`）：键盘 + 鼠标设备各扫描一次，鼠标 `InterceptionMouseStroke` 状态位映射 `INTERCEPTION_MOUSE_BUTTON_4/5_DOWN/UP`（X1/X2 走 BUTTON_4/5）。
 
 `win_input::dispatch(KeyId, is_up)` 是统一入口，`(mode, KeyId)` 模式匹配分发到对应 backend，X1/X2 在 DD 模式 / 鼠标设备缺失时按 once 旗标 warn 一次后自动回退 SendInput。`burst-engine` 负责线程编排：用 `catch_unwind` 包裹引擎线程，并发连发用 `AtomicBool cancel + thread::park_timeout`，`Drop` 时先 signal 再 join 确保按键不卡住。非 Windows 平台提供空实现（`cfg(windows)` 隔离）。
+
+全局热键不走 `tauri-plugin-global-shortcut` 注册，而是与连发规则共用 `burst-engine` 低级 hook：热键检测优先于规则处理，且不受 `global_enabled` 当前状态限制。引擎用 `pressed_keys: HashSet<KeyId>` 记录已经按下的物理键，只让首次 down 进入 `on_key_press`，up 时移除；不要再依赖 `KBDLLHOOKSTRUCT.flags` 的保留位判断 key-repeat。注入事件仍先在 hook 层过滤：SendInput / Interception 用 `SIM_MARKER`，DD-HID 用 `PENDING_INJECTIONS`。
 
 **AppHandle 不进 packages**：`win-driver` / `win-input` / `win-sysinfo` / `burst-engine` 所有函数均不接受 `AppHandle` 参数。资源目录由 `commands/driver.rs` 从 `app.path().resource_dir()` 取得后传入，Tauri 状态管理留在 commands 层。
 
