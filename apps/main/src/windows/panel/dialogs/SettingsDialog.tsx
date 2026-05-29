@@ -166,9 +166,7 @@ export default function SettingsDialog(props: Props) {
   const [tab, setTab] = useState<SettingsTab>(props.initialTab ?? 'general');
   const { sound } = props;
 
-  const tabsNode = (
-    <Tabs tabs={TABS} active={tab} onChange={setTab} variant="pill" grow />
-  );
+  const tabsNode = <Tabs tabs={TABS} active={tab} onChange={setTab} variant="pill" grow />;
 
   return (
     <DialogShell
@@ -253,7 +251,6 @@ export default function SettingsDialog(props: Props) {
                 ))}
               </CardList>
             </SettingsSection>
-
           </>
         )}
 
@@ -327,7 +324,9 @@ export default function SettingsDialog(props: Props) {
             </SettingsSection>
 
             <SettingsSection title="语句">
-              <div className={`settings-sound-body${sound.enabled ? '' : ' settings-sound-body--disabled'}`}>
+              <div
+                className={`settings-sound-body${sound.enabled ? '' : ' settings-sound-body--disabled'}`}
+              >
                 <div className="settings-row">
                   <div className="settings-row-main">
                     <span className="settings-row-title">开始语句</span>
@@ -382,7 +381,9 @@ export default function SettingsDialog(props: Props) {
             </SettingsSection>
 
             <SettingsSection title="合成参数">
-              <div className={`settings-sound-body${sound.enabled ? '' : ' settings-sound-body--disabled'}`}>
+              <div
+                className={`settings-sound-body${sound.enabled ? '' : ' settings-sound-body--disabled'}`}
+              >
                 <div className="settings-row">
                   <div className="settings-row-main">
                     <span className="settings-row-title">语音</span>

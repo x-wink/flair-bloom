@@ -238,8 +238,8 @@ const MOUSE_NAMES: Record<MouseButton, string> = {
   middle: '鼠标中键',
   x1: '侧键 1',
   x2: '侧键 2',
-  wheel_up: '滚轮↑',
-  wheel_down: '滚轮↓',
+  wheel_up: '滚轮上',
+  wheel_down: '滚轮下',
 };
 
 export function keyLabel(key: KeyId | null | undefined): string {

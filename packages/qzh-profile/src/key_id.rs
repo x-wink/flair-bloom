@@ -82,6 +82,19 @@ mod tests {
     }
 
     #[test]
+    fn mouse_wheel_round_trip() {
+        let v = serde_json::to_value(KeyId::Mouse(MouseButton::WheelUp)).unwrap();
+        assert_eq!(v, json!({"kind":"mouse","code":"wheel_up"}));
+        let back: KeyId = serde_json::from_value(v).unwrap();
+        assert_eq!(back, KeyId::Mouse(MouseButton::WheelUp));
+
+        let v = serde_json::to_value(KeyId::Mouse(MouseButton::WheelDown)).unwrap();
+        assert_eq!(v, json!({"kind":"mouse","code":"wheel_down"}));
+        let back: KeyId = serde_json::from_value(v).unwrap();
+        assert_eq!(back, KeyId::Mouse(MouseButton::WheelDown));
+    }
+
+    #[test]
     fn keyid_is_hash_eligible() {
         let mut set = std::collections::HashSet::new();
         set.insert(KeyId::Keyboard(0x51));

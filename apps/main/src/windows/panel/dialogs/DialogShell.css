@@ -54,6 +54,12 @@
   min-width: max-content;
 }
 
-.fb-dialog__footer--end    { justify-content: flex-end; }
-.fb-dialog__footer--center { justify-content: center; }
-.fb-dialog__footer--spread > :first-child { margin-right: auto; }
+.fb-dialog__footer--end {
+  justify-content: flex-end;
+}
+.fb-dialog__footer--center {
+  justify-content: center;
+}
+.fb-dialog__footer--spread > :first-child {
+  margin-right: auto;
+}

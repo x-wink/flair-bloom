@@ -3,9 +3,6 @@
   height: min(600px, 84vh);
 }
 
-
-
-
 .settings-body {
   padding: 0 var(--fb-space-6);
 }
@@ -186,7 +183,6 @@
   font-size: var(--fb-fs-xs);
   color: var(--fb-text-faint);
 }
-
 
 .settings-note {
   margin: var(--fb-space-5) 0 0;

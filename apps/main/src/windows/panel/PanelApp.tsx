@@ -7,19 +7,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import iconUrl from '../../assets/icon-32.png';
 import bgUrl from '../../assets/icon.png';
 import { APP_NAME } from '../../constants';
+import Button from './components/Button';
 import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
 import { useConfirm } from './components/ConfirmDialog';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/icons';
 import Kbd from './components/Kbd';
-import Tabs from './components/Tabs';
 import KeyCapture, { BROWSER_VK, keyboardKey, keyLabel, type KeyId } from './components/KeyCapture';
-import { detectConflicts, severityForKey, severityForRule } from './conflicts';
 import Overlay from './components/Overlay';
 import ProfileNameForm from './components/ProfileNameForm';
+import Tabs from './components/Tabs';
 import { useToast } from './components/Toast';
 import UpdateProgressBar, { type UpdateDownloadProgress } from './components/UpdateProgressBar';
-import Button from './components/Button';
+import { detectConflicts, severityForKey, severityForRule } from './conflicts';
 import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
 import ImportDialog from './dialogs/ImportDialog';
@@ -309,10 +309,10 @@ export default function PanelApp() {
       .get<SoundSettings>(SOUND_KEY)
       .then((v) => {
         if (v && typeof v === 'object') {
-        const merged = { ...DEFAULT_SOUND, ...v };
-        setSound(merged);
-        soundRef.current = merged;
-      }
+          const merged = { ...DEFAULT_SOUND, ...v };
+          setSound(merged);
+          soundRef.current = merged;
+        }
       })
       .catch(() => {});
 
@@ -497,7 +497,9 @@ export default function PanelApp() {
       if (!isEditableKeyboardTarget(e.target)) e.preventDefault();
       const vk = BROWSER_VK[e.code];
       if (vk !== undefined) {
-        invoke('relay_key_event', { key: { kind: 'keyboard', code: vk }, isUp: true }).catch(() => {});
+        invoke('relay_key_event', { key: { kind: 'keyboard', code: vk }, isUp: true }).catch(
+          () => {},
+        );
       }
     };
     window.addEventListener('keydown', downHandler);
@@ -648,9 +650,7 @@ export default function PanelApp() {
     if (!('speechSynthesis' in window)) return;
     const s = soundRef.current;
     window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(
-      buildUtterance(type === 'start' ? s.startText : s.endText, s),
-    );
+    window.speechSynthesis.speak(buildUtterance(type === 'start' ? s.startText : s.endText, s));
   }
 
   function persistSound(patch: Partial<SoundSettings>) {
@@ -1220,9 +1220,7 @@ export default function PanelApp() {
         <img className="header-icon" src={iconUrl} alt="" data-tauri-drag-region />
         <h1 data-tauri-drag-region>
           {APP_NAME}
-          {hotkeys.panel_toggle && (
-            <Kbd label="显隐">{keyLabel(hotkeys.panel_toggle)}</Kbd>
-          )}
+          {hotkeys.panel_toggle && <Kbd label="显隐">{keyLabel(hotkeys.panel_toggle)}</Kbd>}
         </h1>
         <div className="window-controls">
           <button
@@ -1525,7 +1523,13 @@ export default function PanelApp() {
               if (updateNotice) setShowUpdateNotice(true);
             },
           },
-          { label: '用户协议', onClick: () => { setMenuOpen(false); setShowAgreement(true); } },
+          {
+            label: '用户协议',
+            onClick: () => {
+              setMenuOpen(false);
+              setShowAgreement(true);
+            },
+          },
           { type: 'divider' },
           { label: '诊断修复', onClick: handleShowRepair },
           { label: '关于', onClick: handleShowAbout },

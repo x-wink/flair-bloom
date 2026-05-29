@@ -5,21 +5,39 @@
 }
 
 /* 方向 */
-.fb-tab-bar--horizontal { flex-direction: row; }
-.fb-tab-bar--vertical   { flex-direction: column; }
+.fb-tab-bar--horizontal {
+  flex-direction: row;
+}
+.fb-tab-bar--vertical {
+  flex-direction: column;
+}
 
 /* 对齐 */
-.fb-tab-bar--start  { justify-content: flex-start; }
-.fb-tab-bar--center { justify-content: center; }
-.fb-tab-bar--end    { justify-content: flex-end; }
+.fb-tab-bar--start {
+  justify-content: flex-start;
+}
+.fb-tab-bar--center {
+  justify-content: center;
+}
+.fb-tab-bar--end {
+  justify-content: flex-end;
+}
 
 /* vertical 时对齐 = align-items */
-.fb-tab-bar--vertical.fb-tab-bar--start  { align-items: flex-start; }
-.fb-tab-bar--vertical.fb-tab-bar--center { align-items: center; }
-.fb-tab-bar--vertical.fb-tab-bar--end    { align-items: flex-end; }
+.fb-tab-bar--vertical.fb-tab-bar--start {
+  align-items: flex-start;
+}
+.fb-tab-bar--vertical.fb-tab-bar--center {
+  align-items: center;
+}
+.fb-tab-bar--vertical.fb-tab-bar--end {
+  align-items: flex-end;
+}
 
 /* grow：每个 tab 平分 */
-.fb-tab-bar--grow .fb-tab { flex: 1; }
+.fb-tab-bar--grow .fb-tab {
+  flex: 1;
+}
 
 /* underline 变体 —— 下边框分割线 */
 .fb-tab-bar--underline {

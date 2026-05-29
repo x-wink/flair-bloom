@@ -242,13 +242,17 @@ export default function RepairDialog({
           <ul className="repair-status-list">
             <li>
               <span className="repair-status-key">管理员权限</span>
-              <span className={`repair-status-badge ${elevated ? 'repair-flag--ok' : 'repair-flag--off'}`}>
+              <span
+                className={`repair-status-badge ${elevated ? 'repair-flag--ok' : 'repair-flag--off'}`}
+              >
                 {elevated ? '已提权' : '普通用户'}
               </span>
             </li>
             <li>
               <span className="repair-status-key">开机自启</span>
-              <span className={`repair-status-badge ${autostartEnabled ? 'repair-flag--ok' : 'repair-flag--off'}`}>
+              <span
+                className={`repair-status-badge ${autostartEnabled ? 'repair-flag--ok' : 'repair-flag--off'}`}
+              >
                 {autostartEnabled ? '已启用' : '未启用'}
               </span>
             </li>

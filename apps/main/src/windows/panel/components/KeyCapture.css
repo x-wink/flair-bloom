@@ -1,13 +1,20 @@
 .key-capture {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-width: 56px;
+  height: 28px;
   padding: 5px var(--fb-space-5);
   border: 1px solid var(--fb-border);
   border-radius: var(--fb-radius-md);
   background: var(--fb-surface-soft);
   font-size: var(--fb-fs-md);
+  line-height: var(--fb-lh-tight);
   cursor: pointer;
   text-align: center;
   white-space: nowrap;
+  overflow: hidden;
+  vertical-align: middle;
   transition:
     border-color var(--fb-duration-base),
     background var(--fb-duration-base);

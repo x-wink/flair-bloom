@@ -34,7 +34,7 @@ fn migrate_v1_to_v2_wraps_required_keyboard_fields() {
         "advanced": {"log_level": "info"}
     });
     let out = migrate_profile(v1, 1).unwrap();
-    assert_eq!(out["schema_version"], json!(2));
+    assert_eq!(out["schema_version"], json!(CURRENT_SCHEMA_VERSION));
     assert_eq!(
         out["rules"][0]["trigger_key"],
         json!({"kind":"keyboard","code":0x51})
@@ -76,6 +76,35 @@ fn migrate_v1_to_v2_wraps_optional_keys_when_present() {
 }
 
 #[test]
+fn migrate_v2_to_v3_bumps_schema_without_rewriting_keys() {
+    let v2 = json!({
+        "schema_version": 2,
+        "meta": {"name":"t","created_at":0,"updated_at":0,"app_version":"0"},
+        "rules": [{
+            "id": "r1",
+            "enabled": true,
+            "trigger_key": {"kind":"mouse","code":"left"},
+            "target_key": {"kind":"keyboard","code":0x51},
+            "mode": "hold",
+            "stop_key": null,
+            "interval_ms": 10
+        }],
+        "hotkeys": {"global_toggle": {"kind":"mouse","code":"x1"}},
+        "advanced": {"log_level": "info"}
+    });
+    let out = migrate_profile(v2, 2).unwrap();
+    assert_eq!(out["schema_version"], json!(CURRENT_SCHEMA_VERSION));
+    assert_eq!(
+        out["rules"][0]["trigger_key"],
+        json!({"kind":"mouse","code":"left"})
+    );
+    assert_eq!(
+        out["hotkeys"]["global_toggle"],
+        json!({"kind":"mouse","code":"x1"})
+    );
+}
+
+#[test]
 fn migrate_v1_to_v2_full_round_trip_into_profile() {
     let v1 = json!({
         "schema_version": 1,
@@ -111,6 +140,6 @@ fn migrate_v1_to_v2_handles_missing_rules() {
         "rules": []
     });
     let out = migrate_profile(v1, 1).unwrap();
-    assert_eq!(out["schema_version"], json!(2));
+    assert_eq!(out["schema_version"], json!(CURRENT_SCHEMA_VERSION));
     assert_eq!(out["rules"].as_array().unwrap().len(), 0);
 }

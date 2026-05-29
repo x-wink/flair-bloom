@@ -176,6 +176,27 @@ fn validate_for_mode_dd_allows_mouse_left_target() {
 }
 
 #[test]
+fn validate_for_mode_dd_allows_wheel_targets() {
+    let p = make_profile(vec![
+        rule(
+            "wheel-up",
+            BurstMode::Hold,
+            kbd(0x51),
+            KeyId::Mouse(MouseButton::WheelUp),
+            10,
+        ),
+        rule(
+            "wheel-down",
+            BurstMode::Toggle,
+            kbd(0x52),
+            KeyId::Mouse(MouseButton::WheelDown),
+            10,
+        ),
+    ]);
+    assert!(p.validate_for_mode(true).is_ok());
+}
+
+#[test]
 fn validate_for_mode_dd_allows_mouse_x1_as_trigger() {
     // X1 作为触发键合法（hook 端识别），仅 target 受限
     let p = make_profile(vec![rule(

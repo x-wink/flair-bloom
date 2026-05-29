@@ -42,13 +42,7 @@ function InfoRow({ label, value }: { label: string; value: string | React.ReactN
   );
 }
 
-function DirRow({
-  label,
-  onOpen,
-}: {
-  label: string;
-  onOpen: () => void;
-}) {
+function DirRow({ label, onOpen }: { label: string; onOpen: () => void }) {
   return (
     <li>
       <span className="about-key">{label}</span>
@@ -108,9 +102,7 @@ export default function AboutDialog({
     <>
       <h2 className="about-title">
         {APP_NAME}
-        <span className="about-ver">
-          {info.appVersion ? `v${info.appVersion}` : '版本加载中…'}
-        </span>
+        <span className="about-ver">{info.appVersion ? `v${info.appVersion}` : '版本加载中…'}</span>
       </h2>
       <p className="about-tagline">加强花椒油！！！加强紫武区！！！</p>
       {!info.resources_ok && (
@@ -132,11 +124,7 @@ export default function AboutDialog({
   );
 
   return (
-    <DialogShell
-      className="about-card"
-      headerContent={headerNode}
-      footer={footerNode}
-    >
+    <DialogShell className="about-card" headerContent={headerNode} footer={footerNode}>
       <div className="about-body">
         <section className="about-section">
           <p className="about-section-label">运行环境</p>
@@ -146,9 +134,7 @@ export default function AboutDialog({
               value={
                 <>
                   {info.os_version || info.platform || '—'}
-                  {info.os_family && info.os_family !== info.platform
-                    ? ` (${info.os_family})`
-                    : ''}
+                  {info.os_family && info.os_family !== info.platform ? ` (${info.os_family})` : ''}
                 </>
               }
             />
@@ -204,9 +190,7 @@ export default function AboutDialog({
             <li>
               <span className="about-key">更新公告</span>
               <span className="about-value about-value--with-action">
-                {updateNotice && (
-                  <span className="about-update-dot" aria-hidden="true" />
-                )}
+                {updateNotice && <span className="about-update-dot" aria-hidden="true" />}
                 <Button
                   size="sm"
                   variant="outline"

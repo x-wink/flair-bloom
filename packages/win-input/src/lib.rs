@@ -15,7 +15,7 @@ use ddhid::DdHidBackend;
 #[cfg(windows)]
 use interception::InterceptionBackend;
 use qzh_profile::key_id::KeyId;
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 use qzh_profile::key_id::MouseButton;
 #[cfg(windows)]
 use std::collections::{HashMap, VecDeque};
@@ -157,11 +157,11 @@ static DD_FALLBACK_LOGGED: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
 static INTERCEPTION_MOUSE_FALLBACK_LOGGED: AtomicBool = AtomicBool::new(false);
 
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 const MODE_SENDINPUT: u8 = 0;
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 const MODE_INTERCEPTION: u8 = 1;
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 const MODE_DD_HID: u8 = 2;
 
 #[cfg(windows)]
@@ -170,6 +170,53 @@ fn u8_to_mode(v: u8) -> InputMode {
         MODE_INTERCEPTION => InputMode::Interception,
         MODE_DD_HID => InputMode::DdHid,
         _ => InputMode::SendInput,
+    }
+}
+
+#[cfg(any(test, windows))]
+fn is_wheel_button(button: MouseButton) -> bool {
+    matches!(button, MouseButton::WheelUp | MouseButton::WheelDown)
+}
+
+#[cfg(any(test, windows))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DispatchRoute {
+    SendInput,
+    Noop,
+    InterceptionKeyboard(u32),
+    InterceptionWheel { up: bool },
+    InterceptionMouse(MouseButton),
+    DdKeyboard(u32),
+    DdWheel { up: bool },
+    DdMouse(MouseButton),
+}
+
+#[cfg(any(test, windows))]
+fn resolve_route(mode: u8, key: KeyId, is_up: bool) -> DispatchRoute {
+    match (mode, key) {
+        (MODE_INTERCEPTION, KeyId::Keyboard(vk)) => DispatchRoute::InterceptionKeyboard(vk),
+        (MODE_INTERCEPTION, KeyId::Mouse(btn)) if is_wheel_button(btn) => {
+            if is_up {
+                DispatchRoute::Noop
+            } else {
+                DispatchRoute::InterceptionWheel {
+                    up: matches!(btn, MouseButton::WheelUp),
+                }
+            }
+        }
+        (MODE_INTERCEPTION, KeyId::Mouse(btn)) => DispatchRoute::InterceptionMouse(btn),
+        (MODE_DD_HID, KeyId::Keyboard(vk)) => DispatchRoute::DdKeyboard(vk),
+        (MODE_DD_HID, KeyId::Mouse(btn)) if is_wheel_button(btn) => {
+            if is_up {
+                DispatchRoute::Noop
+            } else {
+                DispatchRoute::DdWheel {
+                    up: matches!(btn, MouseButton::WheelUp),
+                }
+            }
+        }
+        (MODE_DD_HID, KeyId::Mouse(btn)) => DispatchRoute::DdMouse(btn),
+        _ => DispatchRoute::SendInput,
     }
 }
 
@@ -376,21 +423,59 @@ pub fn key_up(key: KeyId) {
 }
 
 #[cfg(windows)]
+fn send_via_sendinput(key: KeyId, is_up: bool) {
+    // SAFETY: 各 send_*_via_sendinput 的 Safety 契约由调用方保证
+    match key {
+        KeyId::Keyboard(vk) => unsafe {
+            let flags = if is_up { KEYEVENTF_KEYUP } else { 0 };
+            send_kbd_via_sendinput(vk, flags);
+        },
+        KeyId::Mouse(MouseButton::WheelUp | MouseButton::WheelDown) => {
+            if !is_up {
+                let up = matches!(key, KeyId::Mouse(MouseButton::WheelUp));
+                unsafe { send_wheel_via_sendinput(up) };
+            }
+        }
+        KeyId::Mouse(btn) => unsafe {
+            send_mouse_via_sendinput(btn, is_up);
+        },
+    }
+}
+
+#[cfg(windows)]
 fn dispatch(key: KeyId, is_up: bool) {
     let mode = CURRENT_MODE
         .get()
         .map(|a| a.load(std::sync::atomic::Ordering::SeqCst))
         .unwrap_or(MODE_SENDINPUT);
-    match (mode, key) {
-        (MODE_INTERCEPTION, KeyId::Keyboard(vk)) => {
+    match resolve_route(mode, key, is_up) {
+        DispatchRoute::SendInput => send_via_sendinput(key, is_up),
+        DispatchRoute::Noop => {}
+        DispatchRoute::InterceptionKeyboard(vk) => {
             if let Some(lock) = INTERCEPTION_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     backend.send_key(vk, is_up);
                     return;
                 }
             }
+            send_via_sendinput(key, is_up);
         }
-        (MODE_INTERCEPTION, KeyId::Mouse(btn)) => {
+        DispatchRoute::InterceptionWheel { up } => {
+            if let Some(lock) = INTERCEPTION_BACKEND.get() {
+                if let Some(backend) = revive(lock.lock()).as_ref() {
+                    if backend.send_wheel(up) {
+                        return;
+                    }
+                    if !INTERCEPTION_MOUSE_FALLBACK_LOGGED
+                        .swap(true, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        warn!("Interception 未识别鼠标设备，滚轮回退 SendInput");
+                    }
+                }
+            }
+            unsafe { send_wheel_via_sendinput(up) };
+        }
+        DispatchRoute::InterceptionMouse(btn) => {
             if let Some(lock) = INTERCEPTION_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     if backend.send_mouse(btn, is_up) {
@@ -403,8 +488,9 @@ fn dispatch(key: KeyId, is_up: bool) {
                     }
                 }
             }
+            send_via_sendinput(key, is_up);
         }
-        (MODE_DD_HID, KeyId::Keyboard(vk)) => {
+        DispatchRoute::DdKeyboard(vk) => {
             if let Some(lock) = DD_HID_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     log_dd_route(is_up, key);
@@ -416,15 +502,9 @@ fn dispatch(key: KeyId, is_up: bool) {
             if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 warn!("当前模式 DD-HID 但后端不存在，回退 SendInput");
             }
+            send_via_sendinput(key, is_up);
         }
-        (MODE_DD_HID, KeyId::Mouse(btn))
-            if matches!(btn, MouseButton::WheelUp | MouseButton::WheelDown) =>
-        {
-            // 滚轮：仅在 down 阶段注入一次，up 阶段无操作
-            if is_up {
-                return;
-            }
-            let up = matches!(btn, MouseButton::WheelUp);
+        DispatchRoute::DdWheel { up } => {
             if let Some(lock) = DD_HID_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     log_dd_route(false, key);
@@ -439,9 +519,8 @@ fn dispatch(key: KeyId, is_up: bool) {
                 warn!("当前模式 DD-HID 但滚轮回退 SendInput");
             }
             unsafe { send_wheel_via_sendinput(up) };
-            return;
         }
-        (MODE_DD_HID, KeyId::Mouse(btn)) => {
+        DispatchRoute::DdMouse(btn) => {
             let mut backend_seen = false;
             if let Some(lock) = DD_HID_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
@@ -463,46 +542,8 @@ fn dispatch(key: KeyId, is_up: bool) {
             {
                 warn!("当前模式 DD-HID 但后端不存在，回退 SendInput");
             }
+            send_via_sendinput(key, is_up);
         }
-        (MODE_INTERCEPTION, KeyId::Mouse(btn))
-            if matches!(btn, MouseButton::WheelUp | MouseButton::WheelDown) =>
-        {
-            if is_up {
-                return;
-            }
-            let up = matches!(btn, MouseButton::WheelUp);
-            if let Some(lock) = INTERCEPTION_BACKEND.get() {
-                if let Some(backend) = revive(lock.lock()).as_ref() {
-                    if backend.send_wheel(up) {
-                        return;
-                    }
-                    if !INTERCEPTION_MOUSE_FALLBACK_LOGGED
-                        .swap(true, std::sync::atomic::Ordering::SeqCst)
-                    {
-                        warn!("Interception 未识别鼠标设备，滚轮回退 SendInput");
-                    }
-                }
-            }
-            unsafe { send_wheel_via_sendinput(up) };
-            return;
-        }
-        _ => {}
-    }
-    // SAFETY: 各 send_*_via_sendinput 的 Safety 契约由调用方保证
-    match key {
-        KeyId::Keyboard(vk) => unsafe {
-            let flags = if is_up { KEYEVENTF_KEYUP } else { 0 };
-            send_kbd_via_sendinput(vk, flags);
-        },
-        KeyId::Mouse(MouseButton::WheelUp | MouseButton::WheelDown) => {
-            if !is_up {
-                let up = matches!(key, KeyId::Mouse(MouseButton::WheelUp));
-                unsafe { send_wheel_via_sendinput(up) };
-            }
-        }
-        KeyId::Mouse(btn) => unsafe {
-            send_mouse_via_sendinput(btn, is_up);
-        },
     }
 }
 
@@ -516,5 +557,90 @@ fn log_dd_route(is_up: bool, key: KeyId) {
     if !logged.swap(true, std::sync::atomic::Ordering::SeqCst) {
         let dir = if is_up { "key_up" } else { "key_down" };
         info!("{} 路由到 DD-HID 后端（key={:?}）", dir, key);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mouse(button: MouseButton) -> KeyId {
+        KeyId::Mouse(button)
+    }
+
+    #[test]
+    fn interception_wheel_down_routes_to_wheel_backend() {
+        assert_eq!(
+            resolve_route(MODE_INTERCEPTION, mouse(MouseButton::WheelDown), false),
+            DispatchRoute::InterceptionWheel { up: false }
+        );
+    }
+
+    #[test]
+    fn interception_wheel_up_routes_to_wheel_backend() {
+        assert_eq!(
+            resolve_route(MODE_INTERCEPTION, mouse(MouseButton::WheelUp), false),
+            DispatchRoute::InterceptionWheel { up: true }
+        );
+    }
+
+    #[test]
+    fn interception_wheel_release_is_noop() {
+        assert_eq!(
+            resolve_route(MODE_INTERCEPTION, mouse(MouseButton::WheelDown), true),
+            DispatchRoute::Noop
+        );
+        assert_eq!(
+            resolve_route(MODE_INTERCEPTION, mouse(MouseButton::WheelUp), true),
+            DispatchRoute::Noop
+        );
+    }
+
+    #[test]
+    fn interception_regular_mouse_routes_to_mouse_backend() {
+        assert_eq!(
+            resolve_route(MODE_INTERCEPTION, mouse(MouseButton::Left), false),
+            DispatchRoute::InterceptionMouse(MouseButton::Left)
+        );
+        assert_eq!(
+            resolve_route(MODE_INTERCEPTION, mouse(MouseButton::X2), true),
+            DispatchRoute::InterceptionMouse(MouseButton::X2)
+        );
+    }
+
+    #[test]
+    fn dd_hid_wheel_routes_to_wheel_backend() {
+        assert_eq!(
+            resolve_route(MODE_DD_HID, mouse(MouseButton::WheelDown), false),
+            DispatchRoute::DdWheel { up: false }
+        );
+        assert_eq!(
+            resolve_route(MODE_DD_HID, mouse(MouseButton::WheelUp), false),
+            DispatchRoute::DdWheel { up: true }
+        );
+    }
+
+    #[test]
+    fn dd_hid_wheel_release_is_noop() {
+        assert_eq!(
+            resolve_route(MODE_DD_HID, mouse(MouseButton::WheelDown), true),
+            DispatchRoute::Noop
+        );
+        assert_eq!(
+            resolve_route(MODE_DD_HID, mouse(MouseButton::WheelUp), true),
+            DispatchRoute::Noop
+        );
+    }
+
+    #[test]
+    fn sendinput_mode_uses_sendinput_route() {
+        assert_eq!(
+            resolve_route(MODE_SENDINPUT, KeyId::Keyboard(0x51), false),
+            DispatchRoute::SendInput
+        );
+        assert_eq!(
+            resolve_route(MODE_SENDINPUT, mouse(MouseButton::WheelDown), false),
+            DispatchRoute::SendInput
+        );
     }
 }
