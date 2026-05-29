@@ -319,7 +319,7 @@ export default function KeyCapture({ value, onChange, nullable, placeholder, con
     return () => {
       window.removeEventListener('keydown', keyboardHandler, { capture: true });
       window.removeEventListener('mousedown', mouseHandler, { capture: true });
-      window.removeEventListener('wheel', wheelHandler, { capture: true, passive: false });
+      window.removeEventListener('wheel', wheelHandler, { capture: true });
       window.removeEventListener('contextmenu', contextMenuHandler, { capture: true });
     };
   }, [capturing, onChange]);
