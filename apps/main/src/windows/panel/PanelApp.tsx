@@ -22,6 +22,7 @@ import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
 import ImportDialog from './dialogs/ImportDialog';
 import RepairDialog from './dialogs/RepairDialog';
+import SettingsDialog, { type SettingsTab } from './dialogs/SettingsDialog';
 import UpdateNoticeDialog, { type UpdateNoticeInfo } from './dialogs/UpdateNoticeDialog';
 import './PanelApp.css';
 
@@ -94,9 +95,20 @@ interface Profile {
   advanced: { log_level: string };
 }
 
+interface ProfileSummary {
+  rules_total: number;
+  rules_enabled: number;
+  hold_count: number;
+  toggle_count: number;
+  global_toggle: KeyId | null;
+  global_stop: KeyId | null;
+  panel_toggle: KeyId | null;
+}
+
 interface ProfileEntry {
   meta: ProfileMeta;
   path: string;
+  summary: ProfileSummary;
 }
 
 interface ForkResult {
@@ -126,15 +138,11 @@ function defaultRules(): BurstRule[] {
 function buildProfileMenu(args: {
   profiles: ProfileEntry[];
   activeName: string;
-  isDefault: boolean;
   onSwitch: (path: string) => void;
   onCreate: () => void;
-  onImport: () => void;
-  onRename: () => void;
-  onDelete: () => void;
+  onManage: () => void;
 }): ContextMenuItem[] {
-  const { profiles, activeName, isDefault, onSwitch, onCreate, onImport, onRename, onDelete } =
-    args;
+  const { profiles, activeName, onSwitch, onCreate, onManage } = args;
   const items: ContextMenuItem[] = profiles.map((p) => ({
     label: p.meta.name === DEFAULT_PROFILE_NAME ? '默认配置' : p.meta.name,
     subtitle: p.meta.name === DEFAULT_PROFILE_NAME ? '出厂预设，修改时自动新建' : undefined,
@@ -143,26 +151,25 @@ function buildProfileMenu(args: {
   }));
   if (items.length > 0) items.push({ type: 'divider' });
   items.push({ label: '新建配置…', onClick: onCreate });
-  items.push({ label: '导入外部配置…', onClick: onImport });
-  items.push({
-    label: '重命名当前配置…',
-    disabled: isDefault,
-    subtitle: isDefault ? '默认配置不可重命名' : undefined,
-    onClick: onRename,
-  });
-  items.push({
-    label: '删除当前配置',
-    danger: true,
-    disabled: isDefault,
-    subtitle: isDefault ? '默认配置不可删除' : undefined,
-    onClick: onDelete,
-  });
+  items.push({ label: '管理配置…', subtitle: '重命名、删除、导入', onClick: onManage });
   return items;
+}
+
+function orderProfiles(profiles: ProfileEntry[]): ProfileEntry[] {
+  return [...profiles].sort((a, b) => {
+    const aDefault = a.meta.name === DEFAULT_PROFILE_NAME;
+    const bDefault = b.meta.name === DEFAULT_PROFILE_NAME;
+    if (aDefault !== bDefault) return aDefault ? -1 : 1;
+    if (a.meta.created_at !== b.meta.created_at) return a.meta.created_at - b.meta.created_at;
+    return a.meta.name.localeCompare(b.meta.name, 'zh-Hans-CN');
+  });
 }
 
 export default function PanelApp() {
   const [showAgreement, setShowAgreement] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('general');
   const [showAbout, setShowAbout] = useState(false);
   const [showRepair, setShowRepair] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -173,6 +180,9 @@ export default function PanelApp() {
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const [globalEnabled, setGlobalEnabled] = useState(false);
   const [togglingGlobal, setTogglingGlobal] = useState(false);
+  const [closeBehaviorPreference, setCloseBehaviorPreference] = useState<CloseBehavior | null>(
+    null,
+  );
   const [inputMode, setInputMode] = useState<InputMode>('sendinput');
   const [interceptionInstalled, setInterceptionInstalled] = useState<DriverStatus>('not_installed');
   const [ddHidInstalled, setDdHidInstalled] = useState<DriverStatus>('not_installed');
@@ -276,6 +286,13 @@ export default function PanelApp() {
       })
       .catch(() => {});
 
+    settingsStore
+      .get<CloseBehavior>(CLOSE_BEHAVIOR_KEY)
+      .then((v) => {
+        setCloseBehaviorPreference(v === 'exit' || v === 'minimize' ? v : null);
+      })
+      .catch(() => {});
+
     invoke<boolean>('get_global_enabled')
       .then(setGlobalEnabled)
       .catch(() => {
@@ -292,7 +309,7 @@ export default function PanelApp() {
       const refreshList = async () => {
         try {
           const list = await invoke<ProfileEntry[]>('list_profiles');
-          setProfileList(list);
+          setProfileList(orderProfiles(list));
         } catch {
           /* 启动时静默失败，后续操作再提示 */
         }
@@ -414,7 +431,7 @@ export default function PanelApp() {
   const refreshProfileList = useCallback(async () => {
     try {
       const list = await invoke<ProfileEntry[]>('list_profiles');
-      setProfileList(list);
+      setProfileList(orderProfiles(list));
     } catch {
       toast.warning('读取配置列表失败');
     }
@@ -531,11 +548,17 @@ export default function PanelApp() {
     window.speechSynthesis.speak(utt);
   }, [globalEnabled]);
 
-  function persistCloseBehavior(v: CloseBehavior) {
-    settingsStore
-      .set(CLOSE_BEHAVIOR_KEY, v)
+  function persistCloseBehavior(v: CloseBehavior | null) {
+    const previous = closeBehaviorPreference;
+    setCloseBehaviorPreference(v);
+    const write =
+      v === null
+        ? settingsStore.delete(CLOSE_BEHAVIOR_KEY)
+        : settingsStore.set(CLOSE_BEHAVIOR_KEY, v);
+    write
       .then(() => settingsStore.save())
       .catch(() => {
+        setCloseBehaviorPreference(previous);
         toast.warning('保存关闭行为偏好失败');
       });
   }
@@ -813,39 +836,45 @@ export default function PanelApp() {
     }
   }
 
-  async function handleRenameProfile() {
-    if (isDefaultProfile) {
+  async function handleRenameProfileByName(name: string) {
+    if (name === DEFAULT_PROFILE_NAME) {
       toast.warning('默认配置不可重命名');
       return;
     }
-    let name = profileName;
+    let nextName = name;
     const ok = await confirm({
       title: '重命名配置',
-      description: `当前配置「${profileName}」的新名称：`,
+      description: `配置「${name}」的新名称：`,
       confirmText: '重命名',
       body: (
         <ProfileNameForm
-          defaultValue={profileName}
+          defaultValue={name}
           onChange={(v) => {
-            name = v;
+            nextName = v;
           }}
         />
       ),
     });
     if (!ok) return;
-    const trimmed = name.trim();
-    if (!trimmed || trimmed === profileName) return;
+    const trimmed = nextName.trim();
+    if (!trimmed || trimmed === name) return;
     if (trimmed === DEFAULT_PROFILE_NAME) {
       toast.warning('不能使用默认配置名');
       return;
     }
+    if (profileList.some((p) => p.meta.name === trimmed && p.meta.name !== name)) {
+      toast.warning('已存在同名配置');
+      return;
+    }
     try {
       await invoke<string>('rename_profile', {
-        oldName: profileName,
+        oldName: name,
         newName: trimmed,
       });
-      setProfileName(trimmed);
-      profileNameRef.current = trimmed;
+      if (name === profileName) {
+        setProfileName(trimmed);
+        profileNameRef.current = trimmed;
+      }
       await refreshProfileList();
       toast.success(`已重命名为「${trimmed}」`);
     } catch (e) {
@@ -853,25 +882,28 @@ export default function PanelApp() {
     }
   }
 
-  async function handleDeleteProfile() {
-    if (isDefaultProfile) {
+  async function handleDeleteProfileByName(name: string) {
+    if (name === DEFAULT_PROFILE_NAME) {
       toast.warning('默认配置不可删除');
       return;
     }
     const ok = await confirm({
       title: '删除配置',
-      description: `确定删除配置「${profileName}」？删除后将自动切换为默认配置。`,
+      description:
+        name === profileName
+          ? `确定删除当前配置「${name}」？删除后将自动切换为默认配置。`
+          : `确定删除配置「${name}」？`,
       confirmText: '删除',
       tone: 'danger',
     });
     if (!ok) return;
-    if (saveTimer.current) {
+    if (name === profileName && saveTimer.current) {
       clearTimeout(saveTimer.current);
       saveTimer.current = undefined;
     }
-    initialLoadDone.current = false;
+    if (name === profileName) initialLoadDone.current = false;
     try {
-      const fallback = await invoke<Profile | null>('delete_profile', { name: profileName });
+      const fallback = await invoke<Profile | null>('delete_profile', { name });
       if (fallback) {
         setRules(fallback.rules);
         setHotkeys({
@@ -936,6 +968,13 @@ export default function PanelApp() {
   function handleShowAgreement() {
     setMenuOpen(false);
     setShowAgreement(true);
+  }
+
+  function handleShowSettings(tab: SettingsTab = 'general') {
+    setMenuOpen(false);
+    setProfileMenuOpen(false);
+    setSettingsInitialTab(tab);
+    setShowSettings(true);
   }
 
   function handleCheckUpdate() {
@@ -1365,15 +1404,9 @@ export default function PanelApp() {
         items={buildProfileMenu({
           profiles: profileList,
           activeName: profileName,
-          isDefault: isDefaultProfile,
           onSwitch: switchToProfile,
           onCreate: handleCreateProfile,
-          onImport: () => {
-            setProfileMenuOpen(false);
-            setShowImport(true);
-          },
-          onRename: handleRenameProfile,
-          onDelete: handleDeleteProfile,
+          onManage: () => handleShowSettings('profiles'),
         })}
       />
 
@@ -1408,6 +1441,8 @@ export default function PanelApp() {
         onClose={() => setMenuOpen(false)}
         target={menuBtnRef}
         items={[
+          { label: '设置', onClick: handleShowSettings },
+          { type: 'divider' },
           { label: '检查更新', onClick: handleCheckUpdate },
           {
             label: '更新公告',
@@ -1424,6 +1459,43 @@ export default function PanelApp() {
           { label: '关于', onClick: handleShowAbout },
         ]}
       />
+
+      <Overlay open={showSettings} onClose={() => setShowSettings(false)}>
+        <SettingsDialog
+          initialTab={settingsInitialTab}
+          appVersion={appVersion}
+          inputMode={inputMode}
+          switchingMode={switchingMode}
+          globalEnabled={globalEnabled}
+          togglingGlobal={togglingGlobal}
+          closeBehavior={closeBehaviorPreference}
+          elevated={elevated}
+          interceptionInstalled={interceptionInstalled}
+          ddHidInstalled={ddHidInstalled}
+          profiles={profileList}
+          profileName={profileName}
+          profileCount={profileList.length}
+          isDefaultProfile={isDefaultProfile}
+          onClose={() => setShowSettings(false)}
+          onSelectInputMode={(mode) => {
+            setShowSettings(false);
+            void selectInputMode(mode);
+          }}
+          onToggleGlobal={() => void toggleGlobal()}
+          onSetCloseBehavior={persistCloseBehavior}
+          onCreateProfile={() => {
+            setShowSettings(false);
+            void handleCreateProfile();
+          }}
+          onImportProfile={() => {
+            setShowSettings(false);
+            setShowImport(true);
+          }}
+          onSwitchProfile={(path) => void switchToProfile(path)}
+          onRenameProfile={(name) => void handleRenameProfileByName(name)}
+          onDeleteProfile={(name) => void handleDeleteProfileByName(name)}
+        />
+      </Overlay>
 
       <Overlay open={showAgreement} onClose={() => setShowAgreement(false)} closeOnBackdrop={false}>
         <AgreementDialog onAgreed={handleAgreed} />

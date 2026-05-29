@@ -228,26 +228,14 @@ pub fn list_profiles(app: AppHandle) -> Result<Vec<ProfileEntry>, String> {
         if path.extension().is_none_or(|e| e != "qzh") {
             continue;
         }
-        match std::fs::read(&path) {
-            Ok(data) => {
-                if let Some(header) = FileHeader::from_bytes(&data) {
-                    let aad = header.aad();
-                    let ciphertext = &data[FileHeader::SIZE..];
-                    if let Ok(plaintext) = aes::decrypt(ciphertext, &header.nonce, &aad) {
-                        if let Ok(meta) = serde_json::from_slice::<serde_json::Value>(&plaintext)
-                            .and_then(|v| {
-                                serde_json::from_value::<ProfileMeta>(
-                                    v.get("meta").cloned().unwrap_or_default(),
-                                )
-                            })
-                        {
-                            entries.push(ProfileEntry {
-                                meta,
-                                path: path.to_string_lossy().to_string(),
-                            });
-                        }
-                    }
-                }
+        match read_profile_from_file(&path) {
+            Ok(profile) => {
+                let summary = profile_summary(&profile);
+                entries.push(ProfileEntry {
+                    meta: profile.meta,
+                    path: path.to_string_lossy().to_string(),
+                    summary,
+                });
             }
             Err(e) => {
                 warn!("跳过无法读取的配置文件 {}: {}", path.display(), e);
@@ -262,6 +250,43 @@ pub fn list_profiles(app: AppHandle) -> Result<Vec<ProfileEntry>, String> {
 pub struct ProfileEntry {
     pub meta: ProfileMeta,
     pub path: String,
+    pub summary: ProfileSummary,
+}
+
+#[derive(serde::Serialize)]
+pub struct ProfileSummary {
+    pub rules_total: usize,
+    pub rules_enabled: usize,
+    pub hold_count: usize,
+    pub toggle_count: usize,
+    pub global_toggle: Option<KeyId>,
+    pub global_stop: Option<KeyId>,
+    pub panel_toggle: Option<KeyId>,
+}
+
+fn profile_summary(profile: &Profile) -> ProfileSummary {
+    let mut rules_enabled = 0;
+    let mut hold_count = 0;
+    let mut toggle_count = 0;
+    for rule in &profile.rules {
+        if rule.enabled {
+            rules_enabled += 1;
+        }
+        match &rule.mode {
+            BurstMode::Hold => hold_count += 1,
+            BurstMode::Toggle => toggle_count += 1,
+        }
+    }
+
+    ProfileSummary {
+        rules_total: profile.rules.len(),
+        rules_enabled,
+        hold_count,
+        toggle_count,
+        global_toggle: profile.hotkeys.global_toggle,
+        global_stop: profile.hotkeys.global_stop,
+        panel_toggle: profile.hotkeys.panel_toggle,
+    }
 }
 
 /// 出厂默认规则（不含 id，调用方负责注入）。抽出此函数避免与

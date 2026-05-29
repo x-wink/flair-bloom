@@ -95,3 +95,55 @@ fn make_id_is_unique_across_calls() {
     // 形如 "<16hex>-<n>"
     assert!(a.contains('-'));
 }
+
+#[test]
+fn profile_summary_counts_rules_and_hotkeys() {
+    let profile = Profile {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        meta: ProfileMeta {
+            name: "测试配置".to_string(),
+            created_at: 1,
+            updated_at: 2,
+            app_version: "test".to_string(),
+        },
+        rules: vec![
+            BurstRule {
+                id: "hold".to_string(),
+                enabled: true,
+                trigger_key: KeyId::Keyboard(0x51),
+                target_key: KeyId::Keyboard(0x51),
+                mode: BurstMode::Hold,
+                stop_key: None,
+                interval_ms: 10,
+            },
+            BurstRule {
+                id: "toggle".to_string(),
+                enabled: false,
+                trigger_key: KeyId::Keyboard(0x46),
+                target_key: KeyId::Keyboard(0x47),
+                mode: BurstMode::Toggle,
+                stop_key: Some(KeyId::Keyboard(0x48)),
+                interval_ms: 20,
+            },
+        ],
+        hotkeys: Hotkeys {
+            global_toggle: Some(KeyId::Keyboard(0x70)),
+            global_stop: Some(KeyId::Keyboard(0x71)),
+            panel_toggle: Some(KeyId::Mouse(qzh_profile::key_id::MouseButton::X1)),
+        },
+        advanced: Advanced::default(),
+    };
+
+    let summary = profile_summary(&profile);
+
+    assert_eq!(summary.rules_total, 2);
+    assert_eq!(summary.rules_enabled, 1);
+    assert_eq!(summary.hold_count, 1);
+    assert_eq!(summary.toggle_count, 1);
+    assert_eq!(summary.global_toggle, Some(KeyId::Keyboard(0x70)));
+    assert_eq!(summary.global_stop, Some(KeyId::Keyboard(0x71)));
+    assert_eq!(
+        summary.panel_toggle,
+        Some(KeyId::Mouse(qzh_profile::key_id::MouseButton::X1))
+    );
+}
