@@ -3,3 +3,6 @@ packages:
 
 allowBuilds:
   esbuild: true
+
+policies:
+  minimumReleaseAge: 0
