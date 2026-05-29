@@ -118,15 +118,22 @@ pub fn run() {
         ])
         .setup(move |app| {
             // 全局热键回调：同步托盘菜单与前端开关状态
+            // 注意：这两个回调均由 WH_KEYBOARD_LL hook 线程同步调用。
+            // 在 hook 返回前，WebView2（若聚焦）无法向主线程 STA 投递 COM 消息，
+            // 直接在 hook 线程执行 emit/tray 操作会造成死锁并导致 hook 超时被移除。
+            // 解决方案：将 UI 操作派发到 Tauri 异步运行时，hook 立即返回。
             {
                 let handle = app.handle().clone();
                 burst_engine.set_on_global_changed(move |enabled| {
-                    if let Some(tray) = handle.tray_by_id("main") {
-                        if let Ok(menu) = crate::tray::build_menu(&handle, enabled) {
-                            let _ = tray.set_menu(Some(menu));
+                    let handle = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Some(tray) = handle.tray_by_id("main") {
+                            if let Ok(menu) = crate::tray::build_menu(&handle, enabled) {
+                                let _ = tray.set_menu(Some(menu));
+                            }
                         }
-                    }
-                    let _ = handle.emit("global-enabled-changed", enabled);
+                        let _ = handle.emit("global-enabled-changed", enabled);
+                    });
                 });
             }
 
@@ -134,15 +141,18 @@ pub fn run() {
             {
                 let handle = app.handle().clone();
                 burst_engine.set_on_panel_toggle(move || {
-                    if let Some(win) = handle.get_webview_window("panel") {
-                        let visible = win.is_visible().unwrap_or(false);
-                        if visible {
-                            let _ = win.hide();
-                        } else {
-                            let _ = win.show();
-                            let _ = win.set_focus();
+                    let handle = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        if let Some(win) = handle.get_webview_window("panel") {
+                            let visible = win.is_visible().unwrap_or(false);
+                            if visible {
+                                let _ = win.hide();
+                            } else {
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                            }
                         }
-                    }
+                    });
                 });
             }
 
