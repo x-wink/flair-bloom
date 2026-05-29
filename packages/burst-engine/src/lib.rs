@@ -1,11 +1,11 @@
 use qzh_profile::key_id::KeyId;
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 use qzh_profile::key_id::MouseButton;
 use qzh_profile::profile::{BurstMode, BurstRule, Hotkeys};
 #[cfg(windows)]
 use std::sync::{RwLock, Weak};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -64,6 +64,8 @@ pub struct BurstEngine {
     /// rule_id -> (cancel_flag, thread_handle, target_key, join_handle)
     active_loops: ActiveLoops,
     toggle_states: Arc<Mutex<HashMap<String, bool>>>,
+    /// 当前物理按下的键；用于过滤 OS 生成的 key-repeat。
+    pressed_keys: Arc<Mutex<HashSet<KeyId>>>,
     hotkeys: Arc<Mutex<Hotkeys>>,
     /// 全局开关状态被热键改变时调用（由 app 层注册，用于同步托盘与前端）。
     on_global_changed: GlobalChangedCb,
@@ -84,6 +86,7 @@ impl BurstEngine {
             rules: Arc::new(Mutex::new(Vec::new())),
             active_loops: Arc::new(Mutex::new(HashMap::new())),
             toggle_states: Arc::new(Mutex::new(HashMap::new())),
+            pressed_keys: Arc::new(Mutex::new(HashSet::new())),
             hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
             on_global_changed: Arc::new(Mutex::new(None)),
             on_panel_toggle: Arc::new(Mutex::new(None)),
@@ -135,6 +138,12 @@ impl BurstEngine {
     }
 
     pub fn on_key_press(&self, key: KeyId) {
+        // 低级键盘 hook 没有可靠的 key-repeat 标志。用按下集合识别首次 down，
+        // 避免长按全局热键时重复切换开关，也避免依赖 KBDLLHOOKSTRUCT.flags 保留位。
+        if !revive(self.pressed_keys.lock()).insert(key) {
+            return;
+        }
+
         // 全局热键检测：优先于规则处理，且不受 global_enabled 当前状态限制
         {
             let hk = revive(self.hotkeys.lock());
@@ -201,6 +210,8 @@ impl BurstEngine {
     }
 
     pub fn on_key_release(&self, key: KeyId) {
+        revive(self.pressed_keys.lock()).remove(&key);
+
         let rules = revive(self.rules.lock()).clone();
         for rule in rules
             .iter()
@@ -344,11 +355,6 @@ impl Drop for BurstEngine {
     }
 }
 
-/// KF_REPEAT (0x4000) >> 8：KBDLLHOOKSTRUCT.flags 第 6 位，OS key-repeat 时置位。
-/// Microsoft SDK 未定义命名常量，但与 LLKHF_EXTENDED/ALTDOWN/UP 的推导规律一致。
-#[cfg(windows)]
-const LLKHF_REPEAT: u32 = 0x40;
-
 /// WH_KEYBOARD_LL 低级键盘钩子回调；运行在安装 hook 的线程（消息循环线程）上。
 ///
 /// # Safety
@@ -385,10 +391,7 @@ unsafe extern "system" fn keyboard_hook_proc(ncode: i32, wparam: WPARAM, lparam:
                 .and_then(|w| w.upgrade());
             if let Some(engine) = engine {
                 match wparam as u32 {
-                    // key-repeat 时跳过：Toggle 模式下持续按键会反复开关连发
-                    WM_KEYDOWN | WM_SYSKEYDOWN if (kb.flags & LLKHF_REPEAT) == 0 => {
-                        engine.on_key_press(key)
-                    }
+                    WM_KEYDOWN | WM_SYSKEYDOWN => engine.on_key_press(key),
                     WM_KEYUP | WM_SYSKEYUP => engine.on_key_release(key),
                     _ => {}
                 }
@@ -533,4 +536,122 @@ pub fn start_listener(engine: Arc<BurstEngine>) {
 #[cfg(not(windows))]
 pub fn start_listener(_engine: Arc<BurstEngine>) {
     info!("连发引擎监听器（当前平台暂不支持键盘 hook）");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    fn rule(id: &str, mode: BurstMode, trigger_key: KeyId, target_key: KeyId) -> BurstRule {
+        BurstRule {
+            id: id.to_string(),
+            enabled: true,
+            trigger_key,
+            target_key,
+            mode,
+            stop_key: None,
+            interval_ms: 10,
+        }
+    }
+
+    #[test]
+    fn repeated_keydown_does_not_retrigger_global_toggle_before_release() {
+        let engine = BurstEngine::new();
+        let key = KeyId::Keyboard(0x51);
+        engine.set_hotkeys(Hotkeys {
+            global_toggle: Some(key),
+            ..Default::default()
+        });
+
+        engine.on_key_press(key);
+        assert!(engine.global_enabled.load(Ordering::SeqCst));
+
+        engine.on_key_press(key);
+        assert!(engine.global_enabled.load(Ordering::SeqCst));
+
+        engine.on_key_release(key);
+        engine.on_key_press(key);
+        assert!(!engine.global_enabled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn repeated_keydown_calls_panel_toggle_once_until_release() {
+        let engine = BurstEngine::new();
+        let key = KeyId::Keyboard(0x51);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let calls_for_cb = calls.clone();
+        engine.set_hotkeys(Hotkeys {
+            panel_toggle: Some(key),
+            ..Default::default()
+        });
+        engine.set_on_panel_toggle(move || {
+            calls_for_cb.fetch_add(1, Ordering::SeqCst);
+        });
+
+        engine.on_key_press(key);
+        engine.on_key_press(key);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        engine.on_key_release(key);
+        engine.on_key_press(key);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn hold_rule_still_starts_on_first_down_and_stops_on_up() {
+        let engine = BurstEngine::new();
+        let trigger = KeyId::Keyboard(0x51);
+        let target = KeyId::Keyboard(0x45);
+        engine.global_enabled.store(true, Ordering::SeqCst);
+        engine.set_rules(vec![rule("hold-q", BurstMode::Hold, trigger, target)]);
+
+        engine.on_key_press(trigger);
+        assert_eq!(engine.get_active_ids(), vec!["hold-q".to_string()]);
+
+        engine.on_key_press(trigger);
+        assert_eq!(engine.get_active_ids(), vec!["hold-q".to_string()]);
+
+        engine.on_key_release(trigger);
+        assert!(engine.get_active_ids().is_empty());
+    }
+
+    #[test]
+    fn toggle_rule_still_toggles_after_release_and_next_down() {
+        let engine = BurstEngine::new();
+        let trigger = KeyId::Keyboard(0x51);
+        let target = KeyId::Keyboard(0x45);
+        engine.global_enabled.store(true, Ordering::SeqCst);
+        engine.set_rules(vec![rule("toggle-q", BurstMode::Toggle, trigger, target)]);
+
+        engine.on_key_press(trigger);
+        assert_eq!(engine.get_active_ids(), vec!["toggle-q".to_string()]);
+
+        engine.on_key_press(trigger);
+        assert_eq!(engine.get_active_ids(), vec!["toggle-q".to_string()]);
+
+        engine.on_key_release(trigger);
+        engine.on_key_press(trigger);
+        assert!(engine.get_active_ids().is_empty());
+    }
+
+    #[test]
+    fn repeated_mouse_down_is_filtered_until_release() {
+        let engine = BurstEngine::new();
+        let key = KeyId::Mouse(MouseButton::Left);
+        engine.set_hotkeys(Hotkeys {
+            global_toggle: Some(key),
+            ..Default::default()
+        });
+
+        engine.on_key_press(key);
+        assert!(engine.global_enabled.load(Ordering::SeqCst));
+
+        engine.on_key_press(key);
+        assert!(engine.global_enabled.load(Ordering::SeqCst));
+
+        engine.on_key_release(key);
+        engine.on_key_press(key);
+        assert!(!engine.global_enabled.load(Ordering::SeqCst));
+    }
 }
