@@ -160,11 +160,13 @@ impl BurstEngine {
         revive(self.active_loops.lock()).keys().cloned().collect()
     }
 
-    pub fn on_key_press(&self, key: KeyId) {
+    /// 返回 true 表示引擎处理了本次按键（热键触发或规则匹配），false 表示未匹配或重复按下。
+    /// 供中继调用方决定是否 preventDefault。
+    pub fn on_key_press(&self, key: KeyId) -> bool {
         // 低级键盘 hook 没有可靠的 key-repeat 标志。用按下集合识别首次 down，
         // 避免长按全局热键时重复切换开关，也避免依赖 KBDLLHOOKSTRUCT.flags 保留位。
         if !revive(self.pressed_keys.lock()).insert(key) {
-            return;
+            return false;
         }
 
         // 全局热键检测：优先于规则处理，且不受 global_enabled 当前状态限制
@@ -180,7 +182,7 @@ impl BurstEngine {
                 if let Some(cb) = revive(self.on_panel_toggle.lock()).as_ref() {
                     cb();
                 }
-                return;
+                return true;
             }
             if start == Some(key) && !enabled {
                 drop(hk);
@@ -188,7 +190,7 @@ impl BurstEngine {
                 if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
                     cb(true);
                 }
-                return;
+                return true;
             }
             if stop == Some(key) && enabled {
                 drop(hk);
@@ -197,19 +199,21 @@ impl BurstEngine {
                 if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
                     cb(false);
                 }
-                return;
+                return true;
             }
         }
 
         if !self.global_enabled.load(Ordering::SeqCst) {
-            return;
+            return false;
         }
         let rules = revive(self.rules.lock()).clone();
+        let mut handled = false;
         for rule in rules.iter().filter(|r| r.enabled) {
             match rule.mode {
                 BurstMode::Hold => {
                     if rule.trigger_key == key {
                         self.start_hold_burst(rule);
+                        handled = true;
                     }
                 }
                 BurstMode::Toggle => {
@@ -222,14 +226,17 @@ impl BurstEngine {
                         if started {
                             if stop == key {
                                 self.handle_toggle_press(rule);
+                                handled = true;
                             }
                         } else if rule.trigger_key == key {
                             self.handle_toggle_press(rule);
+                            handled = true;
                         }
                     }
                 }
             }
         }
+        handled
     }
 
     pub fn on_key_release(&self, key: KeyId) {
@@ -414,7 +421,7 @@ unsafe extern "system" fn keyboard_hook_proc(ncode: i32, wparam: WPARAM, lparam:
                 .and_then(|w| w.upgrade());
             if let Some(engine) = engine {
                 match wparam as u32 {
-                    WM_KEYDOWN | WM_SYSKEYDOWN => engine.on_key_press(key),
+                    WM_KEYDOWN | WM_SYSKEYDOWN => { engine.on_key_press(key); }
                     WM_KEYUP | WM_SYSKEYUP => engine.on_key_release(key),
                     _ => {}
                 }

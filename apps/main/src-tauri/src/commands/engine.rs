@@ -1,7 +1,7 @@
 //! 规则 CRUD + 输入模式切换 + 按键捕获。驱动管理已迁至 [`super::driver`]。
 
 use crate::engine::BurstEngine;
-use qzh_profile::{BurstRule, Hotkeys, MAX_RULES};
+use qzh_profile::{BurstRule, Hotkeys, KeyId, MAX_RULES};
 use std::sync::{atomic::Ordering, Arc};
 #[allow(unused_imports)]
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -97,6 +97,19 @@ pub fn get_active_rules(state: State<EngineState>) -> Vec<String> {
     state.0.get_active_ids()
 }
 
+/// 面板聚焦时 WH_KEYBOARD_LL 不触发，前端将键盘事件中继到引擎统一处理。
+/// 注意：WebView 默认行为必须由前端在 DOM 事件内同步 preventDefault；
+/// 这里的返回值只表示引擎是否处理了按键，不能用于事后取消 F3 等浏览器快捷键。
+#[tauri::command]
+pub fn relay_key_event(state: State<EngineState>, key: KeyId, is_up: bool) -> bool {
+    if is_up {
+        state.0.on_key_release(key);
+        false
+    } else {
+        state.0.on_key_press(key)
+    }
+}
+
 #[tauri::command]
 pub fn get_input_mode() -> String {
     #[cfg(windows)]
@@ -174,4 +187,3 @@ pub fn set_input_mode(
         Err("仅 Windows 平台支持切换输入模式".to_string())
     }
 }
-

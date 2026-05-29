@@ -28,7 +28,7 @@ use commands::{
     },
     engine::{
         get_active_rules, get_global_enabled, get_input_mode, get_rules,
-        set_global_enabled, set_global_hotkeys, set_input_mode, set_rules,
+        relay_key_event, set_global_enabled, set_global_hotkeys, set_input_mode, set_rules,
         EngineState,
     },
     import_profile::{import_external_config, preview_import, scan_import_configs},
@@ -81,6 +81,7 @@ pub fn run() {
             set_rules,
             get_rules,
             get_active_rules,
+            relay_key_event,
             get_input_mode,
             set_input_mode,
             is_driver_installed,

@@ -149,6 +149,13 @@ function defaultRules(): BurstRule[] {
   return [newRule('hold'), newRule('toggle')];
 }
 
+function isEditableKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  return Boolean(
+    target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'),
+  );
+}
+
 function buildProfileMenu(args: {
   profiles: ProfileEntry[];
   activeName: string;
@@ -249,7 +256,6 @@ export default function PanelApp() {
     panel_toggle: KeyId | null;
   }>({ global_toggle: null, global_stop: null, panel_toggle: null });
   const hotkeysRef = useRef(hotkeys);
-  const globalEnabledRef = useRef(globalEnabled);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const conflicts = useMemo(() => detectConflicts(rules, hotkeys), [rules, hotkeys]);
   const confirm = useConfirm();
@@ -471,42 +477,36 @@ export default function PanelApp() {
   // 规则/热键变更后防抖自动保存到 .qzh
   profileNameRef.current = profileName;
   hotkeysRef.current = hotkeys;
-  globalEnabledRef.current = globalEnabled;
 
-  // WebView2 聚焦时 WH_KEYBOARD_LL 收不到键盘事件；全局热键改由前端 keydown 处理。
-  // bubble 阶段注册：KeyCapture 在 capture 阶段调用 stopPropagation()，
-  // 捕获模式下本 handler 不会触发，天然隔离按键设置与热键响应。
+  // WebView2 聚焦时 WH_KEYBOARD_LL 不触发；将键盘事件中继到后端引擎统一处理
+  // （热键、Toggle 触发键、pressed_keys 维护）。
+  // bubble 阶段注册：KeyCapture 在 capture 阶段 stopPropagation()，捕获模式下不干扰。
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.repeat) return;
+    const downHandler = (e: KeyboardEvent) => {
+      const allowDefault = isEditableKeyboardTarget(e.target);
+      if (!allowDefault) e.preventDefault();
       const vk = BROWSER_VK[e.code];
-      if (vk === undefined) return;
-      const hk = hotkeysRef.current;
-      const enabled = globalEnabledRef.current;
-
-      if (hk.panel_toggle?.kind === 'keyboard' && hk.panel_toggle.code === vk) {
-        e.preventDefault();
-        getCurrentWindow().hide();
-        return;
-      }
-      const stopKey = hk.global_stop ?? hk.global_toggle;
-      if (enabled && stopKey?.kind === 'keyboard' && stopKey.code === vk) {
-        e.preventDefault();
-        invoke('set_global_enabled', { enabled: false })
-          .then(() => setGlobalEnabled(false))
-          .catch(() => {});
-        return;
-      }
-      if (!enabled && hk.global_toggle?.kind === 'keyboard' && hk.global_toggle.code === vk) {
-        e.preventDefault();
-        invoke('set_global_enabled', { enabled: true })
-          .then(() => setGlobalEnabled(true))
-          .catch(() => {});
+      if (vk !== undefined) {
+        const key = keyboardKey(vk);
+        if (!e.repeat) {
+          invoke('relay_key_event', { key, isUp: false }).catch(() => {});
+        }
       }
     };
-    window.addEventListener('keydown', handler);
-    return () => window.removeEventListener('keydown', handler);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    const upHandler = (e: KeyboardEvent) => {
+      if (!isEditableKeyboardTarget(e.target)) e.preventDefault();
+      const vk = BROWSER_VK[e.code];
+      if (vk !== undefined) {
+        invoke('relay_key_event', { key: { kind: 'keyboard', code: vk }, isUp: true }).catch(() => {});
+      }
+    };
+    window.addEventListener('keydown', downHandler);
+    window.addEventListener('keyup', upHandler);
+    return () => {
+      window.removeEventListener('keydown', downHandler);
+      window.removeEventListener('keyup', upHandler);
+    };
+  }, []);
 
   const refreshProfileList = useCallback(async () => {
     try {
