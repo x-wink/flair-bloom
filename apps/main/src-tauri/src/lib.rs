@@ -27,8 +27,9 @@ use commands::{
         is_elevated, relaunch_as_admin, uninstall_dd_hid_driver, uninstall_driver,
     },
     engine::{
-        get_active_rules, get_global_enabled, get_input_mode, get_rules, set_global_enabled,
-        set_global_hotkeys, set_input_mode, set_rules, EngineState,
+        get_active_rules, get_global_enabled, get_input_mode, get_rules,
+        set_global_enabled, set_global_hotkeys, set_input_mode, set_rules,
+        EngineState,
     },
     import_profile::{import_external_config, preview_import, scan_import_configs},
     log::{log_from_frontend, open_app_dir},

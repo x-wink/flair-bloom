@@ -1,10 +1,10 @@
-//! 规则 CRUD + 输入模式切换。驱动管理已迁至 [`super::driver`]。
+//! 规则 CRUD + 输入模式切换 + 按键捕获。驱动管理已迁至 [`super::driver`]。
 
 use crate::engine::BurstEngine;
 use qzh_profile::{BurstRule, Hotkeys, MAX_RULES};
 use std::sync::{atomic::Ordering, Arc};
 #[allow(unused_imports)]
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct EngineState(pub Arc<BurstEngine>);
 
@@ -174,3 +174,4 @@ pub fn set_input_mode(
         Err("仅 Windows 平台支持切换输入模式".to_string())
     }
 }
+

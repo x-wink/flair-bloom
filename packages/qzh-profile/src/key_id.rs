@@ -19,6 +19,10 @@ pub enum MouseButton {
     X1,
     /// 侧键 2（XBUTTON2）
     X2,
+    /// 滚轮向上（注入时每次触发一格，触发时瞬发）
+    WheelUp,
+    /// 滚轮向下
+    WheelDown,
 }
 
 /// 按键标识：要么是 Win32 虚拟键码（键盘），要么是某个鼠标按钮。

@@ -7,7 +7,7 @@ use std::sync::{RwLock, Weak};
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU32, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -22,18 +22,41 @@ use win_input::{key_down, key_up};
 #[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{LPARAM, WPARAM},
+    System::Threading::GetCurrentThreadId,
     UI::WindowsAndMessaging::{
-        CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
-        UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL,
-        WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
-        WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN, WM_XBUTTONUP,
-        XBUTTON1, XBUTTON2,
+        CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
+        TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
+        WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
+        WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
+        WM_SYSKEYUP, WM_USER, WM_XBUTTONDOWN, WM_XBUTTONUP, XBUTTON1, XBUTTON2,
     },
 };
+
+/// 重装键盘 hook 的自定义线程消息：面板获得焦点时，由主线程投递给 hook 线程，
+/// 触发 unhook + rehook 使我们的 hook 重新排到 Chromium hook 之后安装，即优先被调用。
+#[cfg(windows)]
+const WM_REHOOK_KEYBOARD: u32 = WM_USER + 1;
+
+/// hook 线程 ID，用于跨线程投递 WM_REHOOK_KEYBOARD 消息；0 表示线程尚未启动。
+#[cfg(windows)]
+static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
 /// hook 回调通过静态 Weak 引用访问引擎，避免 Arc 延长生命周期；RwLock 支持重复注册
 #[cfg(windows)]
 static ENGINE_HOOK: RwLock<Option<Weak<BurstEngine>>> = RwLock::new(None);
+
+/// 向 hook 线程投递重装键盘 hook 的信号。
+/// 在面板窗口获得焦点后调用，使我们的 hook 重新排到 Chromium 安装的 hook 之后（即优先执行）。
+#[cfg(windows)]
+pub fn rehook_keyboard() {
+    let tid = HOOK_THREAD_ID.load(Ordering::SeqCst);
+    if tid != 0 {
+        // SAFETY: tid 来自 hook 线程自身写入的有效线程 ID；消息参数均为 0，合法。
+        unsafe { PostThreadMessageW(tid, WM_REHOOK_KEYBOARD, 0, 0) };
+    }
+}
+#[cfg(not(windows))]
+pub fn rehook_keyboard() {}
 
 type ActiveLoops = Arc<
     Mutex<
@@ -461,6 +484,33 @@ unsafe extern "system" fn mouse_hook_proc(ncode: i32, wparam: WPARAM, lparam: LP
                     }
                 }
             }
+
+            // 滚轮触发：每格作为瞬发事件，发 press 后立即发 release
+            // Toggle 规则每格切换一次；Hold 规则每格触发一个间隔周期
+            if wparam as u32 == WM_MOUSEWHEEL {
+                let delta = ((ms.mouseData >> 16) as u16) as i16;
+                let btn = if delta > 0 {
+                    MouseButton::WheelUp
+                } else {
+                    MouseButton::WheelDown
+                };
+                let key = KeyId::Mouse(btn);
+                // DD-HID 注入的滚轮通过 PENDING_INJECTIONS 过滤
+                if try_consume_injection(key, false) {
+                    return CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam);
+                }
+                {
+                    let engine = ENGINE_HOOK
+                        .read()
+                        .unwrap()
+                        .as_ref()
+                        .and_then(|w| w.upgrade());
+                    if let Some(engine) = engine {
+                        engine.on_key_press(key);
+                        engine.on_key_release(key);
+                    }
+                }
+            }
         }
     }
     // SAFETY: 同上,fall-through 路径必须把事件继续传递给后续钩子
@@ -478,9 +528,12 @@ pub fn start_listener(engine: Arc<BurstEngine>) {
         *guard = Some(Arc::downgrade(&engine));
     }
     thread::spawn(move || {
+        // SAFETY: 在安装 hook 前记录线程 ID，供 rehook_keyboard() 跨线程投递消息
+        HOOK_THREAD_ID.store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
+
         // SAFETY: WH_KEYBOARD_LL 全局钩子允许 hmod=null + dwThreadId=0,Windows
         // 会自行加载本进程模块作为 hook owner;hook_proc 满足 # Safety 契约
-        let kbd_hook = unsafe {
+        let mut kbd_hook = unsafe {
             SetWindowsHookExW(
                 WH_KEYBOARD_LL,
                 Some(keyboard_hook_proc),
@@ -515,15 +568,39 @@ pub fn start_listener(engine: Arc<BurstEngine>) {
             if ret == 0 || ret == -1 {
                 break;
             }
+            // 面板获得焦点时触发：重装键盘 hook 使我们排在 Chromium hook 之后安装（LIFO 优先调用）
+            if msg.hwnd.is_null() && msg.message == WM_REHOOK_KEYBOARD {
+                if !kbd_hook.is_null() {
+                    // SAFETY: kbd_hook 是之前 SetWindowsHookExW 返回的有效句柄
+                    unsafe { UnhookWindowsHookEx(kbd_hook) };
+                }
+                kbd_hook = unsafe {
+                    SetWindowsHookExW(
+                        WH_KEYBOARD_LL,
+                        Some(keyboard_hook_proc),
+                        std::ptr::null_mut(),
+                        0,
+                    )
+                };
+                if kbd_hook.is_null() {
+                    error!("rehook: 键盘 hook 重新安装失败");
+                } else {
+                    info!("rehook: 键盘 hook 已重新安装");
+                }
+                continue;
+            }
             // SAFETY: msg 是上一步 GetMessageW 写入的合法消息
             unsafe {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
         }
-        // SAFETY: kbd_hook 是上面 SetWindowsHookExW 返回的非空有效句柄
-        unsafe { UnhookWindowsHookEx(kbd_hook) };
-        info!("键盘 hook 已卸载");
+        HOOK_THREAD_ID.store(0, Ordering::SeqCst);
+        if !kbd_hook.is_null() {
+            // SAFETY: kbd_hook 是上面 SetWindowsHookExW 返回的非空有效句柄
+            unsafe { UnhookWindowsHookEx(kbd_hook) };
+            info!("键盘 hook 已卸载");
+        }
         if !mouse_hook.is_null() {
             // SAFETY: mouse_hook 上面已校验非空
             unsafe { UnhookWindowsHookEx(mouse_hook) };

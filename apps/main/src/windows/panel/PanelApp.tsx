@@ -13,7 +13,7 @@ import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/icons';
 import Kbd from './components/Kbd';
 import Tabs from './components/Tabs';
-import KeyCapture, { keyboardKey, keyLabel, type KeyId } from './components/KeyCapture';
+import KeyCapture, { BROWSER_VK, keyboardKey, keyLabel, type KeyId } from './components/KeyCapture';
 import { detectConflicts, severityForKey, severityForRule } from './conflicts';
 import Overlay from './components/Overlay';
 import ProfileNameForm from './components/ProfileNameForm';
@@ -249,6 +249,7 @@ export default function PanelApp() {
     panel_toggle: KeyId | null;
   }>({ global_toggle: null, global_stop: null, panel_toggle: null });
   const hotkeysRef = useRef(hotkeys);
+  const globalEnabledRef = useRef(globalEnabled);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const conflicts = useMemo(() => detectConflicts(rules, hotkeys), [rules, hotkeys]);
   const confirm = useConfirm();
@@ -470,6 +471,42 @@ export default function PanelApp() {
   // 规则/热键变更后防抖自动保存到 .qzh
   profileNameRef.current = profileName;
   hotkeysRef.current = hotkeys;
+  globalEnabledRef.current = globalEnabled;
+
+  // WebView2 聚焦时 WH_KEYBOARD_LL 收不到键盘事件；全局热键改由前端 keydown 处理。
+  // bubble 阶段注册：KeyCapture 在 capture 阶段调用 stopPropagation()，
+  // 捕获模式下本 handler 不会触发，天然隔离按键设置与热键响应。
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      const vk = BROWSER_VK[e.code];
+      if (vk === undefined) return;
+      const hk = hotkeysRef.current;
+      const enabled = globalEnabledRef.current;
+
+      if (hk.panel_toggle?.kind === 'keyboard' && hk.panel_toggle.code === vk) {
+        e.preventDefault();
+        getCurrentWindow().hide();
+        return;
+      }
+      const stopKey = hk.global_stop ?? hk.global_toggle;
+      if (enabled && stopKey?.kind === 'keyboard' && stopKey.code === vk) {
+        e.preventDefault();
+        invoke('set_global_enabled', { enabled: false })
+          .then(() => setGlobalEnabled(false))
+          .catch(() => {});
+        return;
+      }
+      if (!enabled && hk.global_toggle?.kind === 'keyboard' && hk.global_toggle.code === vk) {
+        e.preventDefault();
+        invoke('set_global_enabled', { enabled: true })
+          .then(() => setGlobalEnabled(true))
+          .catch(() => {});
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshProfileList = useCallback(async () => {
     try {

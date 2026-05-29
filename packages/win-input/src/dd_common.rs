@@ -22,15 +22,18 @@ use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 type DdBtnFn = unsafe extern "C" fn(c_int) -> c_int;
 type DdKeyFn = unsafe extern "C" fn(c_int, c_int) -> c_int;
 type DdTodcFn = unsafe extern "C" fn(c_int) -> c_int;
+type DdWhlFn = unsafe extern "C" fn(c_int) -> c_int;
 
 pub struct DdFfi {
     handle: HMODULE,
     dd_btn: DdBtnFn,
     dd_key: DdKeyFn,
     dd_todc: DdTodcFn,
+    dd_whl: Option<DdWhlFn>,
     diag_logged: AtomicBool,
     mouse_diag_logged: AtomicBool,
     mouse_x1x2_warned: AtomicBool,
+    wheel_diag_logged: AtomicBool,
 }
 
 // SAFETY: HMODULE 在 64 位 Windows 上是地址不变的内核句柄
@@ -87,14 +90,21 @@ impl DdFfi {
             unsafe { FreeLibrary(handle) };
             return None;
         }
+        // DD_whl 是可选扩展：两个已知 DLL 版本均有此导出，旧版不报错仅降级
+        let dd_whl = unsafe { resolve::<DdWhlFn>(handle, b"DD_whl\0") };
+        if dd_whl.is_none() {
+            warn!("DD DLL 缺少 DD_whl 导出，滚轮将回退 SendInput");
+        }
         Some(DdFfi {
             handle,
             dd_btn,
             dd_key,
             dd_todc,
+            dd_whl,
             diag_logged: AtomicBool::new(false),
             mouse_diag_logged: AtomicBool::new(false),
             mouse_x1x2_warned: AtomicBool::new(false),
+            wheel_diag_logged: AtomicBool::new(false),
         })
     }
 
@@ -119,6 +129,22 @@ impl DdFfi {
         }
     }
 
+    /// 注入滚轮事件。`up=true` 时向上（正 delta），`up=false` 时向下。
+    /// 返回 `true` 表示 DD 通道已处理，`false` 表示需回退 SendInput。
+    pub fn send_wheel(&self, up: bool) -> bool {
+        let Some(dd_whl) = self.dd_whl else {
+            return false;
+        };
+        // DD_whl 接收有符号字节：正值向上，负值向下；按 HID 每格 1 单位
+        let delta: c_int = if up { 1 } else { -1 };
+        // SAFETY: dd_whl 已解析
+        let ret = unsafe { dd_whl(delta) };
+        if !self.wheel_diag_logged.swap(true, Ordering::SeqCst) {
+            info!("DD 首次滚轮注入：up={} delta={} ret={}", up, delta, ret);
+        }
+        true
+    }
+
     pub fn send_mouse(&self, button: MouseButton, is_up: bool) -> bool {
         let flag: c_int = match (button, is_up) {
             (MouseButton::Left, false) => 1,
@@ -133,6 +159,8 @@ impl DdFfi {
                 }
                 return false;
             }
+            // WheelUp/WheelDown 由 dispatch 提前路由到 send_wheel，不应到达此处
+            (MouseButton::WheelUp | MouseButton::WheelDown, _) => unreachable!(),
         };
         // SAFETY: dd_btn 已解析
         let ret = unsafe { (self.dd_btn)(flag) };

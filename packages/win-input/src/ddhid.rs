@@ -28,4 +28,8 @@ impl DdHidBackend {
     pub fn send_mouse(&self, button: MouseButton, is_up: bool) -> bool {
         self.ffi.send_mouse(button, is_up)
     }
+
+    pub fn send_wheel(&self, up: bool) -> bool {
+        self.ffi.send_wheel(up)
+    }
 }

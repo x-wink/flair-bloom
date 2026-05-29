@@ -14,7 +14,8 @@ use crate::key_id::{KeyId, MouseButton};
 ///
 /// - v1：所有按键字段为裸 `u32` VK 码。
 /// - v2：按键字段改为 [`KeyId`]，支持键盘 + 鼠标 5 键。
-pub const CURRENT_SCHEMA_VERSION: u32 = 2;
+/// - v3：MouseButton 新增 WheelUp / WheelDown，旧文件向后兼容（新字段有默认值不涉及结构变更）。
+pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 /// 单个 [`Profile`] 允许的最大规则数量，超出会在 [`Profile::validate`] 阶段被拒绝。
 pub const MAX_RULES: usize = 64;
 
@@ -172,6 +173,7 @@ impl Profile {
             if !distinct_target || !rule.enabled {
                 continue;
             }
+            // X1/X2 不在 DD_btn 值域；WheelUp/WheelDown 走 DD_whl，受支持
             if matches!(
                 rule.target_key,
                 KeyId::Mouse(MouseButton::X1) | KeyId::Mouse(MouseButton::X2)

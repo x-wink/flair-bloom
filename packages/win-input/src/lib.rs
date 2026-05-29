@@ -34,7 +34,8 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     MapVirtualKeyW, SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT,
     KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, KEYEVENTF_SCANCODE, MAPVK_VK_TO_VSC_EX,
     MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP,
-    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, MOUSEINPUT,
+    MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, MOUSEEVENTF_WHEEL, MOUSEEVENTF_XDOWN,
+    MOUSEEVENTF_XUP, MOUSEINPUT,
 };
 #[cfg(windows)]
 use windows_sys::Win32::UI::WindowsAndMessaging::{XBUTTON1, XBUTTON2};
@@ -303,6 +304,27 @@ unsafe fn send_kbd_via_sendinput(vk: u32, flags: u32) {
 }
 
 #[cfg(windows)]
+unsafe fn send_wheel_via_sendinput(up: bool) {
+    // WHEEL_DELTA = 120 per notch；向下用补码表示负值
+    let mouse_data: u32 = if up { 120u32 } else { (-120i32) as u32 };
+    let input = INPUT {
+        r#type: INPUT_MOUSE,
+        Anonymous: INPUT_0 {
+            mi: MOUSEINPUT {
+                dx: 0,
+                dy: 0,
+                mouseData: mouse_data,
+                dwFlags: MOUSEEVENTF_WHEEL,
+                time: 0,
+                dwExtraInfo: SIM_MARKER,
+            },
+        },
+    };
+    // SAFETY: input 是栈上完整初始化的 INPUT_MOUSE
+    SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
+}
+
+#[cfg(windows)]
 unsafe fn send_mouse_via_sendinput(button: MouseButton, is_up: bool) {
     let (dw_flags, mouse_data) = match (button, is_up) {
         (MouseButton::Left, false) => (MOUSEEVENTF_LEFTDOWN, 0),
@@ -315,6 +337,8 @@ unsafe fn send_mouse_via_sendinput(button: MouseButton, is_up: bool) {
         (MouseButton::X1, true) => (MOUSEEVENTF_XUP, XBUTTON1 as i32),
         (MouseButton::X2, false) => (MOUSEEVENTF_XDOWN, XBUTTON2 as i32),
         (MouseButton::X2, true) => (MOUSEEVENTF_XUP, XBUTTON2 as i32),
+        // WheelUp/WheelDown 由 dispatch 提前处理，不应到达此处
+        (MouseButton::WheelUp | MouseButton::WheelDown, _) => unreachable!(),
     };
     let input = INPUT {
         r#type: INPUT_MOUSE,
@@ -393,6 +417,30 @@ fn dispatch(key: KeyId, is_up: bool) {
                 warn!("当前模式 DD-HID 但后端不存在，回退 SendInput");
             }
         }
+        (MODE_DD_HID, KeyId::Mouse(btn))
+            if matches!(btn, MouseButton::WheelUp | MouseButton::WheelDown) =>
+        {
+            // 滚轮：仅在 down 阶段注入一次，up 阶段无操作
+            if is_up {
+                return;
+            }
+            let up = matches!(btn, MouseButton::WheelUp);
+            if let Some(lock) = DD_HID_BACKEND.get() {
+                if let Some(backend) = revive(lock.lock()).as_ref() {
+                    log_dd_route(false, key);
+                    record_injection(key, false);
+                    if backend.send_wheel(up) {
+                        return;
+                    }
+                    try_consume_injection(key, false);
+                }
+            }
+            if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                warn!("当前模式 DD-HID 但滚轮回退 SendInput");
+            }
+            unsafe { send_wheel_via_sendinput(up) };
+            return;
+        }
         (MODE_DD_HID, KeyId::Mouse(btn)) => {
             let mut backend_seen = false;
             if let Some(lock) = DD_HID_BACKEND.get() {
@@ -416,6 +464,28 @@ fn dispatch(key: KeyId, is_up: bool) {
                 warn!("当前模式 DD-HID 但后端不存在，回退 SendInput");
             }
         }
+        (MODE_INTERCEPTION, KeyId::Mouse(btn))
+            if matches!(btn, MouseButton::WheelUp | MouseButton::WheelDown) =>
+        {
+            if is_up {
+                return;
+            }
+            let up = matches!(btn, MouseButton::WheelUp);
+            if let Some(lock) = INTERCEPTION_BACKEND.get() {
+                if let Some(backend) = revive(lock.lock()).as_ref() {
+                    if backend.send_wheel(up) {
+                        return;
+                    }
+                    if !INTERCEPTION_MOUSE_FALLBACK_LOGGED
+                        .swap(true, std::sync::atomic::Ordering::SeqCst)
+                    {
+                        warn!("Interception 未识别鼠标设备，滚轮回退 SendInput");
+                    }
+                }
+            }
+            unsafe { send_wheel_via_sendinput(up) };
+            return;
+        }
         _ => {}
     }
     // SAFETY: 各 send_*_via_sendinput 的 Safety 契约由调用方保证
@@ -424,6 +494,12 @@ fn dispatch(key: KeyId, is_up: bool) {
             let flags = if is_up { KEYEVENTF_KEYUP } else { 0 };
             send_kbd_via_sendinput(vk, flags);
         },
+        KeyId::Mouse(MouseButton::WheelUp | MouseButton::WheelDown) => {
+            if !is_up {
+                let up = matches!(key, KeyId::Mouse(MouseButton::WheelUp));
+                unsafe { send_wheel_via_sendinput(up) };
+            }
+        }
         KeyId::Mouse(btn) => unsafe {
             send_mouse_via_sendinput(btn, is_up);
         },

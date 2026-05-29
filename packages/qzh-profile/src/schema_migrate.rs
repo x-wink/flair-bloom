@@ -18,6 +18,7 @@ pub fn migrate_profile(data: Value, from: u32) -> Result<Value, MigrateError> {
 fn migrate_step(data: Value, from_version: u32) -> Result<Value, MigrateError> {
     match from_version {
         1 => migrate_v1_to_v2(data),
+        2 => migrate_v2_to_v3(data),
         v => Err(MigrateError::UnknownVersion(v)),
     }
 }
@@ -65,6 +66,12 @@ fn wrap_optional_keyboard_field(obj: &mut Value, field: &str) {
     if let Some(vk) = val.as_u64() {
         *val = json!({ "kind": "keyboard", "code": vk });
     }
+}
+
+/// v2 → v3：新增 WheelUp / WheelDown 枚举值，旧数据无结构变更，仅升版本号。
+fn migrate_v2_to_v3(mut data: Value) -> Result<Value, MigrateError> {
+    data["schema_version"] = json!(3);
+    Ok(data)
 }
 
 #[cfg(test)]

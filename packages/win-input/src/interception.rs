@@ -72,6 +72,32 @@ impl InterceptionBackend {
         }
     }
 
+    /// 注入滚轮事件。Interception WHEEL state=0x0400，rolling 使用 Windows WHEEL_DELTA=120。
+    pub fn send_wheel(&self, up: bool) -> bool {
+        let Some(mouse_device) = self.mouse_device else {
+            return false;
+        };
+        let rolling: i16 = if up { 120 } else { -120 };
+        let stroke = InterceptionMouseStroke {
+            state: 0x0400, // INTERCEPTION_MOUSE_WHEEL
+            flags: 0,
+            rolling,
+            x: 0,
+            y: 0,
+            information: SIM_MARKER as c_uint,
+        };
+        // SAFETY: ctx/mouse_device 已验证；stroke 在调用期间在栈上
+        unsafe {
+            interception_send(
+                self.ctx,
+                mouse_device,
+                &stroke as *const InterceptionMouseStroke as *const InterceptionStroke,
+                1,
+            );
+        }
+        true
+    }
+
     pub fn send_mouse(&self, button: MouseButton, is_up: bool) -> bool {
         let Some(mouse_device) = self.mouse_device else {
             return false;
@@ -103,6 +129,8 @@ impl InterceptionBackend {
                 InterceptionMouseState_INTERCEPTION_MOUSE_BUTTON_5_DOWN as u16
             }
             (MouseButton::X2, true) => InterceptionMouseState_INTERCEPTION_MOUSE_BUTTON_5_UP as u16,
+            // WheelUp/WheelDown 由 dispatch 提前路由到 send_wheel，不应到达此处
+            (MouseButton::WheelUp | MouseButton::WheelDown, _) => unreachable!(),
         };
         let stroke = InterceptionMouseStroke {
             state,
