@@ -3,7 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LazyStore } from '@tauri-apps/plugin-store';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import iconUrl from '../../assets/icon-32.png';
 import bgUrl from '../../assets/icon.png';
 import { APP_NAME } from '../../constants';
@@ -12,6 +12,7 @@ import { useConfirm } from './components/ConfirmDialog';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/icons';
 import KeyCapture, { keyboardKey, type KeyId } from './components/KeyCapture';
+import { detectConflicts, severityForKey, severityForRule } from './conflicts';
 import Overlay from './components/Overlay';
 import ProfileNameForm from './components/ProfileNameForm';
 import { useToast } from './components/Toast';
@@ -220,6 +221,8 @@ export default function PanelApp() {
     panel_toggle: KeyId | null;
   }>({ global_toggle: null, global_stop: null, panel_toggle: null });
   const hotkeysRef = useRef(hotkeys);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const conflicts = useMemo(() => detectConflicts(rules, hotkeys), [rules, hotkeys]);
   const confirm = useConfirm();
   const toast = useToast();
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -1078,6 +1081,7 @@ export default function PanelApp() {
                 }}
                 nullable
                 placeholder="未设置"
+                conflict={severityForKey(conflicts, hotkeys.global_toggle)}
               />
               {/* 停止键仅在开启键已设置时显示。
                   导入时若来源配置只有 stop 无 toggle，gaibang_parse_hotkeys 也不会产生
@@ -1094,6 +1098,7 @@ export default function PanelApp() {
                     }}
                     nullable
                     placeholder="同开启键"
+                    conflict={severityForKey(conflicts, hotkeys.global_stop)}
                   />
                 </>
               )}
@@ -1112,6 +1117,7 @@ export default function PanelApp() {
                 }}
                 nullable
                 placeholder="未设置"
+                conflict={severityForKey(conflicts, hotkeys.panel_toggle)}
               />
             </div>
           </div>
@@ -1183,6 +1189,9 @@ export default function PanelApp() {
                                   if (!showAdvanced) patch.trigger_key = vk;
                                   updateRule(rule.id, patch);
                                 }}
+                                conflict={
+                                  !showAdvanced ? severityForRule(conflicts, rule.id) : null
+                                }
                               />
                             </div>
                           ) : (
@@ -1192,6 +1201,7 @@ export default function PanelApp() {
                                 <KeyCapture
                                   value={rule.trigger_key}
                                   onChange={(vk) => vk && updateRule(rule.id, { trigger_key: vk })}
+                                  conflict={severityForRule(conflicts, rule.id)}
                                 />
                               </div>
                               <span className="rule-arrow">→</span>
@@ -1200,6 +1210,7 @@ export default function PanelApp() {
                                 <KeyCapture
                                   value={rule.target_key}
                                   onChange={(vk) => vk && updateRule(rule.id, { target_key: vk })}
+                                  conflict={severityForRule(conflicts, rule.id)}
                                 />
                               </div>
                             </>
@@ -1240,6 +1251,7 @@ export default function PanelApp() {
                             <KeyCapture
                               value={rule.trigger_key}
                               onChange={(vk) => vk && updateRule(rule.id, { trigger_key: vk })}
+                              conflict={severityForRule(conflicts, rule.id)}
                             />
                           </div>
                           <span className="adv-hint">默认与连发按键相同</span>

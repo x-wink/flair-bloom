@@ -27,3 +27,12 @@
   background: #f0ecfc;
   outline: none;
 }
+
+.key-capture.key-capture-error {
+  border-color: var(--fb-error, #e05050);
+  color: var(--fb-error, #e05050);
+}
+.key-capture.key-capture-warn {
+  border-color: var(--fb-warning, #d97706);
+  color: var(--fb-warning, #d97706);
+}

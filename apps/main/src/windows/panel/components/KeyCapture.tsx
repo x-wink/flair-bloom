@@ -276,9 +276,11 @@ interface Props {
   /** 为 true 时，捕获中按 Esc 清空按键而非取消捕获。 */
   nullable?: boolean;
   placeholder?: string;
+  /** 冲突级别，用于着色提示。 */
+  conflict?: 'error' | 'warning' | null;
 }
 
-export default function KeyCapture({ value, onChange, nullable, placeholder }: Props) {
+export default function KeyCapture({ value, onChange, nullable, placeholder, conflict }: Props) {
   const [capturing, setCapturing] = useState(false);
   // 在 capturing 状态下捕获到鼠标按键后，紧随其后的 onClick 不应重新进入
   // capturing；用 ref 在事件序列内传递这个一次性标记。
@@ -320,7 +322,7 @@ export default function KeyCapture({ value, onChange, nullable, placeholder }: P
 
   return (
     <button
-      className={`key-capture${capturing ? ' capturing' : ''}${!value ? ' key-capture-empty' : ''}`}
+      className={`key-capture${capturing ? ' capturing' : ''}${!value ? ' key-capture-empty' : ''}${conflict === 'error' ? ' key-capture-error' : conflict === 'warning' ? ' key-capture-warn' : ''}`}
       onKeyDown={capturing ? handleKeyDown : undefined}
       onMouseDown={capturing ? handleMouseDown : undefined}
       // 非捕获状态下右键清除绑定；捕获右键后抑制紧随的 contextmenu 避免误清除
