@@ -627,16 +627,29 @@ export default function PanelApp() {
             <>
               究极HID 模式需要安装 ddxoft 提供的 WHQL 签名 HID 虚拟驱动。点击「安装」后将弹出 UAC
               授权窗口，授权后会出现一个一闪而过的命令行窗口即为安装完成。
-              <br />
-              <br />
-              <strong>本驱动无需重启电脑即可生效。</strong>
             </>
           ),
           confirmText: '安装',
         });
         if (!ok) return;
-        await invoke('install_dd_hid_driver');
-        toast.success('究极HID 驱动已安装');
+        const installResult = await invoke<{ pending_reboot: boolean }>('install_dd_hid_driver');
+        if (installResult.pending_reboot) {
+          await confirm({
+            title: '安装完成，建议重启电脑',
+            description: (
+              <>
+                究极HID 驱动已安装，但 Windows PnP 报告驱动文件已更新，建议重启电脑以确保完全生效。
+                <br />
+                <br />
+                驱动在重启前通常已可正常工作，可尝试直接切换；若遇到异常请重启后再试。
+              </>
+            ),
+            confirmText: '我已知晓',
+            cancelText: '稍后重启',
+          });
+        } else {
+          toast.success('究极HID 驱动已安装');
+        }
       }
 
       // DD-HID 模式需要管理员：当前非管理员则提示重启

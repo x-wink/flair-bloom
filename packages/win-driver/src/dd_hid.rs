@@ -28,11 +28,23 @@ pub fn dd_hid_sys_installed() -> bool {
     false
 }
 
-/// 安装 DD-HID 驱动（调用 `ddc.exe`）。
+/// `ERROR_SUCCESS_REBOOT_REQUIRED`：安装成功但系统需重启后才能完全生效。
+/// SetupAPI 在覆盖安装/更新已在用驱动文件时会返回此码（0xBC3 = 3011）。
 #[cfg(windows)]
-pub async fn install(resource_dir: &Path) -> Result<(), String> {
+const REBOOT_REQUIRED: u32 = 0xBC3;
+
+/// 安装 DD-HID 驱动（调用 `ddc.exe`）。
+///
+/// 返回 `Ok(true)` 表示安装成功但 Windows 要求重启（`0xBC3`），
+/// `Ok(false)` 表示安装成功且无需重启，`Err` 表示安装失败。
+#[cfg(windows)]
+pub async fn install(resource_dir: &Path) -> Result<bool, String> {
     let exe = resource_dir.join("ddhid-driver").join("ddc.exe");
-    run_elevated_exe(exe, None).await
+    match run_elevated_exe_capture(exe, None).await? {
+        0 => Ok(false),
+        REBOOT_REQUIRED => Ok(true),
+        n => Err(format!("ddc.exe 返回错误码 {n}")),
+    }
 }
 
 /// 卸载 DD-HID 驱动（调用 `ddc.exe -u`），失败时兜底调用 pnputil。
