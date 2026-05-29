@@ -225,8 +225,8 @@ export default function PanelApp() {
   const conflicts = useMemo(() => detectConflicts(rules, hotkeys), [rules, hotkeys]);
   const confirm = useConfirm();
   const toast = useToast();
-  const saveTimer = useRef<ReturnType<typeof setTimeout>>();
-  const updateProgressDoneTimer = useRef<ReturnType<typeof setTimeout>>();
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const updateProgressDoneTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const updateDownloadFailedRef = useRef(false);
   const initialLoadDone = useRef(false);
   const profileNameRef = useRef(profileName);

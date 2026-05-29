@@ -28,7 +28,7 @@ export type ContextMenuItem =
 interface Props {
   open: boolean;
   onClose: () => void;
-  target: RefObject<HTMLElement>;
+  target: RefObject<HTMLElement | null>;
   items: ContextMenuItem[];
   location?: 'bottom-left' | 'bottom-right' | 'right-start' | 'left-start';
   /** 内部使用：通知最外层关闭整条菜单链 */
@@ -196,7 +196,7 @@ export default function ContextMenu({
                 <ContextMenu
                   open={isSubOpen}
                   onClose={() => setOpenSubIndex((v) => (v === i ? null : v))}
-                  target={{ current: itemRefs.current[i] } as RefObject<HTMLElement>}
+                  target={{ current: itemRefs.current[i] } as RefObject<HTMLElement | null>}
                   items={item.children!}
                   location="right-start"
                   onCloseChain={closeChain}

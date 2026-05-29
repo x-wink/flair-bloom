@@ -31,7 +31,7 @@ export type Location =
 export type AttachTarget = HTMLElement | 'body' | 'parent';
 
 /** 定位锚点：可传 DOM 元素或 RefObject */
-export type TargetRef = HTMLElement | null | React.RefObject<HTMLElement>;
+export type TargetRef = HTMLElement | null | React.RefObject<HTMLElement | null>;
 
 function resolveTarget(t: TargetRef | undefined): HTMLElement | null {
   if (!t) return null;
