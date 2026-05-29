@@ -1,0 +1,23 @@
+.fb-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3em;
+  padding: 1px 0.35em;
+  border: 1px solid currentColor;
+  border-radius: var(--fb-radius-sm, 3px);
+  font-family: monospace;
+  font-size: 0.75em;
+  font-style: normal;
+  font-weight: var(--fb-fw-medium);
+  line-height: 1.6;
+  opacity: 0.5;
+  user-select: none;
+  flex: none;
+}
+
+.fb-kbd-label {
+  font-family: inherit;
+  font-size: 0.9em;
+  opacity: 0.75;
+  white-space: nowrap;
+}

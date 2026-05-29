@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import Kbd from './Kbd';
 import './Button.css';
 
 export type ButtonVariant = 'solid' | 'outline' | 'ghost' | 'dashed' | 'link' | 'text';
@@ -34,6 +35,8 @@ export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
   prependIcon?: ReactNode;
   /** 后置图标 */
   appendIcon?: ReactNode;
+  /** 快捷键提示，渲染为按钮内部的 kbd 标签 */
+  kbd?: string;
   /** 原生 type，默认 button 防止意外提交表单 */
   htmlType?: 'button' | 'submit' | 'reset';
 }
@@ -49,6 +52,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
     iconOnly = false,
     prependIcon,
     appendIcon,
+    kbd,
     htmlType = 'button',
     disabled,
     className,
@@ -135,6 +139,7 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
       <span className="fb-btn__content">
         {prependIcon && <span className="fb-btn__icon fb-btn__icon--prepend">{prependIcon}</span>}
         {children != null && children !== '' && <span className="fb-btn__label">{children}</span>}
+        {kbd && <Kbd>{kbd}</Kbd>}
         {appendIcon && <span className="fb-btn__icon fb-btn__icon--append">{appendIcon}</span>}
       </span>
     </button>

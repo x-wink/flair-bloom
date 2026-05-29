@@ -1,17 +1,9 @@
 .about-card {
   max-width: min(440px, calc(100vw - 32px));
   max-height: 80vh;
-  background: var(--fb-surface);
-  border-radius: var(--fb-radius-2xl);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  box-shadow: var(--fb-shadow-modal);
-  animation: modal-pop var(--fb-duration-slow) ease;
 }
 
-.about-header {
-  padding: var(--fb-space-10) var(--fb-space-12) var(--fb-space-6);
+.fb-dialog__header:has(.about-title) {
   text-align: center;
 }
 
@@ -36,10 +28,7 @@
 }
 
 .about-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0 var(--fb-space-12) var(--fb-space-4);
-  border-top: 1px solid var(--fb-border-soft);
+  padding: 0;
 }
 
 .about-section + .about-section {
@@ -132,10 +121,22 @@
   line-height: var(--fb-lh-snug);
 }
 
-.about-actions {
-  display: flex;
-  justify-content: center;
-  gap: var(--fb-space-4);
-  padding: var(--fb-space-6) var(--fb-space-12) var(--fb-space-10);
-  border-top: 1px solid #f3f3f3;
+.about-flag--primary {
+  background: var(--fb-color-primary-soft, #ede8ff);
+  color: var(--fb-color-primary);
 }
+
+.about-update-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fb-color-primary);
+  flex: none;
+}
+
+.about-key--inline {
+  color: var(--fb-text-weak);
+  font-size: var(--fb-fs-sm);
+}
+

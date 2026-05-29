@@ -1,15 +1,28 @@
 import { type ReactNode, useState } from 'react';
-import { APP_NAME } from '../../../constants';
 import Button from '../components/Button';
 import { CardList, CardListButton } from '../components/CardList';
 import type { CloseBehavior } from '../components/CloseBehaviorForm';
+import KeyCapture, { type KeyId } from '../components/KeyCapture';
+import Tabs from '../components/Tabs';
+import type { ConflictSeverity } from '../conflicts';
+import DialogShell from './DialogShell';
 import ProfileCardList, { type SettingsProfileEntry } from './ProfileCardList';
-import './dialog-base.css';
 import './SettingsDialog.css';
 
-export type SettingsTab = 'general' | 'profiles';
+export type SettingsTab = 'general' | 'hotkeys' | 'sound' | 'profiles';
 type SettingsInputMode = 'sendinput' | 'interception' | 'dd_hid';
 type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
+
+export interface SoundSettings {
+  enabled: boolean;
+  volume: number;
+  rate: number;
+  pitch: number;
+  startText: string;
+  endText: string;
+  voiceName: string;
+  globalOnly: boolean; // reserved, not yet wired
+}
 
 interface Props {
   initialTab?: SettingsTab;
@@ -22,6 +35,10 @@ interface Props {
   elevated: boolean;
   interceptionInstalled: DriverStatus;
   ddHidInstalled: DriverStatus;
+  autostartEnabled: boolean;
+  togglingAutostart: boolean;
+  sound: SoundSettings;
+  availableVoices: string[];
   profiles: SettingsProfileEntry[];
   profileName: string;
   profileCount: number;
@@ -30,6 +47,20 @@ interface Props {
   onSelectInputMode: (mode: SettingsInputMode) => void;
   onToggleGlobal: () => void;
   onSetCloseBehavior: (choice: CloseBehavior | null) => void;
+  hotkeys: { global_toggle: KeyId | null; global_stop: KeyId | null; panel_toggle: KeyId | null };
+  hotkeyConflicts: {
+    global_toggle: ConflictSeverity | null;
+    global_stop: ConflictSeverity | null;
+    panel_toggle: ConflictSeverity | null;
+  };
+  onHotkeyChange: (patch: {
+    global_toggle?: KeyId | null;
+    global_stop?: KeyId | null;
+    panel_toggle?: KeyId | null;
+  }) => void;
+  onToggleAutostart: () => void;
+  onSoundChange: (patch: Partial<SoundSettings>) => void;
+  onPreviewSound: (type: 'start' | 'end') => void;
   onCreateProfile: () => void;
   onImportProfile: () => void;
   onSwitchProfile: (path: string) => void;
@@ -39,6 +70,8 @@ interface Props {
 
 const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'general', label: '通用' },
+  { id: 'hotkeys', label: '热键' },
+  { id: 'sound', label: '声音' },
   { id: 'profiles', label: '配置文件' },
 ];
 
@@ -94,40 +127,57 @@ function modeDetail(mode: SettingsInputMode, props: Props): string {
   return '无需驱动';
 }
 
+function SliderRow({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+  formatValue,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+  formatValue?: (v: number) => string;
+}) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-main">
+        <span className="settings-row-title">{label}</span>
+      </div>
+      <div className="settings-slider-group">
+        <input
+          type="range"
+          className="settings-slider"
+          min={min}
+          max={max}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+        <span className="settings-slider-value">{formatValue ? formatValue(value) : value}</span>
+      </div>
+    </div>
+  );
+}
+
 export default function SettingsDialog(props: Props) {
   const [tab, setTab] = useState<SettingsTab>(props.initialTab ?? 'general');
-  const versionLabel = props.appVersion ? `v${props.appVersion}` : '版本加载中';
+  const { sound } = props;
+
+  const tabsNode = (
+    <Tabs tabs={TABS} active={tab} onChange={setTab} variant="pill" grow />
+  );
 
   return (
-    <div className="settings-card" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-      <header className="settings-header">
-        <div>
-          <h2 id="settings-title" className="settings-title">
-            设置
-          </h2>
-          <p className="settings-subtitle">
-            {APP_NAME} {versionLabel}
-          </p>
-        </div>
-        <Button size="sm" variant="ghost" tone="neutral" onClick={props.onClose}>
-          关闭
-        </Button>
-      </header>
-
-      <nav className="settings-tabs" aria-label="设置分区">
-        {TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className={`settings-tab${tab === item.id ? ' settings-tab--active' : ''}`}
-            aria-selected={tab === item.id}
-            onClick={() => setTab(item.id)}
-          >
-            {item.label}
-          </button>
-        ))}
-      </nav>
-
+    <DialogShell
+      className="settings-card"
+      title="设置"
+      labelId="settings-title"
+      subheader={tabsNode}
+      footer={<Button onClick={props.onClose}>关闭</Button>}
+    >
       <div className="settings-body">
         {tab === 'general' && (
           <>
@@ -146,6 +196,22 @@ export default function SettingsDialog(props: Props) {
                   onClick={props.onToggleGlobal}
                 >
                   {props.globalEnabled ? '已启用' : '已禁用'}
+                </Button>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-main">
+                  <span className="settings-row-title">开机自启</span>
+                  <span className="settings-row-desc">
+                    {props.autostartEnabled ? '登录后自动启动' : '不自动启动'}
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  tone={props.autostartEnabled ? 'primary' : 'neutral'}
+                  loading={props.togglingAutostart}
+                  onClick={props.onToggleAutostart}
+                >
+                  {props.autostartEnabled ? '已启用' : '已禁用'}
                 </Button>
               </div>
             </SettingsSection>
@@ -167,6 +233,7 @@ export default function SettingsDialog(props: Props) {
                   </CardListButton>
                 ))}
               </CardList>
+              <p className="settings-note">驱动安装与卸载操作请前往「诊断修复」。</p>
             </SettingsSection>
 
             <SettingsSection title="关闭行为">
@@ -185,6 +252,187 @@ export default function SettingsDialog(props: Props) {
                   </CardListButton>
                 ))}
               </CardList>
+            </SettingsSection>
+
+          </>
+        )}
+
+        {tab === 'hotkeys' && (
+          <SettingsSection title="热键">
+            <div className="settings-hotkey-list">
+              <div className="settings-hotkey-row">
+                <span className="settings-hotkey-label">全局开关</span>
+                <div className="settings-hotkey-keys">
+                  <KeyCapture
+                    value={props.hotkeys.global_toggle}
+                    nullable
+                    placeholder="未设置"
+                    conflict={props.hotkeyConflicts.global_toggle}
+                    onChange={(k) =>
+                      props.onHotkeyChange({
+                        global_toggle: k,
+                        global_stop: k === null ? null : props.hotkeys.global_stop,
+                      })
+                    }
+                  />
+                  {props.hotkeys.global_toggle && (
+                    <>
+                      <span className="settings-hotkey-sep">停止</span>
+                      <KeyCapture
+                        value={props.hotkeys.global_stop}
+                        nullable
+                        placeholder="同开启键"
+                        conflict={props.hotkeyConflicts.global_stop}
+                        onChange={(k) => props.onHotkeyChange({ global_stop: k })}
+                      />
+                    </>
+                  )}
+                </div>
+              </div>
+              <div className="settings-hotkey-row">
+                <span className="settings-hotkey-label">面板显隐</span>
+                <div className="settings-hotkey-keys">
+                  <KeyCapture
+                    value={props.hotkeys.panel_toggle}
+                    nullable
+                    placeholder="未设置"
+                    conflict={props.hotkeyConflicts.panel_toggle}
+                    onChange={(k) => props.onHotkeyChange({ panel_toggle: k })}
+                  />
+                </div>
+              </div>
+            </div>
+            <p className="settings-note">热键随当前配置文件保存。</p>
+          </SettingsSection>
+        )}
+
+        {tab === 'sound' && (
+          <>
+            <SettingsSection title="声音反馈">
+              <div className="settings-row">
+                <div className="settings-row-main">
+                  <span className="settings-row-title">声音反馈</span>
+                  <span className="settings-row-desc">
+                    {sound.enabled ? '切换全局开关时朗读语句' : '已关闭'}
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  tone={sound.enabled ? 'primary' : 'neutral'}
+                  onClick={() => props.onSoundChange({ enabled: !sound.enabled })}
+                >
+                  {sound.enabled ? '已启用' : '已禁用'}
+                </Button>
+              </div>
+            </SettingsSection>
+
+            <SettingsSection title="语句">
+              <div className={`settings-sound-body${sound.enabled ? '' : ' settings-sound-body--disabled'}`}>
+                <div className="settings-row">
+                  <div className="settings-row-main">
+                    <span className="settings-row-title">开始语句</span>
+                    <span className="settings-row-desc">全局开关启用时朗读</span>
+                  </div>
+                  <div className="settings-text-group">
+                    <input
+                      type="text"
+                      className="settings-text-input"
+                      value={sound.startText}
+                      maxLength={30}
+                      disabled={!sound.enabled}
+                      onChange={(e) => props.onSoundChange({ startText: e.target.value })}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      tone="neutral"
+                      disabled={!sound.enabled}
+                      onClick={() => props.onPreviewSound('start')}
+                    >
+                      试听
+                    </Button>
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-main">
+                    <span className="settings-row-title">结束语句</span>
+                    <span className="settings-row-desc">全局开关停用时朗读</span>
+                  </div>
+                  <div className="settings-text-group">
+                    <input
+                      type="text"
+                      className="settings-text-input"
+                      value={sound.endText}
+                      maxLength={30}
+                      disabled={!sound.enabled}
+                      onChange={(e) => props.onSoundChange({ endText: e.target.value })}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      tone="neutral"
+                      disabled={!sound.enabled}
+                      onClick={() => props.onPreviewSound('end')}
+                    >
+                      试听
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </SettingsSection>
+
+            <SettingsSection title="合成参数">
+              <div className={`settings-sound-body${sound.enabled ? '' : ' settings-sound-body--disabled'}`}>
+                <div className="settings-row">
+                  <div className="settings-row-main">
+                    <span className="settings-row-title">语音</span>
+                  </div>
+                  <select
+                    className="settings-select"
+                    value={sound.voiceName}
+                    disabled={!sound.enabled}
+                    onChange={(e) => props.onSoundChange({ voiceName: e.target.value })}
+                  >
+                    {props.availableVoices.length === 0 ? (
+                      <option value="">系统无可用语音</option>
+                    ) : (
+                      <>
+                        <option value="">系统默认</option>
+                        {props.availableVoices.map((v) => (
+                          <option key={v} value={v}>
+                            {v}
+                          </option>
+                        ))}
+                      </>
+                    )}
+                  </select>
+                </div>
+
+                <SliderRow
+                  label="语速"
+                  value={sound.rate}
+                  min={-10}
+                  max={10}
+                  onChange={(v) => props.onSoundChange({ rate: v })}
+                  formatValue={(v) => (v === 0 ? '0' : v > 0 ? `+${v}` : `${v}`)}
+                />
+                <SliderRow
+                  label="音调"
+                  value={sound.pitch}
+                  min={-10}
+                  max={10}
+                  onChange={(v) => props.onSoundChange({ pitch: v })}
+                  formatValue={(v) => (v === 0 ? '0' : v > 0 ? `+${v}` : `${v}`)}
+                />
+                <SliderRow
+                  label="音量"
+                  value={sound.volume}
+                  min={0}
+                  max={100}
+                  onChange={(v) => props.onSoundChange({ volume: v })}
+                  formatValue={(v) => `${v}%`}
+                />
+              </div>
             </SettingsSection>
           </>
         )}
@@ -234,6 +482,6 @@ export default function SettingsDialog(props: Props) {
           </>
         )}
       </div>
-    </div>
+    </DialogShell>
   );
 }

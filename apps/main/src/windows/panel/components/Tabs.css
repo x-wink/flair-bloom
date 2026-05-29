@@ -1,0 +1,112 @@
+/* ── 容器 ─────────────────────────────────────────────────── */
+.fb-tab-bar {
+  display: flex;
+  flex-shrink: 0;
+}
+
+/* 方向 */
+.fb-tab-bar--horizontal { flex-direction: row; }
+.fb-tab-bar--vertical   { flex-direction: column; }
+
+/* 对齐 */
+.fb-tab-bar--start  { justify-content: flex-start; }
+.fb-tab-bar--center { justify-content: center; }
+.fb-tab-bar--end    { justify-content: flex-end; }
+
+/* vertical 时对齐 = align-items */
+.fb-tab-bar--vertical.fb-tab-bar--start  { align-items: flex-start; }
+.fb-tab-bar--vertical.fb-tab-bar--center { align-items: center; }
+.fb-tab-bar--vertical.fb-tab-bar--end    { align-items: flex-end; }
+
+/* grow：每个 tab 平分 */
+.fb-tab-bar--grow .fb-tab { flex: 1; }
+
+/* underline 变体 —— 下边框分割线 */
+.fb-tab-bar--underline {
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.fb-tab-bar--vertical.fb-tab-bar--underline {
+  border-bottom: none;
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+/* pill 变体 —— 圆角按钮组 */
+.fb-tab-bar--pill {
+  gap: var(--fb-space-2);
+  padding: var(--fb-space-2);
+  background: var(--fb-color-neutral-soft);
+  border: 1px solid var(--fb-border-soft);
+}
+
+/* ── Tab 按钮 ─────────────────────────────────────────────── */
+.fb-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fb-space-3);
+  background: transparent;
+  border: none;
+  font: inherit;
+  font-size: var(--fb-fs-md);
+  color: var(--fb-text-weak);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color var(--fb-duration-base),
+    background var(--fb-duration-base),
+    border-color var(--fb-duration-base);
+}
+
+/* underline tab */
+.fb-tab-bar--underline .fb-tab {
+  padding: var(--fb-space-4) var(--fb-space-5);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.fb-tab-bar--vertical.fb-tab-bar--underline .fb-tab {
+  border-bottom: none;
+  border-right: 2px solid transparent;
+  margin-bottom: 0;
+  margin-right: -1px;
+  padding: var(--fb-space-3) var(--fb-space-6) var(--fb-space-3) var(--fb-space-4);
+}
+
+.fb-tab-bar--underline .fb-tab:hover {
+  color: var(--fb-color-primary);
+}
+.fb-tab-bar--underline .fb-tab--active {
+  color: var(--fb-color-primary);
+  border-bottom-color: var(--fb-color-primary);
+  font-weight: var(--fb-fw-semibold);
+}
+.fb-tab-bar--vertical.fb-tab-bar--underline .fb-tab--active {
+  border-bottom-color: transparent;
+  border-right-color: var(--fb-color-primary);
+}
+
+/* pill tab */
+.fb-tab-bar--pill .fb-tab {
+  padding: var(--fb-space-3) var(--fb-space-5);
+  border-radius: var(--fb-radius-md);
+  border: 1px solid transparent;
+  font-weight: var(--fb-fw-medium);
+}
+.fb-tab-bar--pill .fb-tab:hover {
+  background: var(--fb-color-neutral-soft);
+  color: var(--fb-text-regular);
+}
+.fb-tab-bar--pill .fb-tab--active {
+  background: var(--fb-surface);
+  border-color: var(--fb-border-soft);
+  color: var(--fb-color-primary);
+}
+
+/* ── Badge ────────────────────────────────────────────────── */
+.fb-tab-badge {
+  font-size: var(--fb-fs-xs);
+  padding: 1px var(--fb-space-4);
+  border-radius: var(--fb-radius-pill);
+  background: rgba(108, 77, 230, 0.12);
+  color: var(--fb-color-primary);
+  font-weight: var(--fb-fw-medium);
+}

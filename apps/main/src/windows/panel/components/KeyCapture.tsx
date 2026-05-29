@@ -323,6 +323,7 @@ export default function KeyCapture({ value, onChange, nullable, placeholder, con
   return (
     <button
       className={`key-capture${capturing ? ' capturing' : ''}${!value ? ' key-capture-empty' : ''}${conflict === 'error' ? ' key-capture-error' : conflict === 'warning' ? ' key-capture-warn' : ''}`}
+      title={nullable && value ? '左键重新绑定 · 右键清除' : undefined}
       onKeyDown={capturing ? handleKeyDown : undefined}
       onMouseDown={capturing ? handleMouseDown : undefined}
       // 非捕获状态下右键清除绑定；捕获右键后抑制紧随的 contextmenu 避免误清除

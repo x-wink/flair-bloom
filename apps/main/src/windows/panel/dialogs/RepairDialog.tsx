@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Button from '../components/Button';
 import { useConfirm } from '../components/ConfirmDialog';
-import './dialog-base.css';
+import DialogShell from './DialogShell';
 import './RepairDialog.css';
 
 type Severity = 'info' | 'warn' | 'error';
@@ -51,9 +51,20 @@ interface DisplayIssue {
   action: RepairCommand | null;
 }
 
+type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
+
 interface Props {
+  elevated: boolean;
+  autostartEnabled: boolean;
+  inputMode: string;
+  interceptionInstalled: DriverStatus;
+  ddHidInstalled: DriverStatus;
   onClose: () => void;
   onToast: (kind: 'success' | 'warn' | 'error', message: string) => void;
+  onInstallDriver: () => void;
+  onUninstallDriver: () => void;
+  onInstallDdHid: () => void;
+  onUninstallDdHid: () => void;
 }
 
 const STEP_LABEL: Record<StepStatus, string> = {
@@ -77,7 +88,41 @@ const ACTION_CONFIRM: Record<RepairCommand, string> = {
   repair_clean_logs: '会清理 7 天前的旧日志，崩溃日志会保留。',
 };
 
-export default function RepairDialog({ onClose, onToast }: Props) {
+const INPUT_MODE_LABEL: Record<string, string> = {
+  sendinput: '通用模式',
+  interception: '游戏模式',
+  dd_hid: '究极HID',
+};
+
+function driverStatusLabel(status: DriverStatus): string {
+  if (status === 'installed') return '已安装';
+  if (status === 'pending_reboot') return '待重启';
+  return '未安装';
+}
+
+function DriverFlag({ status }: { status: DriverStatus }) {
+  const cls =
+    status === 'installed'
+      ? 'repair-flag--ok'
+      : status === 'pending_reboot'
+        ? 'repair-flag--warn'
+        : 'repair-flag--off';
+  return <span className={`repair-status-badge ${cls}`}>{driverStatusLabel(status)}</span>;
+}
+
+export default function RepairDialog({
+  elevated,
+  autostartEnabled,
+  inputMode,
+  interceptionInstalled,
+  ddHidInstalled,
+  onClose,
+  onToast,
+  onInstallDriver,
+  onUninstallDriver,
+  onInstallDdHid,
+  onUninstallDdHid,
+}: Props) {
   const confirm = useConfirm();
   const [report, setReport] = useState<RepairReport | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -165,14 +210,95 @@ export default function RepairDialog({ onClose, onToast }: Props) {
   const displayIssues = buildDisplayIssues(report?.items ?? []);
   const hasIssues = (report?.items ?? []).some((i) => i.severity !== 'info');
 
-  return (
-    <div className="repair-card">
-      <header className="repair-header">
-        <h2 className="repair-title">环境修复</h2>
-        <p className="repair-tagline">自动检查影响安装和运行的常见问题。修复前会先备份。</p>
-      </header>
+  const footerNode = (
+    <>
+      <Button
+        variant="outline"
+        tone="neutral"
+        onClick={() => void exportDiagnosticReport()}
+        loading={exportingReport}
+      >
+        导出诊断报告
+      </Button>
+      <Button variant="outline" onClick={() => void scan()} loading={scanning}>
+        重新诊断
+      </Button>
+      <Button onClick={onClose}>关闭</Button>
+    </>
+  );
 
+  return (
+    <DialogShell
+      className="repair-card"
+      title="诊断修复"
+      subtitle="自动检查影响安装和运行的常见问题。修复前会先备份。"
+      labelId="repair-title"
+      footer={footerNode}
+      footerAlign="spread"
+    >
       <div className="repair-body">
+        <section className="repair-section repair-section--status">
+          <h3 className="repair-section-title">运行状态</h3>
+          <ul className="repair-status-list">
+            <li>
+              <span className="repair-status-key">管理员权限</span>
+              <span className={`repair-status-badge ${elevated ? 'repair-flag--ok' : 'repair-flag--off'}`}>
+                {elevated ? '已提权' : '普通用户'}
+              </span>
+            </li>
+            <li>
+              <span className="repair-status-key">开机自启</span>
+              <span className={`repair-status-badge ${autostartEnabled ? 'repair-flag--ok' : 'repair-flag--off'}`}>
+                {autostartEnabled ? '已启用' : '未启用'}
+              </span>
+            </li>
+            <li>
+              <span className="repair-status-key">当前输入模式</span>
+              <span className="repair-status-badge repair-flag--neutral">
+                {INPUT_MODE_LABEL[inputMode] ?? inputMode}
+              </span>
+            </li>
+          </ul>
+        </section>
+
+        <section className="repair-section repair-section--drivers">
+          <h3 className="repair-section-title">驱动状态</h3>
+          <ul className="repair-status-list">
+            <li>
+              <span className="repair-status-key">游戏模式驱动</span>
+              <div className="repair-status-actions">
+                <DriverFlag status={interceptionInstalled} />
+                {interceptionInstalled === 'not_installed' && (
+                  <Button size="sm" variant="outline" tone="primary" onClick={onInstallDriver}>
+                    安装
+                  </Button>
+                )}
+                {interceptionInstalled === 'installed' && (
+                  <Button size="sm" variant="outline" tone="danger" onClick={onUninstallDriver}>
+                    卸载
+                  </Button>
+                )}
+              </div>
+            </li>
+            <li>
+              <span className="repair-status-key">究极HID 驱动</span>
+              <div className="repair-status-actions">
+                <DriverFlag status={ddHidInstalled} />
+                {ddHidInstalled === 'not_installed' && (
+                  <Button size="sm" variant="outline" tone="primary" onClick={onInstallDdHid}>
+                    安装
+                  </Button>
+                )}
+                {ddHidInstalled === 'installed' && (
+                  <Button size="sm" variant="outline" tone="danger" onClick={onUninstallDdHid}>
+                    卸载
+                  </Button>
+                )}
+              </div>
+            </li>
+          </ul>
+        </section>
+
         {scanning && !report && <p className="repair-loading">正在诊断…</p>}
 
         {report && (
@@ -224,22 +350,7 @@ export default function RepairDialog({ onClose, onToast }: Props) {
           </>
         )}
       </div>
-
-      <div className="repair-actions">
-        <Button
-          variant="outline"
-          tone="neutral"
-          onClick={() => void exportDiagnosticReport()}
-          loading={exportingReport}
-        >
-          导出诊断报告
-        </Button>
-        <Button variant="outline" onClick={() => void scan()} loading={scanning}>
-          重新诊断
-        </Button>
-        <Button onClick={onClose}>关闭</Button>
-      </div>
-    </div>
+    </DialogShell>
   );
 }
 

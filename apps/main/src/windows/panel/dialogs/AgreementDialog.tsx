@@ -2,7 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import eulaText from '../../../assets/EULA.md?raw';
 import Button from '../components/Button';
-import './dialog-base.css';
+import DialogShell from './DialogShell';
 import './AgreementDialog.css';
 
 interface Props {
@@ -19,7 +19,6 @@ export default function AgreementPage({ onAgreed }: Props) {
     const el = contentRef.current;
     if (!el) return;
     const checkBottom = () => {
-      // 内容不溢出时 scroll 事件永远不会触发，需要主动检查
       if (el.scrollHeight <= el.clientHeight + 16) {
         setScrolledToBottom(true);
         return;
@@ -48,32 +47,37 @@ export default function AgreementPage({ onAgreed }: Props) {
   }, []);
 
   return (
-    <div className="agreement-card">
-      <h2 className="agreement-title">用户协议</h2>
-      <div className="agreement-body" ref={contentRef}>
+    <DialogShell
+      className="agreement-card"
+      title="用户协议"
+      labelId="agreement-title"
+      footer={
+        <>
+          <p className="agreement-hint">
+            {agreeError || (scrolledToBottom ? '已阅读完毕' : '请滚动阅读协议全文')}
+          </p>
+          <Button
+            variant="outline"
+            tone="neutral"
+            className="agreement-action"
+            onClick={handleReject}
+          >
+            不同意并退出
+          </Button>
+          <Button
+            className="agreement-action"
+            loading={agreeing}
+            disabled={!scrolledToBottom}
+            onClick={handleAgree}
+          >
+            {agreeing ? '处理中…' : '同意并继续'}
+          </Button>
+        </>
+      }
+    >
+      <div ref={contentRef}>
         <pre className="agreement-text">{eulaText}</pre>
       </div>
-      <div className="agreement-hint">
-        {agreeError || (scrolledToBottom ? '已阅读完毕' : '请滚动阅读协议全文')}
-      </div>
-      <div className="agreement-actions">
-        <Button
-          variant="outline"
-          tone="neutral"
-          className="agreement-action"
-          onClick={handleReject}
-        >
-          不同意并退出
-        </Button>
-        <Button
-          className="agreement-action"
-          loading={agreeing}
-          disabled={!scrolledToBottom}
-          onClick={handleAgree}
-        >
-          {agreeing ? '处理中…' : '同意并继续'}
-        </Button>
-      </div>
-    </div>
+    </DialogShell>
   );
 }

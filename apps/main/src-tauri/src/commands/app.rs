@@ -48,6 +48,19 @@ pub fn exit_app(app: AppHandle) {
 }
 
 #[tauri::command]
+pub fn toggle_autostart(app: AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let launch = app.autolaunch();
+    let enabled = launch.is_enabled().unwrap_or(false);
+    if enabled {
+        launch.disable().map_err(|e| format!("禁用开机自启失败: {e}"))?;
+    } else {
+        launch.enable().map_err(|e| format!("启用开机自启失败: {e}"))?;
+    }
+    Ok(launch.is_enabled().unwrap_or(!enabled))
+}
+
+#[tauri::command]
 pub async fn check_update(app: AppHandle, lock: State<'_, UpdateLock>) -> Result<(), String> {
     let _guard = lock.acquire().ok_or("更新正在进行中")?;
     do_check_update(&app).await

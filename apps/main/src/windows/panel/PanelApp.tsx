@@ -11,7 +11,9 @@ import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehavio
 import { useConfirm } from './components/ConfirmDialog';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/icons';
-import KeyCapture, { keyboardKey, type KeyId } from './components/KeyCapture';
+import Kbd from './components/Kbd';
+import Tabs from './components/Tabs';
+import KeyCapture, { keyboardKey, keyLabel, type KeyId } from './components/KeyCapture';
 import { detectConflicts, severityForKey, severityForRule } from './conflicts';
 import Overlay from './components/Overlay';
 import ProfileNameForm from './components/ProfileNameForm';
@@ -22,13 +24,25 @@ import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
 import ImportDialog from './dialogs/ImportDialog';
 import RepairDialog from './dialogs/RepairDialog';
-import SettingsDialog, { type SettingsTab } from './dialogs/SettingsDialog';
+import SettingsDialog, { type SettingsTab, type SoundSettings } from './dialogs/SettingsDialog';
 import UpdateNoticeDialog, { type UpdateNoticeInfo } from './dialogs/UpdateNoticeDialog';
 import './PanelApp.css';
 
 const settingsStore = new LazyStore('settings.json');
 const CLOSE_BEHAVIOR_KEY = 'closeBehavior';
 const ACTIVE_TAB_KEY = 'activeTab';
+const SOUND_KEY = 'sound';
+
+const DEFAULT_SOUND: SoundSettings = {
+  enabled: false,
+  volume: 80,
+  rate: 0,
+  pitch: 0,
+  startText: '我准备好库库按了',
+  endText: '我累了歇会',
+  voiceName: '',
+  globalOnly: false,
+};
 const DEFAULT_PROFILE_NAME = 'defults';
 
 type BurstMode = 'hold' | 'toggle';
@@ -214,6 +228,10 @@ export default function PanelApp() {
     resources_ok: true,
     missing_resources: [],
   });
+  const [togglingAutostart, setTogglingAutostart] = useState(false);
+  const [sound, setSound] = useState<SoundSettings>(DEFAULT_SOUND);
+  const soundRef = useRef<SoundSettings>(DEFAULT_SOUND);
+  const [availableVoices, setAvailableVoices] = useState<string[]>([]);
   const [switchingMode, setSwitchingMode] = useState(false);
   const [modePickerOpen, setModePickerOpen] = useState(false);
   const modeBtnRef = useRef<HTMLButtonElement>(null);
@@ -276,6 +294,31 @@ export default function PanelApp() {
     getVersion()
       .then(setAppVersion)
       .catch(() => {});
+  }, []);
+
+  // 声音设置：从 store 加载，同时枚举系统语音列表
+  useEffect(() => {
+    settingsStore
+      .get<SoundSettings>(SOUND_KEY)
+      .then((v) => {
+        if (v && typeof v === 'object') {
+        const merged = { ...DEFAULT_SOUND, ...v };
+        setSound(merged);
+        soundRef.current = merged;
+      }
+      })
+      .catch(() => {});
+
+    const loadVoices = () => {
+      const voices = window.speechSynthesis
+        .getVoices()
+        .filter((v) => v.lang.startsWith('zh') || v.lang.startsWith('en'))
+        .map((v) => v.name);
+      if (voices.length > 0) setAvailableVoices(voices);
+    };
+    loadVoices();
+    window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
+    return () => window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
   }, []);
 
   useEffect(() => {
@@ -540,13 +583,63 @@ export default function PanelApp() {
   // 全局开关切换时播报语音；initialLoadDone 为 true 后才响应，跳过启动阶段的状态同步
   useEffect(() => {
     if (!initialLoadDone.current) return;
-    if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
-    const utt = new SpeechSynthesisUtterance(globalEnabled ? '我准备好库库按了' : '我累了歇会');
+    speakGlobalChange(globalEnabled);
+  }, [globalEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function buildUtterance(text: string, s: SoundSettings): SpeechSynthesisUtterance {
+    const utt = new SpeechSynthesisUtterance(text);
     utt.lang = 'zh-CN';
-    utt.rate = 1.15;
-    window.speechSynthesis.speak(utt);
-  }, [globalEnabled]);
+    utt.volume = s.volume / 100;
+    // rate: -10..+10 → 0.5..1.5（中点 0 对应默认 1）
+    utt.rate = 1 + s.rate * 0.05;
+    // pitch: -10..+10 → 0..2（Web Speech API 原生属性，中点 0 对应默认 1）
+    utt.pitch = 1 + s.pitch * 0.1;
+    const voice = window.speechSynthesis.getVoices().find((v) => v.name === s.voiceName);
+    if (voice) utt.voice = voice;
+    return utt;
+  }
+
+  function speakGlobalChange(enabled: boolean) {
+    if (!('speechSynthesis' in window)) return;
+    const s = soundRef.current;
+    if (!s.enabled) return;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(buildUtterance(enabled ? s.startText : s.endText, s));
+  }
+
+  function previewSound(type: 'start' | 'end') {
+    if (!('speechSynthesis' in window)) return;
+    const s = soundRef.current;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(
+      buildUtterance(type === 'start' ? s.startText : s.endText, s),
+    );
+  }
+
+  function persistSound(patch: Partial<SoundSettings>) {
+    setSound((prev) => {
+      const next = { ...prev, ...patch };
+      soundRef.current = next;
+      settingsStore
+        .set(SOUND_KEY, next)
+        .then(() => settingsStore.save())
+        .catch(() => {});
+      return next;
+    });
+  }
+
+  async function handleToggleAutostart() {
+    if (togglingAutostart) return;
+    setTogglingAutostart(true);
+    try {
+      const next = await invoke<boolean>('toggle_autostart');
+      setSysInfo((prev) => ({ ...prev, autostart_enabled: next }));
+    } catch {
+      toast.error('切换开机自启失败');
+    } finally {
+      setTogglingAutostart(false);
+    }
+  }
 
   function persistCloseBehavior(v: CloseBehavior | null) {
     const previous = closeBehaviorPreference;
@@ -577,105 +670,123 @@ export default function PanelApp() {
     }
   }
 
+  async function handleInstallDriver() {
+    if (interceptionInstalled === 'pending_reboot') {
+      await confirm({
+        title: '请重启电脑',
+        description: (
+          <>
+            检测到游戏模式驱动处于「待重启」状态——上次安装或卸载尚未完成，
+            必须重启电脑后才能使用此驱动。
+          </>
+        ),
+        confirmText: '我已知晓',
+        cancelText: '稍后处理',
+      });
+      return;
+    }
+    const ok = await confirm({
+      title: '安装驱动',
+      description: (
+        <>
+          游戏模式需要安装 Interception 内核驱动。点击「安装」后将弹出 UAC
+          授权窗口，授权后控制台窗口会一闪而过即为安装完成。
+          <br />
+          <br />
+          <strong>安装完成后必须重启电脑，驱动才会生效。</strong>
+        </>
+      ),
+      confirmText: '安装',
+    });
+    if (!ok) return;
+    try {
+      await invoke('install_driver');
+    } catch (e) {
+      toast.error(`安装失败：${e}`);
+      return;
+    }
+    await confirm({
+      title: '请重启电脑',
+      description: (
+        <>
+          驱动安装程序已启动。如系统弹出「可能未正确安装此程序」提示，请点击「已正确安装此程序」。
+          <br />
+          <br />
+          <strong>安装完成后请重启电脑</strong>，重启后再次切换到游戏模式即可生效。
+        </>
+      ),
+      confirmText: '我已知晓',
+      cancelText: '稍后处理',
+    });
+  }
+
+  async function handleInstallDdHid() {
+    if (ddHidInstalled === 'pending_reboot') {
+      await confirm({
+        title: '请重启电脑',
+        description: (
+          <>
+            检测到究极HID 驱动处于「待重启」状态——上次卸载尚未由 PnP 完成清理。
+            请重启电脑后再尝试安装此驱动。
+          </>
+        ),
+        confirmText: '我已知晓',
+        cancelText: '稍后处理',
+      });
+      return;
+    }
+    const ok = await confirm({
+      title: '安装究极HID 驱动',
+      description: (
+        <>
+          究极HID 模式需要安装 ddxoft 提供的 WHQL 签名 HID 虚拟驱动。点击「安装」后将弹出 UAC
+          授权窗口，授权后会出现一个一闪而过的命令行窗口即为安装完成。
+          <br />
+          <br />
+          <strong>通常不需要重启即可生效。</strong>
+        </>
+      ),
+      confirmText: '安装',
+    });
+    if (!ok) return;
+    try {
+      const installResult = await invoke<{ pending_reboot: boolean }>('install_dd_hid_driver');
+      if (installResult.pending_reboot) {
+        await confirm({
+          title: '安装完成，建议重启电脑',
+          description: (
+            <>
+              究极HID 驱动已安装，但 Windows PnP 报告驱动文件已更新，建议重启电脑以确保完全生效。
+              <br />
+              <br />
+              驱动在重启前通常已可正常工作，可尝试直接切换；若遇到异常请重启后再试。
+            </>
+          ),
+          confirmText: '我已知晓',
+          cancelText: '稍后重启',
+        });
+      } else {
+        toast.success('究极HID 驱动已安装');
+      }
+    } catch (e) {
+      toast.error(`安装失败：${e}`);
+    }
+  }
+
   async function selectInputMode(target: InputMode) {
     if (switchingMode || target === inputMode) return;
     setSwitchingMode(true);
     try {
       // Interception 驱动：未安装则先安装并退出（要求重启电脑）
       if (target === 'interception' && interceptionInstalled !== 'installed') {
-        if (interceptionInstalled === 'pending_reboot') {
-          await confirm({
-            title: '请重启电脑',
-            description: (
-              <>
-                检测到游戏模式驱动处于「待重启」状态——上次安装或卸载尚未完成，
-                必须重启电脑后才能切换到此模式。
-              </>
-            ),
-            confirmText: '我已知晓',
-            cancelText: '稍后处理',
-          });
-          return;
-        }
-        const ok = await confirm({
-          title: '安装驱动',
-          description: (
-            <>
-              游戏模式需要安装 Interception 内核驱动。点击「安装」后将弹出 UAC
-              授权窗口，授权后控制台窗口会一闪而过即为安装完成。
-              <br />
-              <br />
-              <strong>安装完成后必须重启电脑，驱动才会生效。</strong>
-            </>
-          ),
-          confirmText: '安装',
-        });
-        if (!ok) return;
-        await invoke('install_driver');
-        await confirm({
-          title: '请重启电脑',
-          description: (
-            <>
-              驱动安装程序已启动。如系统弹出「可能未正确安装此程序」提示，请点击「已正确安装此程序」。
-              <br />
-              <br />
-              <strong>安装完成后请重启电脑</strong>，重启后再次切换到游戏模式即可生效。
-            </>
-          ),
-          confirmText: '我已知晓',
-          cancelText: '稍后处理',
-        });
+        await handleInstallDriver();
         return;
       }
 
       // DD-HID：未安装则先 PnP 安装（无需重启）
       if (target === 'dd_hid' && ddHidInstalled !== 'installed') {
-        if (ddHidInstalled === 'pending_reboot') {
-          await confirm({
-            title: '请重启电脑',
-            description: (
-              <>
-                检测到究极HID 驱动处于「待重启」状态——上次卸载尚未由 PnP 完成清理。
-                请重启电脑后再尝试切换到此模式。
-              </>
-            ),
-            confirmText: '我已知晓',
-            cancelText: '稍后处理',
-          });
-          return;
-        }
-        const ok = await confirm({
-          title: '安装究极HID 驱动',
-          description: (
-            <>
-              究极HID 模式需要安装 ddxoft 提供的 WHQL 签名 HID 虚拟驱动。点击「安装」后将弹出 UAC
-              授权窗口，授权后会出现一个一闪而过的命令行窗口即为安装完成。
-              <br />
-              <br />
-              <strong>通常不需要重启即可生效。</strong>
-            </>
-          ),
-          confirmText: '安装',
-        });
-        if (!ok) return;
-        const installResult = await invoke<{ pending_reboot: boolean }>('install_dd_hid_driver');
-        if (installResult.pending_reboot) {
-          await confirm({
-            title: '安装完成，建议重启电脑',
-            description: (
-              <>
-                究极HID 驱动已安装，但 Windows PnP 报告驱动文件已更新，建议重启电脑以确保完全生效。
-                <br />
-                <br />
-                驱动在重启前通常已可正常工作，可尝试直接切换；若遇到异常请重启后再试。
-              </>
-            ),
-            confirmText: '我已知晓',
-            cancelText: '稍后重启',
-          });
-        } else {
-          toast.success('究极HID 驱动已安装');
-        }
+        await handleInstallDdHid();
+        return;
       }
 
       // DD-HID 模式需要管理员：当前非管理员则提示重启
@@ -965,11 +1076,6 @@ export default function PanelApp() {
     else getCurrentWindow().hide();
   }
 
-  function handleShowAgreement() {
-    setMenuOpen(false);
-    setShowAgreement(true);
-  }
-
   function handleShowSettings(tab: SettingsTab = 'general') {
     setMenuOpen(false);
     setProfileMenuOpen(false);
@@ -986,21 +1092,6 @@ export default function PanelApp() {
         toast.warning('检查更新失败，请检查网络连接后重试');
       }
     });
-  }
-
-  function handleShowUpdateNotice() {
-    setMenuOpen(false);
-    if (updateNotice) {
-      setShowUpdateNotice(true);
-    } else {
-      updateDownloadFailedRef.current = false;
-      invoke('check_update').catch(() => {
-        setUpdateProgress(null);
-        if (!updateDownloadFailedRef.current) {
-          toast.warning('检查更新失败，请检查网络连接后重试');
-        }
-      });
-    }
   }
 
   function handleShowAbout() {
@@ -1092,7 +1183,9 @@ export default function PanelApp() {
         <img className="header-icon" src={iconUrl} alt="" data-tauri-drag-region />
         <h1 data-tauri-drag-region>
           {APP_NAME}
-          {appVersion ? ` v${appVersion}` : ''}
+          {hotkeys.panel_toggle && (
+            <Kbd label="显隐">{keyLabel(hotkeys.panel_toggle)}</Kbd>
+          )}
         </h1>
         <div className="window-controls">
           <button
@@ -1118,93 +1211,26 @@ export default function PanelApp() {
       {updateProgress && <UpdateProgressBar progress={updateProgress} />}
 
       <section className="rules-section">
-        {/* 热键设置区：属于规则配置，跟着配置文件切换 */}
-        <div className="hotkey-section">
-          {/* 全局开关 */}
-          <div className="hotkey-item">
-            <span className="hotkey-item-label">全局开关</span>
-            <div className="hotkey-item-keys">
-              <KeyCapture
-                value={hotkeys.global_toggle}
-                onChange={(k) => {
-                  void ensureWritableProfile();
-                  setHotkeys((prev) => ({
-                    ...prev,
-                    global_toggle: k,
-                    global_stop: k === null ? null : prev.global_stop,
-                  }));
-                }}
-                nullable
-                placeholder="未设置"
-                conflict={severityForKey(conflicts, hotkeys.global_toggle)}
-              />
-              {/* 停止键仅在开启键已设置时显示。
-                  导入时若来源配置只有 stop 无 toggle，gaibang_parse_hotkeys 也不会产生
-                  stop-only 结构（因为 toggle==0 时 global_toggle=None 而 global_stop 不会被单独保留），
-                  故此处无需额外处理 stop-only 场景。 */}
-              {hotkeys.global_toggle && (
-                <>
-                  <span className="hotkey-item-sep">停止</span>
-                  <KeyCapture
-                    value={hotkeys.global_stop}
-                    onChange={(k) => {
-                      void ensureWritableProfile();
-                      setHotkeys((prev) => ({ ...prev, global_stop: k }));
-                    }}
-                    nullable
-                    placeholder="同开启键"
-                    conflict={severityForKey(conflicts, hotkeys.global_stop)}
-                  />
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* 面板显隐 */}
-          <div className="hotkey-item">
-            <span className="hotkey-item-label">面板显隐</span>
-            <div className="hotkey-item-keys">
-              <KeyCapture
-                value={hotkeys.panel_toggle}
-                onChange={(k) => {
-                  void ensureWritableProfile();
-                  setHotkeys((prev) => ({ ...prev, panel_toggle: k }));
-                }}
-                nullable
-                placeholder="未设置"
-                conflict={severityForKey(conflicts, hotkeys.panel_toggle)}
-              />
-            </div>
-          </div>
-        </div>
-
-        <div className="tab-bar">
-          {(['hold', 'toggle'] as BurstMode[]).map((mode) => {
+        <Tabs
+          tabs={(['hold', 'toggle'] as BurstMode[]).map((mode) => {
             const groupRules = rules.filter((r) => r.mode === mode);
             const active = groupRules.filter((r) => r.enabled).length;
-            const title = mode === 'hold' ? '按压连发' : '切换连发';
-            return (
-              <button
-                key={mode}
-                className={`tab${activeTab === mode ? ' active' : ''}`}
-                onClick={() => {
-                  setActiveTab(mode);
-                  settingsStore
-                    .set(ACTIVE_TAB_KEY, mode)
-                    .then(() => settingsStore.save())
-                    .catch(() => {
-                      toast.warning('保存当前标签页失败');
-                    });
-                }}
-              >
-                <span className="tab-title">{title}</span>
-                <span className="tab-count">
-                  {active}/{groupRules.length}
-                </span>
-              </button>
-            );
+            return {
+              id: mode,
+              label: mode === 'hold' ? '按压连发' : '切换连发',
+              badge: `${active}/${groupRules.length}`,
+            };
           })}
-        </div>
+          active={activeTab}
+          grow
+          onChange={(mode) => {
+            setActiveTab(mode);
+            settingsStore
+              .set(ACTIVE_TAB_KEY, mode)
+              .then(() => settingsStore.save())
+              .catch(() => toast.warning('保存当前标签页失败'));
+          }}
+        />
 
         {(['hold', 'toggle'] as BurstMode[]).map((mode) => {
           if (mode !== activeTab) return null;
@@ -1366,7 +1392,6 @@ export default function PanelApp() {
         </Button>
         <div className="footer-controls">
           <div className="footer-control">
-            <span className="footer-label">输入模式</span>
             <Button
               ref={modeBtnRef}
               variant="outline"
@@ -1388,6 +1413,12 @@ export default function PanelApp() {
               tone={globalEnabled ? 'primary' : 'neutral'}
               size="sm"
               loading={togglingGlobal}
+              kbd={(() => {
+                const k = globalEnabled
+                  ? (hotkeys.global_stop ?? hotkeys.global_toggle)
+                  : hotkeys.global_toggle;
+                return k ? keyLabel(k) : undefined;
+              })()}
               onClick={toggleGlobal}
             >
               {globalEnabled ? '已启用' : '已禁用'}
@@ -1452,10 +1483,14 @@ export default function PanelApp() {
                 style={{ width: 6, height: 6, borderRadius: '50%', background: '#6c4de6' }}
               />
             ) : undefined,
-            onClick: handleShowUpdateNotice,
+            onClick: () => {
+              setMenuOpen(false);
+              if (updateNotice) setShowUpdateNotice(true);
+            },
           },
-          { label: '用户协议', onClick: handleShowAgreement },
-          { label: '环境修复', onClick: handleShowRepair },
+          { label: '用户协议', onClick: () => { setMenuOpen(false); setShowAgreement(true); } },
+          { type: 'divider' },
+          { label: '诊断修复', onClick: handleShowRepair },
           { label: '关于', onClick: handleShowAbout },
         ]}
       />
@@ -1472,6 +1507,10 @@ export default function PanelApp() {
           elevated={elevated}
           interceptionInstalled={interceptionInstalled}
           ddHidInstalled={ddHidInstalled}
+          autostartEnabled={sysInfo.autostart_enabled}
+          togglingAutostart={togglingAutostart}
+          sound={sound}
+          availableVoices={availableVoices}
           profiles={profileList}
           profileName={profileName}
           profileCount={profileList.length}
@@ -1481,8 +1520,21 @@ export default function PanelApp() {
             setShowSettings(false);
             void selectInputMode(mode);
           }}
+          hotkeys={hotkeys}
+          hotkeyConflicts={{
+            global_toggle: severityForKey(conflicts, hotkeys.global_toggle),
+            global_stop: severityForKey(conflicts, hotkeys.global_stop),
+            panel_toggle: severityForKey(conflicts, hotkeys.panel_toggle),
+          }}
+          onHotkeyChange={(patch) => {
+            void ensureWritableProfile();
+            setHotkeys((prev) => ({ ...prev, ...patch }));
+          }}
           onToggleGlobal={() => void toggleGlobal()}
           onSetCloseBehavior={persistCloseBehavior}
+          onToggleAutostart={() => void handleToggleAutostart()}
+          onSoundChange={persistSound}
+          onPreviewSound={previewSound}
           onCreateProfile={() => {
             setShowSettings(false);
             void handleCreateProfile();
@@ -1512,10 +1564,6 @@ export default function PanelApp() {
           info={
             {
               appVersion,
-              elevated,
-              interception_installed: interceptionInstalled,
-              dd_hid_installed: ddHidInstalled,
-              input_mode: inputMode,
               platform: sysInfo.platform,
               os_family: sysInfo.os_family,
               os_version: sysInfo.os_version,
@@ -1525,36 +1573,52 @@ export default function PanelApp() {
               install_path: sysInfo.install_path,
               log_dir: sysInfo.log_dir,
               app_data_dir: sysInfo.app_data_dir,
-              autostart_enabled: sysInfo.autostart_enabled,
               resources_ok: sysInfo.resources_ok,
               missing_resources: sysInfo.missing_resources,
-              global_enabled: globalEnabled,
-              rules_total: rules.length,
-              rules_enabled: rules.filter((r) => r.enabled).length,
-              active_rule_ids: Array.from(activeRuleIds),
             } satisfies AboutDialogInfo
           }
+          updateNotice={updateNotice}
+          checkingUpdate={updateProgress !== null && !updateProgress.done}
           onClose={() => setShowAbout(false)}
-          onUninstallInterception={handleUninstallDriver}
-          onUninstallDdHid={handleUninstallDdHid}
+          onCheckUpdate={() => {
+            setShowAbout(false);
+            handleCheckUpdate();
+          }}
+          onShowUpdateNotice={() => {
+            setShowAbout(false);
+            if (updateNotice) setShowUpdateNotice(true);
+          }}
+          onShowAgreement={() => {
+            setShowAbout(false);
+            setShowAgreement(true);
+          }}
           onOpenDir={(kind) => {
             invoke('open_app_dir', { kind }).catch((err) => {
               toast.warning(`打开目录失败：${err}`);
             });
           }}
-          onCopied={() => toast.success('已复制状态信息')}
+          onCopied={() => toast.success('已复制环境信息')}
           onCopyFailed={(e) => toast.error(`复制失败：${e}`)}
         />
       </Overlay>
 
       <Overlay open={showRepair} onClose={() => setShowRepair(false)}>
         <RepairDialog
+          elevated={elevated}
+          autostartEnabled={sysInfo.autostart_enabled}
+          inputMode={inputMode}
+          interceptionInstalled={interceptionInstalled}
+          ddHidInstalled={ddHidInstalled}
           onClose={() => setShowRepair(false)}
           onToast={(kind, msg) => {
             if (kind === 'success') toast.success(msg);
             else if (kind === 'warn') toast.warning(msg);
             else toast.error(msg);
           }}
+          onInstallDriver={() => void handleInstallDriver()}
+          onUninstallDriver={() => void handleUninstallDriver()}
+          onInstallDdHid={() => void handleInstallDdHid()}
+          onUninstallDdHid={() => void handleUninstallDdHid()}
         />
       </Overlay>
 

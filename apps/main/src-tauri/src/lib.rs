@@ -20,7 +20,7 @@ use bootstrap::{
     update::{check_for_updates, UpdateLock},
 };
 use commands::{
-    app::{agree_license, check_update, exit_app, needs_agreement},
+    app::{agree_license, check_update, exit_app, needs_agreement, toggle_autostart},
     ddhid_diagnostic::export_dd_hid_diagnostic_report,
     driver::{
         install_dd_hid_driver, install_driver, is_dd_hid_driver_installed, is_driver_installed,
@@ -102,6 +102,7 @@ pub fn run() {
             agree_license,
             check_update,
             exit_app,
+            toggle_autostart,
             log_from_frontend,
             open_app_dir,
             get_app_status,
