@@ -627,6 +627,9 @@ export default function PanelApp() {
             <>
               究极HID 模式需要安装 ddxoft 提供的 WHQL 签名 HID 虚拟驱动。点击「安装」后将弹出 UAC
               授权窗口，授权后会出现一个一闪而过的命令行窗口即为安装完成。
+              <br />
+              <br />
+              <strong>通常不需要重启即可生效。</strong>
             </>
           ),
           confirmText: '安装',
