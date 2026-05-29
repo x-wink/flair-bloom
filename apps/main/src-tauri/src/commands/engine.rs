@@ -1,7 +1,7 @@
 //! 规则 CRUD + 输入模式切换。驱动管理已迁至 [`super::driver`]。
 
 use crate::engine::BurstEngine;
-use qzh_profile::{BurstRule, MAX_RULES};
+use qzh_profile::{BurstRule, Hotkeys, MAX_RULES};
 use std::sync::{atomic::Ordering, Arc};
 #[allow(unused_imports)]
 use tauri::{AppHandle, Manager, State};
@@ -11,11 +11,20 @@ pub struct EngineState(pub Arc<BurstEngine>);
 #[tauri::command]
 pub fn set_global_enabled(app: AppHandle, state: State<EngineState>, enabled: bool) {
     state.0.global_enabled.store(enabled, Ordering::SeqCst);
+    if !enabled {
+        state.0.cancel_all_loops();
+    }
     if let Some(tray) = app.tray_by_id("main") {
         if let Ok(menu) = crate::tray::build_menu(&app, enabled) {
             let _ = tray.set_menu(Some(menu));
         }
     }
+}
+
+/// 运行时更新全局热键（不写盘，写盘由 `save_profile` 负责）。
+#[tauri::command]
+pub fn set_global_hotkeys(state: State<EngineState>, hotkeys: Hotkeys) {
+    state.0.set_hotkeys(hotkeys);
 }
 
 #[tauri::command]

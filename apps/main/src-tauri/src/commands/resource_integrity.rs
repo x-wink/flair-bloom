@@ -3,10 +3,12 @@
 use std::path::Path;
 
 use ::resource_integrity as generic_resource_integrity;
+#[allow(unused_imports)]
 pub use generic_resource_integrity::{
     sha256_file_hex, ResourceHealth, ResourceIssue, ResourceIssueKind, ResourceSpec,
 };
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy)]
 pub struct ExpectedResource {
     pub rel: &'static str,
@@ -15,6 +17,7 @@ pub struct ExpectedResource {
     pub sha256: &'static str,
 }
 
+#[allow(dead_code)]
 pub const EXPECTED_RESOURCES: &[ExpectedResource] = &[
     ExpectedResource {
         rel: "install-interception.exe",
@@ -54,6 +57,7 @@ pub const EXPECTED_RESOURCES: &[ExpectedResource] = &[
     },
 ];
 
+#[allow(dead_code)]
 pub fn check_resources(resources_dir: &Path) -> ResourceHealth {
     let specs = EXPECTED_RESOURCES
         .iter()
@@ -66,6 +70,7 @@ pub fn check_resources(resources_dir: &Path) -> ResourceHealth {
     generic_resource_integrity::check_resources(resources_dir, &specs)
 }
 
+#[allow(dead_code)]
 pub fn issue_label(issue: &ResourceIssue) -> String {
     let label = label_for_rel(issue.rel);
     match &issue.kind {

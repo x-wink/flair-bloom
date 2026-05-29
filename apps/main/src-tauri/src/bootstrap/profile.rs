@@ -25,6 +25,7 @@ pub fn load_or_init_profile(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
     match active_path {
         Some(path) => match load_profile_from_path(&path, &profiles_dir) {
             Ok(profile) => {
+                engine.set_hotkeys(profile.hotkeys);
                 engine.set_rules(profile.rules);
                 info!("已加载配置: {}", path);
             }

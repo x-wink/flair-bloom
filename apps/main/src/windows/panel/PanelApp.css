@@ -276,6 +276,48 @@ body {
   gap: var(--fb-space-3);
 }
 
+/* ── 热键设置区（规则区，tab 上方）──────────────────────────── */
+.hotkey-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fb-space-2) var(--fb-space-6);
+  padding-bottom: var(--fb-space-4);
+  margin-bottom: var(--fb-space-2);
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  flex-shrink: 0;
+}
+
+.hotkey-item {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+}
+
+.hotkey-item-label {
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-text-weak);
+  white-space: nowrap;
+}
+
+.hotkey-item-keys {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+}
+
+.hotkey-item-sep {
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+/* 空值状态（未设置）下的 KeyCapture */
+.key-capture-empty {
+  opacity: 0.55;
+}
+
 .empty {
   color: var(--fb-text-faint);
   text-align: center;

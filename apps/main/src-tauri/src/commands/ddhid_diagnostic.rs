@@ -1,11 +1,14 @@
 //! DD-HID diagnostic report export.
 
+#[allow(unused_imports)]
 use crate::commands::repair::{DiagnosticItem, ItemStatus, RepairReport, Severity};
+#[allow(unused_imports)]
 use std::fmt::Write as _;
 use tauri::AppHandle;
 #[allow(unused_imports)]
 use tauri::Manager;
 
+#[allow(dead_code)]
 const DIAGNOSE_SCRIPT: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../scripts/diagnose-ddhid.ps1"

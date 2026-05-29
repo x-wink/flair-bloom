@@ -28,8 +28,9 @@ use commands::{
     },
     engine::{
         get_active_rules, get_global_enabled, get_input_mode, get_rules, set_global_enabled,
-        set_input_mode, set_rules, EngineState,
+        set_global_hotkeys, set_input_mode, set_rules, EngineState,
     },
+    import_profile::{import_external_config, preview_import, scan_import_configs},
     log::{log_from_frontend, open_app_dir},
     profile::{
         delete_profile, fork_active_profile, get_active_profile_path, init_default_profile,
@@ -76,6 +77,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             set_global_enabled,
             get_global_enabled,
+            set_global_hotkeys,
             set_rules,
             get_rules,
             get_active_rules,
@@ -110,8 +112,40 @@ pub fn run() {
             repair_corrupted_profiles,
             repair_clean_logs,
             export_dd_hid_diagnostic_report,
+            scan_import_configs,
+            preview_import,
+            import_external_config,
         ])
         .setup(move |app| {
+            // 全局热键回调：同步托盘菜单与前端开关状态
+            {
+                let handle = app.handle().clone();
+                burst_engine.set_on_global_changed(move |enabled| {
+                    if let Some(tray) = handle.tray_by_id("main") {
+                        if let Ok(menu) = crate::tray::build_menu(&handle, enabled) {
+                            let _ = tray.set_menu(Some(menu));
+                        }
+                    }
+                    let _ = handle.emit("global-enabled-changed", enabled);
+                });
+            }
+
+            // 面板显隐热键回调
+            {
+                let handle = app.handle().clone();
+                burst_engine.set_on_panel_toggle(move || {
+                    if let Some(win) = handle.get_webview_window("panel") {
+                        let visible = win.is_visible().unwrap_or(false);
+                        if visible {
+                            let _ = win.hide();
+                        } else {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                });
+            }
+
             let need_agreement = check_agreement(app.handle());
             load_or_init_profile(app.handle(), &burst_engine);
             init_input_backend(app.handle());

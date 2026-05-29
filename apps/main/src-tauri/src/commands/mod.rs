@@ -2,6 +2,7 @@ pub mod app;
 pub mod ddhid_diagnostic;
 pub mod driver;
 pub mod engine;
+pub mod import_profile;
 pub mod log;
 pub mod profile;
 pub mod repair;

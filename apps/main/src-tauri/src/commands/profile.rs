@@ -23,14 +23,14 @@ pub const DEFAULT_PROFILE_NAME: &str = "defults";
 /// store 中存储「当前激活配置文件绝对路径」的键名。
 pub const ACTIVE_PATH_KEY: &str = "activeProfilePath";
 
-fn profiles_dir(app: &AppHandle) -> Result<PathBuf, String> {
+pub(crate) fn profiles_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map(|p| p.join("profiles"))
         .map_err(|e| format!("无法获取应用数据目录: {e}"))
 }
 
-fn now_secs() -> u64 {
+pub(crate) fn now_secs() -> u64 {
     // 时钟早于 UNIX epoch 是 invariant 违反（比 1970 还早或被恶意回拨），
     // 静默返回 0 会导致 created_at/updated_at 错乱、list_profiles 排序失真，
     // 故选择显式 panic 让上层 panic hook 记录现场。
@@ -54,7 +54,10 @@ fn compute_aad() -> Vec<u8> {
     aad
 }
 
-fn write_profile_file_to_path(file_path: &Path, profile: &Profile) -> Result<String, String> {
+pub(crate) fn write_profile_file_to_path(
+    file_path: &Path,
+    profile: &Profile,
+) -> Result<String, String> {
     let json = serde_json::to_vec(profile).map_err(|e| format!("序列化失败: {e}"))?;
     let aad = compute_aad();
     let (ciphertext, nonce) = aes::encrypt(&json, &aad).map_err(|e| e.to_string())?;
@@ -113,7 +116,7 @@ fn profile_path_for_name(dir: &Path, name: &str) -> PathBuf {
     dir.join(format!("{}.qzh", sanitize_filename(name)))
 }
 
-fn set_active_path(app: &AppHandle, path: &str) {
+pub(crate) fn set_active_path(app: &AppHandle, path: &str) {
     if let Ok(store) = app.store(crate::STORE_PATH) {
         store.set(ACTIVE_PATH_KEY, serde_json::json!(path));
         let _ = store.save();
@@ -148,6 +151,7 @@ pub fn save_profile(
     profile.schema_version = CURRENT_SCHEMA_VERSION;
 
     let rules = profile.rules.clone();
+    let hotkeys = profile.hotkeys.clone();
     let path = write_profile_file_to_path(&file_path, &profile)?;
 
     // 更新 store 中记录的活跃配置路径
@@ -157,6 +161,7 @@ pub fn save_profile(
     }
 
     state.0.set_rules(rules);
+    state.0.set_hotkeys(hotkeys);
     Ok(path)
 }
 
@@ -205,6 +210,7 @@ pub fn load_profile(
     profile.validate().map_err(|e| e.to_string())?;
 
     state.0.set_rules(profile.rules.clone());
+    state.0.set_hotkeys(profile.hotkeys.clone());
     set_active_path(&app, &safe_path.to_string_lossy());
     Ok(profile)
 }
@@ -309,8 +315,10 @@ pub(crate) fn create_default_profile(
     let file_path = dir.join(format!("{DEFAULT_PROFILE_NAME}.qzh"));
 
     let rules = profile.rules.clone();
+    let hotkeys = profile.hotkeys.clone();
     let path = write_profile_file_to_path(&file_path, &profile)?;
     engine.set_rules(rules);
+    engine.set_hotkeys(hotkeys);
 
     if let Ok(store) = app.store(crate::STORE_PATH) {
         store.set(ACTIVE_PATH_KEY, serde_json::json!(path));
@@ -428,6 +436,7 @@ pub fn delete_profile(
     let profile = match read_profile_from_file(&default_path) {
         Ok(p) => {
             state.0.set_rules(p.rules.clone());
+            state.0.set_hotkeys(p.hotkeys.clone());
             set_active_path(&app, &default_path.to_string_lossy());
             p
         }
@@ -494,7 +503,7 @@ pub struct ForkResult {
 }
 
 /// 在 `dir` 下挑一个不冲突的文件名：base、base 2、base 3 ...
-fn pick_unique_name(dir: &Path, base: &str) -> (String, PathBuf) {
+pub(crate) fn pick_unique_name(dir: &Path, base: &str) -> (String, PathBuf) {
     let first = profile_path_for_name(dir, base);
     if !first.exists() {
         return (base.to_string(), first);

@@ -1,7 +1,7 @@
 use qzh_profile::key_id::KeyId;
 #[cfg(windows)]
 use qzh_profile::key_id::MouseButton;
-use qzh_profile::profile::{BurstMode, BurstRule};
+use qzh_profile::profile::{BurstMode, BurstRule, Hotkeys};
 #[cfg(windows)]
 use std::sync::{RwLock, Weak};
 use std::{
@@ -48,6 +48,8 @@ type ActiveLoops = Arc<
         >,
     >,
 >;
+type GlobalChangedCb = Arc<Mutex<Option<Box<dyn Fn(bool) + Send + Sync>>>>;
+type PanelToggleCb = Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
 
 /// 关键路径锁兜底：若前一持锁者 panic 导致 Mutex 中毒,强行复活并继续。
 /// 按键工具最差故障是键盘卡死,值得给一层硬兜底；连发线程已被 catch_unwind
@@ -62,6 +64,11 @@ pub struct BurstEngine {
     /// rule_id -> (cancel_flag, thread_handle, target_key, join_handle)
     active_loops: ActiveLoops,
     toggle_states: Arc<Mutex<HashMap<String, bool>>>,
+    hotkeys: Arc<Mutex<Hotkeys>>,
+    /// 全局开关状态被热键改变时调用（由 app 层注册，用于同步托盘与前端）。
+    on_global_changed: GlobalChangedCb,
+    /// 面板显隐热键触发时调用。
+    on_panel_toggle: PanelToggleCb,
 }
 
 impl Default for BurstEngine {
@@ -77,10 +84,19 @@ impl BurstEngine {
             rules: Arc::new(Mutex::new(Vec::new())),
             active_loops: Arc::new(Mutex::new(HashMap::new())),
             toggle_states: Arc::new(Mutex::new(HashMap::new())),
+            hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
+            on_global_changed: Arc::new(Mutex::new(None)),
+            on_panel_toggle: Arc::new(Mutex::new(None)),
         }
     }
 
-    pub fn set_rules(&self, rules: Vec<BurstRule>) {
+    pub fn set_hotkeys(&self, hotkeys: Hotkeys) {
+        *revive(self.hotkeys.lock()) = hotkeys;
+    }
+
+    /// 取消所有正在运行的连发循环并清空 toggle 状态。
+    /// 在全局开关关闭时调用，防止连发线程继续注入按键。
+    pub fn cancel_all_loops(&self) {
         let mut loops = revive(self.active_loops.lock());
         for (cancel, thread_handle, _, _) in loops.values() {
             cancel.store(true, Ordering::SeqCst);
@@ -91,8 +107,21 @@ impl BurstEngine {
         revive(self.toggle_states.lock()).clear();
         #[cfg(windows)]
         clear_pending_injections();
+    }
+
+    /// 注册全局开关热键触发时的回调（供 app 层同步托盘与前端事件）。
+    pub fn set_on_global_changed(&self, f: impl Fn(bool) + Send + Sync + 'static) {
+        *revive(self.on_global_changed.lock()) = Some(Box::new(f));
+    }
+
+    /// 注册面板显隐热键触发时的回调。
+    pub fn set_on_panel_toggle(&self, f: impl Fn() + Send + Sync + 'static) {
+        *revive(self.on_panel_toggle.lock()) = Some(Box::new(f));
+    }
+
+    pub fn set_rules(&self, rules: Vec<BurstRule>) {
+        self.cancel_all_loops();
         *revive(self.rules.lock()) = rules;
-        // loops 在此 drop，持锁直到 rules 更新完毕，消除 TOCTOU 窗口
     }
 
     pub fn get_rules(&self) -> Vec<BurstRule> {
@@ -106,6 +135,40 @@ impl BurstEngine {
     }
 
     pub fn on_key_press(&self, key: KeyId) {
+        // 全局热键检测：优先于规则处理，且不受 global_enabled 当前状态限制
+        {
+            let hk = revive(self.hotkeys.lock());
+            let start = hk.global_toggle;
+            let stop = hk.global_stop.or(start); // None 时停止键 = 开启键（切换模式）
+            let panel = hk.panel_toggle;
+            let enabled = self.global_enabled.load(Ordering::SeqCst);
+
+            if panel == Some(key) {
+                drop(hk);
+                if let Some(cb) = revive(self.on_panel_toggle.lock()).as_ref() {
+                    cb();
+                }
+                return;
+            }
+            if start == Some(key) && !enabled {
+                drop(hk);
+                self.global_enabled.store(true, Ordering::SeqCst);
+                if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
+                    cb(true);
+                }
+                return;
+            }
+            if stop == Some(key) && enabled {
+                drop(hk);
+                self.global_enabled.store(false, Ordering::SeqCst);
+                self.cancel_all_loops();
+                if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
+                    cb(false);
+                }
+                return;
+            }
+        }
+
         if !self.global_enabled.load(Ordering::SeqCst) {
             return;
         }

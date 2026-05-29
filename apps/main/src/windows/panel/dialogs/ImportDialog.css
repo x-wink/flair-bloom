@@ -1,0 +1,204 @@
+.import-modal {
+  width: 360px;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.import-section {
+  margin-bottom: var(--fb-space-6);
+}
+
+.import-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: var(--fb-fs-xs);
+  font-weight: var(--fb-fw-semibold);
+  color: var(--fb-text-weak);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: var(--fb-space-2);
+}
+
+.rescan-btn {
+  background: none;
+  border: none;
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-primary);
+  cursor: pointer;
+  padding: 0 var(--fb-space-1);
+  opacity: 0.85;
+}
+.rescan-btn:hover:not(:disabled) {
+  opacity: 1;
+}
+.rescan-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* 扫描结果列表 */
+.found-list {
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-md);
+  overflow: hidden;
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+}
+
+.found-empty {
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+  padding: var(--fb-space-3) var(--fb-space-4);
+  margin: 0;
+}
+.found-empty.scanning {
+  animation: pulse 1.2s ease infinite;
+}
+
+.found-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: var(--fb-space-3) var(--fb-space-4);
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--fb-border);
+  cursor: pointer;
+  transition: background var(--fb-duration-fast);
+}
+.found-item:last-child {
+  border-bottom: none;
+}
+.found-item:hover {
+  background: var(--fb-bg-hover);
+}
+.found-item.selected {
+  background: color-mix(in srgb, var(--fb-primary) 12%, transparent);
+}
+
+.found-app {
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-primary);
+  font-weight: var(--fb-fw-semibold);
+}
+.found-name {
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-text);
+  font-weight: var(--fb-fw-medium);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.found-path {
+  font-size: 10px;
+  color: var(--fb-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 手动路径 */
+.custom-dir-row {
+  display: flex;
+  gap: var(--fb-space-2);
+}
+
+.custom-dir-input {
+  flex: 1;
+  font-size: var(--fb-fs-sm);
+  padding: var(--fb-space-2) var(--fb-space-3);
+  background: var(--fb-input-bg);
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-sm);
+  color: var(--fb-text);
+  outline: none;
+  min-width: 0;
+}
+.custom-dir-input:focus {
+  border-color: var(--fb-primary);
+}
+
+/* 预览区 */
+.import-preview-section {
+  background: var(--fb-bg-subtle, color-mix(in srgb, var(--fb-surface) 60%, transparent));
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-md);
+  padding: var(--fb-space-4);
+}
+
+.import-preview-error {
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-error, #e05050);
+  margin: 0;
+}
+
+.preview-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--fb-space-1) var(--fb-space-4);
+  align-items: baseline;
+  margin-bottom: var(--fb-space-4);
+}
+.preview-label {
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+  white-space: nowrap;
+}
+.preview-value {
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-text);
+}
+.preview-warn {
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-warning, #d97706);
+  margin-left: var(--fb-space-2);
+}
+
+/* 配置名称输入 */
+.profile-name-row {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-3);
+}
+.profile-name-label {
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.profile-name-input {
+  flex: 1;
+  font-size: var(--fb-fs-sm);
+  padding: var(--fb-space-2) var(--fb-space-3);
+  background: var(--fb-input-bg);
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-sm);
+  color: var(--fb-text);
+  outline: none;
+  min-width: 0;
+}
+.profile-name-input:focus {
+  border-color: var(--fb-primary);
+}
+
+/* 导入错误 */
+.import-error {
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-error, #e05050);
+  margin: 0 0 var(--fb-space-4);
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}

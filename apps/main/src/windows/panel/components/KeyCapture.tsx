@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './KeyCapture.css';
 
 /** 鼠标按钮枚举（与 Rust 端 `MouseButton` 共享 wire format）。 */
@@ -271,16 +271,30 @@ function mouseButtonFromEvent(button: number): MouseButton | null {
 }
 
 interface Props {
-  value: KeyId;
-  onChange: (key: KeyId) => void;
+  value: KeyId | null;
+  onChange: (key: KeyId | null) => void;
+  /** 为 true 时，捕获中按 Esc 清空按键而非取消捕获。 */
+  nullable?: boolean;
+  placeholder?: string;
 }
 
-export default function KeyCapture({ value, onChange }: Props) {
+export default function KeyCapture({ value, onChange, nullable, placeholder }: Props) {
   const [capturing, setCapturing] = useState(false);
   // 在 capturing 状态下捕获到鼠标按键后，紧随其后的 onClick 不应重新进入
   // capturing；用 ref 在事件序列内传递这个一次性标记。
   const justCaptured = useRef(false);
+  // 捕获到鼠标右键后抑制紧随的 contextmenu，避免误触清除
+  const suppressNextContextMenu = useRef(false);
 
+  // 捕获状态 5 秒无操作自动退出，避免忘记取消
+  useEffect(() => {
+    if (!capturing) return;
+    const timer = setTimeout(() => setCapturing(false), 5000);
+    return () => clearTimeout(timer);
+  }, [capturing]);
+
+  // Esc 是合法的可绑定按键（VK_ESCAPE = 0x1B），捕获时按 Esc 会把它绑定为热键。
+  // 清除绑定的方式是右键点击已设置的按键（非捕获状态下触发 contextmenu → onChange(null)）。
   function handleKeyDown(e: React.KeyboardEvent) {
     e.preventDefault();
     const vk = BROWSER_VK[e.code];
@@ -299,18 +313,26 @@ export default function KeyCapture({ value, onChange }: Props) {
     // 只有左键按下会派发后续 onClick，需要被 justCaptured 拦掉避免立刻重新进入
     // capturing；右键 / 中键 / 侧键不派发 click，留 ref=true 会污染下次左键点击。
     if (e.button === 0) justCaptured.current = true;
+    if (e.button === 2) suppressNextContextMenu.current = true;
     onChange(mouseKey(btn));
     setCapturing(false);
   }
 
   return (
     <button
-      className={`key-capture${capturing ? ' capturing' : ''}`}
+      className={`key-capture${capturing ? ' capturing' : ''}${!value ? ' key-capture-empty' : ''}`}
       onKeyDown={capturing ? handleKeyDown : undefined}
       onMouseDown={capturing ? handleMouseDown : undefined}
-      // 阻止右键弹出原生菜单，方便录入鼠标右键
+      // 非捕获状态下右键清除绑定；捕获右键后抑制紧随的 contextmenu 避免误清除
       onContextMenu={(e) => {
-        if (capturing) e.preventDefault();
+        e.preventDefault();
+        if (suppressNextContextMenu.current) {
+          suppressNextContextMenu.current = false;
+          return;
+        }
+        if (!capturing && nullable && value) {
+          onChange(null);
+        }
       }}
       onClick={() => {
         if (justCaptured.current) {
@@ -321,7 +343,7 @@ export default function KeyCapture({ value, onChange }: Props) {
       }}
       onBlur={() => setCapturing(false)}
     >
-      {capturing ? '按下按键…' : keyLabel(value)}
+      {capturing ? '按下按键…' : value ? keyLabel(value) : (placeholder ?? '—')}
     </button>
   );
 }

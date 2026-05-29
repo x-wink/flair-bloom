@@ -79,11 +79,20 @@ pub enum BurstMode {
     Toggle,
 }
 
-/// 全局热键映射。当前仅支持「全局开关」一个槽位。
+/// 全局热键映射。
+///
+/// 当 `global_stop` 为 `None` 时，`global_toggle` 兼作切换键（按一下开，再按一下关）。
+/// 当两者不同时，`global_toggle` 只负责开启，`global_stop` 只负责关闭。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Hotkeys {
-    /// 全局连发引擎开关绑定的按键。`None` 表示未绑定。
+    /// 全局开启热键（`None` 表示未绑定）。
     pub global_toggle: Option<KeyId>,
+    /// 全局停止热键；`None` 时与 `global_toggle` 共用（切换模式）。
+    #[serde(default)]
+    pub global_stop: Option<KeyId>,
+    /// 面板显示/隐藏热键。
+    #[serde(default)]
+    pub panel_toggle: Option<KeyId>,
 }
 
 /// 高级选项。当前仅含日志级别，未来可扩展。

@@ -19,6 +19,7 @@ import UpdateProgressBar, { type UpdateDownloadProgress } from './components/Upd
 import Button from './components/Button';
 import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
+import ImportDialog from './dialogs/ImportDialog';
 import RepairDialog from './dialogs/RepairDialog';
 import UpdateNoticeDialog, { type UpdateNoticeInfo } from './dialogs/UpdateNoticeDialog';
 import './PanelApp.css';
@@ -88,7 +89,7 @@ interface Profile {
   schema_version: number;
   meta: ProfileMeta;
   rules: BurstRule[];
-  hotkeys: { global_toggle: KeyId | null };
+  hotkeys: { global_toggle: KeyId | null; global_stop?: KeyId | null; panel_toggle?: KeyId | null };
   advanced: { log_level: string };
 }
 
@@ -127,10 +128,12 @@ function buildProfileMenu(args: {
   isDefault: boolean;
   onSwitch: (path: string) => void;
   onCreate: () => void;
+  onImport: () => void;
   onRename: () => void;
   onDelete: () => void;
 }): ContextMenuItem[] {
-  const { profiles, activeName, isDefault, onSwitch, onCreate, onRename, onDelete } = args;
+  const { profiles, activeName, isDefault, onSwitch, onCreate, onImport, onRename, onDelete } =
+    args;
   const items: ContextMenuItem[] = profiles.map((p) => ({
     label: p.meta.name === DEFAULT_PROFILE_NAME ? '默认配置' : p.meta.name,
     subtitle: p.meta.name === DEFAULT_PROFILE_NAME ? '出厂预设，修改时自动新建' : undefined,
@@ -139,6 +142,7 @@ function buildProfileMenu(args: {
   }));
   if (items.length > 0) items.push({ type: 'divider' });
   items.push({ label: '新建配置…', onClick: onCreate });
+  items.push({ label: '导入外部配置…', onClick: onImport });
   items.push({
     label: '重命名当前配置…',
     disabled: isDefault,
@@ -160,6 +164,7 @@ export default function PanelApp() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
   const [showRepair, setShowRepair] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const [appVersion, setAppVersion] = useState('');
   const [updateNotice, setUpdateNotice] = useState<UpdateNoticeInfo | null>(null);
   const [showUpdateNotice, setShowUpdateNotice] = useState(false);
@@ -209,6 +214,12 @@ export default function PanelApp() {
   const profileBtnRef = useRef<HTMLButtonElement>(null);
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<BurstMode>('toggle');
+  const [hotkeys, setHotkeys] = useState<{
+    global_toggle: KeyId | null;
+    global_stop: KeyId | null;
+    panel_toggle: KeyId | null;
+  }>({ global_toggle: null, global_stop: null, panel_toggle: null });
+  const hotkeysRef = useRef(hotkeys);
   const confirm = useConfirm();
   const toast = useToast();
   const saveTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -289,6 +300,11 @@ export default function PanelApp() {
           try {
             const profile = await invoke<Profile>('load_profile', { path: activePath });
             setRules(profile.rules);
+            setHotkeys({
+              global_toggle: profile.hotkeys.global_toggle ?? null,
+              global_stop: profile.hotkeys.global_stop ?? null,
+              panel_toggle: profile.hotkeys.panel_toggle ?? null,
+            });
             setProfileName(profile.meta.name);
             await refreshList();
             queueMicrotask(() => {
@@ -301,6 +317,11 @@ export default function PanelApp() {
         }
         const profile = await invoke<Profile>('init_default_profile');
         setRules(profile.rules);
+        setHotkeys({
+          global_toggle: profile.hotkeys.global_toggle ?? null,
+          global_stop: profile.hotkeys.global_stop ?? null,
+          panel_toggle: profile.hotkeys.panel_toggle ?? null,
+        });
         setProfileName(profile.meta.name);
         await refreshList();
       } catch {
@@ -383,8 +404,9 @@ export default function PanelApp() {
     };
   }, []);
 
-  // 规则变更后防抖自动保存到 .qzh
+  // 规则/热键变更后防抖自动保存到 .qzh
   profileNameRef.current = profileName;
+  hotkeysRef.current = hotkeys;
 
   const refreshProfileList = useCallback(async () => {
     try {
@@ -395,33 +417,78 @@ export default function PanelApp() {
     }
   }, [toast]);
 
-  const saveRules = useCallback((r: BurstRule[]) => {
+  // forkPromiseRef：正在进行的 fork_active_profile 调用；
+  // saveProfile 在写盘前 await 它，确保竞态时写入目标是已 fork 的配置。
+  const forkPromiseRef = useRef<Promise<void> | null>(null);
+
+  // ensureWritableProfile：若当前是默认配置，启动 fork；已在 fork 中则返回同一 Promise。
+  // 只能由用户操作（pushRules / 热键 onChange）调用，不能放进会在 profile load 时触发的 effect。
+  function ensureWritableProfile(): Promise<void> {
+    if (profileNameRef.current !== DEFAULT_PROFILE_NAME) return Promise.resolve();
+    if (forkPromiseRef.current) return forkPromiseRef.current;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = undefined;
+    }
+    forkPromiseRef.current = invoke<ForkResult>('fork_active_profile', {
+      suggestedName: '我的配置',
+    })
+      .then(async (res) => {
+        setProfileName(res.profile.meta.name);
+        profileNameRef.current = res.profile.meta.name;
+        await refreshProfileList();
+        toast.success(`已为你创建新配置「${res.profile.meta.name}」`);
+      })
+      .catch((e) => {
+        toast.error(`创建新配置失败：${e}`);
+      })
+      .finally(() => {
+        forkPromiseRef.current = null;
+      });
+    return forkPromiseRef.current;
+  }
+
+  // saveProfile：防抖 500ms，写盘前 await 任何正在进行的 fork，保证写到正确配置。
+  const saveProfile = useCallback((r: BurstRule[], hk: typeof hotkeys) => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(() => {
+    saveTimer.current = setTimeout(async () => {
+      await (forkPromiseRef.current ?? Promise.resolve());
       const name = profileNameRef.current;
       const profile: Profile = {
         schema_version: 2,
-        meta: {
-          name,
-          created_at: 0, // backend will set timestamps
-          updated_at: 0,
-          app_version: '',
-        },
+        meta: { name, created_at: 0, updated_at: 0, app_version: '' },
         rules: r,
-        hotkeys: { global_toggle: null },
+        hotkeys: {
+          global_toggle: hk.global_toggle,
+          global_stop: hk.global_stop,
+          panel_toggle: hk.panel_toggle,
+        },
         advanced: { log_level: 'info' },
       };
       invoke('save_profile', { name, profile }).catch(() => {
         toast.warning('自动保存配置失败');
       });
     }, 500);
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 规则变更时自动保存（跳过初始加载，避免启动时重复写入）
   useEffect(() => {
     if (!initialLoadDone.current) return;
-    saveRules(rules);
-  }, [rules, saveRules]);
+    saveProfile(rules, hotkeysRef.current);
+  }, [rules, saveProfile]);
+
+  // 热键变更时：立即通知引擎 + 写盘（saveProfile 内部会等待正在进行的 fork）
+  useEffect(() => {
+    if (!initialLoadDone.current) return;
+    invoke('set_global_hotkeys', {
+      hotkeys: {
+        global_toggle: hotkeys.global_toggle,
+        global_stop: hotkeys.global_stop,
+        panel_toggle: hotkeys.panel_toggle,
+      },
+    }).catch(() => {});
+    saveProfile(rules, hotkeys);
+  }, [hotkeys]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 全局开关启用时轮询活动规则 ID，驱动激活态脉冲动画。
   // 关闭时清空，避免残留高亮。
@@ -448,6 +515,17 @@ export default function PanelApp() {
       cancelled = true;
       clearInterval(timer);
     };
+  }, [globalEnabled]);
+
+  // 全局开关切换时播报语音；initialLoadDone 为 true 后才响应，跳过启动阶段的状态同步
+  useEffect(() => {
+    if (!initialLoadDone.current) return;
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+    const utt = new SpeechSynthesisUtterance(globalEnabled ? '我准备好库库按了' : '我累了歇会');
+    utt.lang = 'zh-CN';
+    utt.rate = 1.15;
+    window.speechSynthesis.speak(utt);
   }, [globalEnabled]);
 
   function persistCloseBehavior(v: CloseBehavior) {
@@ -603,8 +681,6 @@ export default function PanelApp() {
     }
   }
 
-  const forkingRef = useRef(false);
-
   function pushRules(updater: (prev: BurstRule[]) => BurstRule[]) {
     const next = updater(rules);
     setRules(next);
@@ -617,30 +693,9 @@ export default function PanelApp() {
         setRules(defaultRules());
       }
     });
-
-    // 修改默认配置时，自动 fork 一份新的「我的配置」并切换为活跃配置。
-    // 防抖保存（saveRules）此时仍在排队，因 profileNameRef 在 setProfileName
-    // 后才更新，因此先取消已排队的 saveTimer，避免把新规则写到 default。
-    if (profileNameRef.current === DEFAULT_PROFILE_NAME && !forkingRef.current) {
-      forkingRef.current = true;
-      if (saveTimer.current) {
-        clearTimeout(saveTimer.current);
-        saveTimer.current = undefined;
-      }
-      void invoke<ForkResult>('fork_active_profile', { suggestedName: '我的配置' })
-        .then(async (res) => {
-          setProfileName(res.profile.meta.name);
-          profileNameRef.current = res.profile.meta.name;
-          await refreshProfileList();
-          toast.success(`已为你创建新配置「${res.profile.meta.name}」`);
-        })
-        .catch((e) => {
-          toast.error(`创建新配置失败：${e}`);
-        })
-        .finally(() => {
-          forkingRef.current = false;
-        });
-    }
+    // 用户编辑规则时启动 fork（若在默认配置）；写盘由 rules effect 里的 saveProfile 负责，
+    // saveProfile 内部会 await forkPromiseRef，确保写到 fork 后的新配置。
+    void ensureWritableProfile();
   }
 
   function addRule(mode: BurstMode = 'hold') {
@@ -678,6 +733,11 @@ export default function PanelApp() {
     try {
       const profile = await invoke<Profile>('load_profile', { path });
       setRules(profile.rules);
+      setHotkeys({
+        global_toggle: profile.hotkeys.global_toggle ?? null,
+        global_stop: profile.hotkeys.global_stop ?? null,
+        panel_toggle: profile.hotkeys.panel_toggle ?? null,
+      });
       setProfileName(profile.meta.name);
       profileNameRef.current = profile.meta.name;
       setAdvancedOpen({});
@@ -795,6 +855,11 @@ export default function PanelApp() {
       const fallback = await invoke<Profile | null>('delete_profile', { name: profileName });
       if (fallback) {
         setRules(fallback.rules);
+        setHotkeys({
+          global_toggle: fallback.hotkeys.global_toggle ?? null,
+          global_stop: fallback.hotkeys.global_stop ?? null,
+          panel_toggle: fallback.hotkeys.panel_toggle ?? null,
+        });
         setProfileName(fallback.meta.name);
         profileNameRef.current = fallback.meta.name;
         setAdvancedOpen({});
@@ -995,6 +1060,63 @@ export default function PanelApp() {
       {updateProgress && <UpdateProgressBar progress={updateProgress} />}
 
       <section className="rules-section">
+        {/* 热键设置区：属于规则配置，跟着配置文件切换 */}
+        <div className="hotkey-section">
+          {/* 全局开关 */}
+          <div className="hotkey-item">
+            <span className="hotkey-item-label">全局开关</span>
+            <div className="hotkey-item-keys">
+              <KeyCapture
+                value={hotkeys.global_toggle}
+                onChange={(k) => {
+                  void ensureWritableProfile();
+                  setHotkeys((prev) => ({
+                    ...prev,
+                    global_toggle: k,
+                    global_stop: k === null ? null : prev.global_stop,
+                  }));
+                }}
+                nullable
+                placeholder="未设置"
+              />
+              {/* 停止键仅在开启键已设置时显示。
+                  导入时若来源配置只有 stop 无 toggle，gaibang_parse_hotkeys 也不会产生
+                  stop-only 结构（因为 toggle==0 时 global_toggle=None 而 global_stop 不会被单独保留），
+                  故此处无需额外处理 stop-only 场景。 */}
+              {hotkeys.global_toggle && (
+                <>
+                  <span className="hotkey-item-sep">停止</span>
+                  <KeyCapture
+                    value={hotkeys.global_stop}
+                    onChange={(k) => {
+                      void ensureWritableProfile();
+                      setHotkeys((prev) => ({ ...prev, global_stop: k }));
+                    }}
+                    nullable
+                    placeholder="同开启键"
+                  />
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* 面板显隐 */}
+          <div className="hotkey-item">
+            <span className="hotkey-item-label">面板显隐</span>
+            <div className="hotkey-item-keys">
+              <KeyCapture
+                value={hotkeys.panel_toggle}
+                onChange={(k) => {
+                  void ensureWritableProfile();
+                  setHotkeys((prev) => ({ ...prev, panel_toggle: k }));
+                }}
+                nullable
+                placeholder="未设置"
+              />
+            </div>
+          </div>
+        </div>
+
         <div className="tab-bar">
           {(['hold', 'toggle'] as BurstMode[]).map((mode) => {
             const groupRules = rules.filter((r) => r.mode === mode);
@@ -1055,6 +1177,7 @@ export default function PanelApp() {
                               <KeyCapture
                                 value={rule.target_key}
                                 onChange={(vk) => {
+                                  if (!vk) return;
                                   const patch: Partial<BurstRule> = { target_key: vk };
                                   // 高级未展开时，触发键跟随连发键同步，符合「等技能 CD 好就按」的默认场景
                                   if (!showAdvanced) patch.trigger_key = vk;
@@ -1068,7 +1191,7 @@ export default function PanelApp() {
                                 <label>启动热键</label>
                                 <KeyCapture
                                   value={rule.trigger_key}
-                                  onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
+                                  onChange={(vk) => vk && updateRule(rule.id, { trigger_key: vk })}
                                 />
                               </div>
                               <span className="rule-arrow">→</span>
@@ -1076,7 +1199,7 @@ export default function PanelApp() {
                                 <label>连发按键</label>
                                 <KeyCapture
                                   value={rule.target_key}
-                                  onChange={(vk) => updateRule(rule.id, { target_key: vk })}
+                                  onChange={(vk) => vk && updateRule(rule.id, { target_key: vk })}
                                 />
                               </div>
                             </>
@@ -1116,7 +1239,7 @@ export default function PanelApp() {
                             <label>按压键</label>
                             <KeyCapture
                               value={rule.trigger_key}
-                              onChange={(vk) => updateRule(rule.id, { trigger_key: vk })}
+                              onChange={(vk) => vk && updateRule(rule.id, { trigger_key: vk })}
                             />
                           </div>
                           <span className="adv-hint">默认与连发按键相同</span>
@@ -1128,7 +1251,7 @@ export default function PanelApp() {
                             <label>停止热键</label>
                             <KeyCapture
                               value={rule.stop_key ?? rule.trigger_key}
-                              onChange={(vk) => updateRule(rule.id, { stop_key: vk })}
+                              onChange={(vk) => vk && updateRule(rule.id, { stop_key: vk })}
                             />
                           </div>
                           <span className="adv-hint">默认与启动热键相同</span>
@@ -1217,6 +1340,10 @@ export default function PanelApp() {
           isDefault: isDefaultProfile,
           onSwitch: switchToProfile,
           onCreate: handleCreateProfile,
+          onImport: () => {
+            setProfileMenuOpen(false);
+            setShowImport(true);
+          },
           onRename: handleRenameProfile,
           onDelete: handleDeleteProfile,
         })}
@@ -1327,6 +1454,40 @@ export default function PanelApp() {
             if (kind === 'success') toast.success(msg);
             else if (kind === 'warn') toast.warning(msg);
             else toast.error(msg);
+          }}
+        />
+      </Overlay>
+
+      <Overlay open={showImport} onClose={() => setShowImport(false)}>
+        <ImportDialog
+          onClose={() => setShowImport(false)}
+          onImported={async (name) => {
+            setShowImport(false);
+            // 导入后以新配置名重新加载（后端已切换 activeProfilePath）
+            initialLoadDone.current = false;
+            try {
+              const activePath = await invoke<string | null>('get_active_profile_path');
+              if (activePath) {
+                const profile = await invoke<Profile>('load_profile', { path: activePath });
+                setRules(profile.rules);
+                setHotkeys({
+                  global_toggle: profile.hotkeys.global_toggle ?? null,
+                  global_stop: profile.hotkeys.global_stop ?? null,
+                  panel_toggle: profile.hotkeys.panel_toggle ?? null,
+                });
+                setProfileName(profile.meta.name);
+                profileNameRef.current = profile.meta.name;
+                setAdvancedOpen({});
+                await refreshProfileList();
+                toast.success(`已导入配置「${name}」`);
+              }
+            } catch (e) {
+              toast.error(`导入后加载失败：${e}`);
+            } finally {
+              queueMicrotask(() => {
+                initialLoadDone.current = true;
+              });
+            }
           }}
         />
       </Overlay>
