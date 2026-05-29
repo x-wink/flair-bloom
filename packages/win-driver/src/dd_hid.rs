@@ -1,7 +1,10 @@
 //! DD-HID 驱动安装/卸载 + 残留检测。
 
 #[cfg(windows)]
-use crate::{elevation::run_elevated_exe, powershell};
+use crate::{
+    elevation::{run_elevated_exe, run_elevated_exe_capture},
+    powershell,
+};
 #[cfg(windows)]
 use std::path::Path;
 #[cfg(windows)]
