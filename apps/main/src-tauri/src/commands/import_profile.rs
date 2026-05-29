@@ -318,6 +318,9 @@ pub fn scan_import_configs(dirs: Vec<String>) -> Vec<FoundConfig> {
     result
 }
 
+/// 导入文件大小上限（4 MB），防止大文件导致 OOM。
+const IMPORT_MAX_BYTES: u64 = 4 * 1024 * 1024;
+
 /// 解析指定文件，返回导入预览。路径可来自 [`scan_import_configs`] 或用户手动输入。
 #[tauri::command]
 pub fn preview_import(path: String) -> Result<ImportPreview, String> {
@@ -327,6 +330,13 @@ pub fn preview_import(path: String) -> Result<ImportPreview, String> {
     }
     let parser =
         find_parser(p).ok_or_else(|| "无法识别的配置格式，目前支持：丐帮高手".to_string())?;
+    let size = p
+        .metadata()
+        .map_err(|e| format!("读取文件信息失败：{e}"))?
+        .len();
+    if size > IMPORT_MAX_BYTES {
+        return Err(format!("文件过大（{size} 字节），超过 4 MB 上限"));
+    }
     let data = std::fs::read_to_string(p).map_err(|e| format!("读取文件失败：{e}"))?;
     let dir_name = p
         .parent()
@@ -352,6 +362,13 @@ pub fn import_external_config(
 
     let p = Path::new(&path);
     let parser = find_parser(p).ok_or_else(|| "无法识别的配置格式".to_string())?;
+    let size = p
+        .metadata()
+        .map_err(|e| format!("读取文件信息失败：{e}"))?
+        .len();
+    if size > IMPORT_MAX_BYTES {
+        return Err(format!("文件过大（{size} 字节），超过 4 MB 上限"));
+    }
     let data = std::fs::read_to_string(p).map_err(|e| format!("读取文件失败：{e}"))?;
 
     let rules = (parser.parse_rules)(&data);

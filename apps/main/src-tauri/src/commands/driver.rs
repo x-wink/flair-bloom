@@ -41,6 +41,18 @@ pub async fn install_driver(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
         let res_dir = resource_dir(&app)?;
+        let health = crate::commands::resource_integrity::check_resources(&res_dir);
+        if !health.issues.is_empty() {
+            let details = health
+                .issues
+                .iter()
+                .map(crate::commands::resource_integrity::issue_label)
+                .collect::<Vec<_>>()
+                .join("；");
+            return Err(format!(
+                "驱动资源文件校验失败，拒绝安装以防提权执行被篡改文件：{details}"
+            ));
+        }
         let result = win_driver::interception::install(&res_dir).await;
         if let Err(ref e) = result {
             tracing::error!("Interception 驱动安装失败：{e}");
@@ -91,6 +103,18 @@ pub async fn install_dd_hid_driver(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
         let res_dir = resource_dir(&app)?;
+        let health = crate::commands::resource_integrity::check_resources(&res_dir);
+        if !health.issues.is_empty() {
+            let details = health
+                .issues
+                .iter()
+                .map(crate::commands::resource_integrity::issue_label)
+                .collect::<Vec<_>>()
+                .join("；");
+            return Err(format!(
+                "驱动资源文件校验失败，拒绝安装以防提权执行被篡改文件：{details}"
+            ));
+        }
         let exe_result = win_driver::dd_hid::install(&res_dir).await;
         let sys_installed = win_driver::dd_hid::dd_hid_sys_installed();
         let service_present = win_sysinfo::registry::service_key_present("ddhid63340");

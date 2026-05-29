@@ -96,7 +96,7 @@ fn read_profile_from_file(file_path: &Path) -> Result<Profile, String> {
     let version = value
         .get("schema_version")
         .and_then(|v| v.as_u64())
-        .unwrap_or(CURRENT_SCHEMA_VERSION as u64) as u32;
+        .unwrap_or(1) as u32;
     let value = if version < CURRENT_SCHEMA_VERSION {
         migrate_profile(value, version).map_err(|e| format!("配置迁移失败: {e}"))?
     } else if version > CURRENT_SCHEMA_VERSION {
@@ -193,7 +193,7 @@ pub fn load_profile(
     let version = value
         .get("schema_version")
         .and_then(|v| v.as_u64())
-        .unwrap_or(CURRENT_SCHEMA_VERSION as u64) as u32;
+        .unwrap_or(1) as u32;
 
     let value = if version < CURRENT_SCHEMA_VERSION {
         migrate_profile(value, version).map_err(|e| format!("配置迁移失败: {e}"))?
