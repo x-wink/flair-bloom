@@ -1,5 +1,6 @@
 //! 协议同意 / 检查更新 / 退出。
 
+use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tracing::{info, warn};
@@ -8,6 +9,7 @@ use crate::bootstrap::{
     agreement::AGREEMENT_VERSION,
     update::{build_updater, download_update, proxy_github_download_url, UpdateLock},
 };
+use crate::commands::engine::EngineState;
 
 const PENDING_UPDATE_DIR: &str = "pending_update";
 
@@ -43,7 +45,9 @@ pub fn agree_license(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn exit_app(app: AppHandle) {
+pub fn exit_app(app: AppHandle, state: State<EngineState>) {
+    state.0.global_enabled.store(false, Ordering::SeqCst);
+    state.0.cancel_all_loops();
     app.exit(0);
 }
 

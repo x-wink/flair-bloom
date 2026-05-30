@@ -1130,7 +1130,7 @@ export default function PanelApp() {
     settingsStore
       .get<CloseBehavior>(CLOSE_BEHAVIOR_KEY)
       .then((remembered) => {
-        if (remembered === 'exit') getCurrentWindow().destroy();
+        if (remembered === 'exit') void invoke('exit_app');
         else if (remembered === 'minimize') getCurrentWindow().hide();
         else void askCloseBehavior();
       })
@@ -1161,7 +1161,7 @@ export default function PanelApp() {
     });
     if (!ok) return;
     if (result.remember) persistCloseBehavior(result.choice);
-    if (result.choice === 'exit') getCurrentWindow().destroy();
+    if (result.choice === 'exit') void invoke('exit_app');
     else getCurrentWindow().hide();
   }
 

@@ -72,6 +72,7 @@ type ActiveRules = Arc<Mutex<HashSet<String>>>;
 type KeyEvent = (KeyId, bool);
 type Metrics = Arc<EngineMetrics>;
 const DELAY_SAMPLE_LIMIT: usize = 4096;
+const STOP_ALL_ACK_TIMEOUT: Duration = Duration::from_millis(500);
 
 #[derive(Clone)]
 struct ScheduledRuleConfig {
@@ -84,7 +85,10 @@ struct ScheduledRuleConfig {
 enum SchedulerCommand {
     Start(ScheduledRuleConfig),
     Stop(String, Instant),
-    StopAll(Instant),
+    StopAll {
+        sent_at: Instant,
+        ack: Option<Sender<()>>,
+    },
     SetWaitMode(SchedulerWaitMode),
     Shutdown,
 }
@@ -897,7 +901,7 @@ fn handle_scheduler_command(
             }
             false
         }
-        SchedulerCommand::StopAll(sent_at) => {
+        SchedulerCommand::StopAll { sent_at, ack } => {
             metrics.record_stop_response(sent_at.elapsed());
             cleanup_scheduler_rules(
                 rules,
@@ -907,6 +911,9 @@ fn handle_scheduler_command(
                 active_rules,
                 false,
             );
+            if let Some(ack) = ack {
+                let _ = ack.send(());
+            }
             false
         }
         SchedulerCommand::SetWaitMode(mode) => {
@@ -1207,12 +1214,14 @@ impl BurstEngine {
         revive(self.active_rules.lock()).clear();
         self.metrics.set_active_rules(0);
         self.metrics.add_stop_command();
-        if self
-            .scheduler_tx
-            .send(SchedulerCommand::StopAll(Instant::now()))
-            .is_err()
-        {
-            // The scheduler owns planned key-down/up ordering. Only fall back here if it is gone.
+        let (ack_tx, ack_rx) = mpsc::channel();
+        let sent = self.scheduler_tx.send(SchedulerCommand::StopAll {
+            sent_at: Instant::now(),
+            ack: Some(ack_tx),
+        });
+        if sent.is_err() || ack_rx.recv_timeout(STOP_ALL_ACK_TIMEOUT).is_err() {
+            // The scheduler owns planned key-down/up ordering. This fallback is only for a dead
+            // or wedged scheduler so a stop/exit path still attempts to release held input.
             release_simulated_keys(&self.pressed_keys, &self.simulated_keys);
         }
         revive(self.toggle_states.lock()).clear();
@@ -1851,15 +1860,14 @@ mod tests {
     }
 
     #[test]
-    fn cancel_all_loops_leaves_simulated_ledger_for_scheduler_when_stop_all_is_queued() {
+    fn cancel_all_loops_waits_for_scheduler_to_release_simulated_ledger() {
         let key = KeyId::Keyboard(0x45);
-        let (tx, _rx) = mpsc::channel();
-        let simulated_keys = Arc::new(Mutex::new(HashMap::from([(key, 1)])));
-        let engine = engine_with_scheduler_tx(tx, simulated_keys.clone());
+        let engine = BurstEngine::new();
+        revive(engine.simulated_keys.lock()).insert(key, 1);
 
         engine.cancel_all_loops();
 
-        assert_eq!(revive(simulated_keys.lock()).get(&key), Some(&1));
+        assert!(revive(engine.simulated_keys.lock()).is_empty());
     }
 
     #[test]

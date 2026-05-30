@@ -4,7 +4,9 @@
 
 use serde::Serialize;
 #[allow(unused_imports)]
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, State};
+
+use crate::commands::engine::EngineState;
 
 /// DD-HID 安装结果。`pending_reboot=true` 表示 Windows PnP 报告驱动文件已更新
 /// 并建议重启以确保完全生效（`ERROR_SUCCESS_REBOOT_REQUIRED`, 0xBC3）；
@@ -209,10 +211,17 @@ pub fn is_elevated() -> bool {
 
 /// 以管理员身份重启自身，携带 `--switch-mode=<id>` 参数，然后退出当前进程。
 #[tauri::command]
-pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), String> {
+pub async fn relaunch_as_admin(
+    app: AppHandle,
+    state: State<'_, EngineState>,
+    mode: String,
+) -> Result<(), String> {
+    let engine = state.0.clone();
+
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
+        use std::sync::atomic::Ordering;
         use windows_sys::Win32::Foundation::ERROR_CANCELLED;
         use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW};
 
@@ -256,6 +265,9 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
 
         result.as_ref().map_err(|e| e.clone())?;
 
+        engine.global_enabled.store(false, Ordering::SeqCst);
+        engine.cancel_all_loops();
+
         let app_clone = app.clone();
         tauri::async_runtime::spawn_blocking(move || {
             std::thread::sleep(std::time::Duration::from_millis(300));
@@ -265,7 +277,7 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
     }
     #[cfg(not(windows))]
     {
-        let _ = (app, mode);
+        let _ = (app, state, engine, mode);
         Err("仅 Windows 平台支持提权重启".to_string())
     }
 }
