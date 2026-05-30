@@ -4,7 +4,15 @@
 
 面向游戏辅助的按键助手。核心功能免费开放，亲友专属功能通过兑换码离线激活使用时长。
 Monorepo 结构，Rust workspace + pnpm workspace 双层管理。
-支持三种运行模式：面板模式、托盘模式、桌宠模式，均在单一 Tauri 进程内管理。
+目标支持面板、托盘、桌宠三种运行模式，均在单一 Tauri 进程内管理。当前主线为 Windows 桌面端，已实现面板窗口 + 系统托盘常驻运行，桌宠模式进入 v0.3 规划。
+
+## 当前阶段（2026-05-30）
+
+- 当前基线：`v0.2.x`，以体验完善、稳定性和完整配置管理为主。
+- 已完成主能力：按压 / Toggle 连发、键盘全键位、鼠标 5 键、滚轮连发、三档输入模式（SendInput / Interception / DD-HID）、多配置文件、全局热键、面板显隐热键、设置面板、声音反馈、诊断修复、外部配置导入、自动更新、系统托盘、开机自启。
+- 配置 schema：`CURRENT_SCHEMA_VERSION = 3`。v1→v2 将裸 VK 升级为 `KeyId`，v2→v3 增加滚轮上 / 下。
+- 后续主线：v0.3 桌宠、v0.4 许可证与亲友专属功能、v0.5 落地页与运营基础、v1.0 完整功能。
+- 进度标记：`[x]` 表示当前代码或发布流程已具备，`[ ]` 表示仍在规划或未完成。
 
 ---
 
@@ -54,15 +62,15 @@ Monorepo 结构，Rust workspace + pnpm workspace 双层管理。
 
 | 场景                          | 容错策略                                                          |
 | ----------------------------- | ----------------------------------------------------------------- |
-| 连发引擎线程 panic            | `catch_unwind` 捕获，记录日志，自动重启引擎线程，托盘图标短暂提示 |
+| 连发循环线程 panic            | `catch_unwind` 捕获，记录日志，补发 `key_up`，避免按键卡住       |
 | 配置文件读取失败（损坏/篡改） | 提示用户，提供"恢复默认配置"选项，不阻塞启动                      |
-| `notify` 文件监听失效         | 定时轮询兜底（每 30 秒检查一次配置变更）                          |
-| 自动升级下载失败              | 最多重试 3 次，失败后静默跳过，不影响正常使用                     |
-| `rdev` 监听初始化失败         | 提示"全局监听启动失败，请以管理员权限运行"，其余功能保持可用      |
-| 规则热键冲突                  | 检测到冲突时弹提示，保留旧绑定，新绑定不生效，不崩溃              |
+| `notify` 文件监听失效         | 规划项；当前暂未接入配置文件监听                                  |
+| 自动升级下载失败              | 前端展示下载失败提示，不影响正常使用                              |
+| 全局监听或输入后端初始化失败  | 提示用户切换模式 / 以管理员权限运行，其余功能保持可用            |
+| 规则热键冲突                  | 检测到冲突时在界面标注风险并提示用户调整                          |
 | Tauri Command 异常            | 所有 Command 返回 `Result`，前端统一错误处理，显示 toast 提示     |
 
-**引擎线程隔离：** 连发引擎在独立线程运行，panic 不传播到主进程，`std::panic::catch_unwind` 包裹主循环。
+**引擎线程隔离：** 连发循环在独立线程运行，panic 不传播到主进程，`std::panic::catch_unwind` 包裹具体连发循环并做按键释放兜底。
 
 ### 四、日志完善，崩溃可追溯
 
@@ -72,22 +80,22 @@ Monorepo 结构，Rust workspace + pnpm workspace 双层管理。
 
 - **Rust 端**：`tracing` + `tracing-subscriber` + `tracing-appender`
   - 按天滚动日志文件，保留最近 7 天
-  - 日志路径：`%AppData%\qzhua\logs\qzhua-YYYY-MM-DD.log`
-  - 级别：`ERROR` / `WARN` / `INFO` / `DEBUG`（可在设置中切换，默认 INFO）
-- **前端端**：JS 错误通过 Tauri Command 转发到 Rust logger，统一写入同一日志文件
+  - 日志路径：Windows `%LOCALAPPDATA%\fun.xwink.flairbloom\logs\flair-bloom.YYYY-MM-DD`；macOS `~/Library/Logs/fun.xwink.flairbloom`
+  - 级别：`ERROR` / `WARN` / `INFO` / `DEBUG`（当前默认 INFO，后续可开放运行时切换）
+- **前端**：JS 错误通过 Tauri Command 转发到 Rust logger，统一写入同一日志文件
 - **结构化格式**：每条日志含时间戳、级别、模块路径、线程 ID
 
 #### 崩溃处理
 
 ```
 std::panic::set_hook → 捕获 panic 信息
-  → 写入 crash-YYYY-MM-DD-HHmmss.log（独立崩溃日志）
-  → 弹出崩溃提示窗口（Tauri 原生对话框）
+  → 写入 crash-{unix_ts}.log（独立崩溃日志）
+  → 后续补充崩溃提示窗口（Tauri 原生对话框）
       ┌─────────────────────────────────────┐
       │ 气质花遇到了一个问题并已崩溃          │
       │                                     │
       │ 崩溃日志已保存，如需报告问题请提供：  │
-      │ C:\Users\...\qzhua\logs\crash-...   │
+      │ C:\Users\...\fun.xwink.flairbloom\logs\crash-... │
       │                                     │
       │ [打开日志文件夹]  [复制日志路径]      │
       │              [确定关闭]              │
@@ -96,8 +104,8 @@ std::panic::set_hook → 捕获 panic 信息
 
 #### 用户反馈引导
 
-- 设置面板提供"查看日志文件夹"入口（日常排查用）
-- 崩溃弹窗提供"复制日志路径"按钮（一键复制，方便粘贴给开发者）
+- 关于 / 诊断入口提供"打开日志目录"入口（日常排查用）
+- 崩溃弹窗提供"复制日志路径"按钮（一键复制，方便粘贴给开发者，待实现）
 - 日志文件夹直接用系统文件管理器打开，降低操作门槛
 - 日志文件不含任何用户个人信息（无硬件 ID、无用户名），用户无需顾虑隐私
 
@@ -116,17 +124,15 @@ std::panic::set_hook → 捕获 panic 信息
 
 ### 面板模式（Panel）
 
-全功能配置界面，适合初始设置和规则管理。常规窗口，可最小化到托盘。
+全功能配置界面，适合初始设置和规则管理。标题栏最小化走系统最小化；关闭按钮可按用户偏好选择退出或隐藏到托盘；面板显隐热键使用最小化 / 恢复语义，方便从任务栏手动唤回。
 
 ### 托盘模式（Tray）
 
-关闭面板和桌宠窗口后，仅系统托盘图标常驻。极低资源占用，适合日常游戏中后台运行。
-托盘菜单提供开关、切换模式、退出等快捷操作。
+面板隐藏到托盘后，Tauri 进程继续常驻，连发功能保持有效。托盘菜单当前提供全局开关、打开面板、退出；托盘双击和再次启动应用都会唤回面板。
 
 ### 桌宠模式（Pet）
 
-透明无边框窗口，始终置顶。角色浮在桌面或游戏画面角落，通过动画反映当前连发状态。
-默认点击穿透（游戏中不影响操作），鼠标悬停时临时关闭穿透以支持拖拽和右键菜单。
+v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明无边框、始终置顶的小窗口，通过动画反映连发状态；默认点击穿透，鼠标悬停时临时关闭穿透以支持拖拽和右键菜单。
 
 ---
 
@@ -139,18 +145,18 @@ std::panic::set_hook → 捕获 panic 信息
 ├── package.json                        # 根脚本（dev / build / release）
 │
 ├── apps/
-│   ├── main/                           # 单一 Tauri 应用（面板 + 桌宠 + 托盘）
+│   ├── main/                           # 单一 Tauri 应用（面板 + 托盘；v0.3 加入桌宠）
 │   │   ├── package.json
-│   │   ├── panel.html                  # 面板窗口入口
-│   │   ├── pet.html                    # 桌宠窗口入口
+│   │   ├── panel.html                  # 面板窗口入口（已实现）
+│   │   ├── pet.html                    # 桌宠窗口入口（v0.3 规划）
 │   │   ├── src/
 │   │   │   ├── windows/
 │   │   │   │   ├── panel/              # 面板窗口 UI
 │   │   │   │   │   ├── components/     # 基础 UI（Overlay、Toast、ConfirmDialog、ContextMenu、KeyCapture、SvgIcon、icons、CloseBehaviorForm）
-│   │   │   │   │   ├── dialogs/        # 弹窗内容（AboutDialog、AgreementDialog、UpdateNoticeDialog）
+│   │   │   │   │   ├── dialogs/        # 设置 / 关于 / 协议 / 更新公告 / 诊断修复 / 导入
 │   │   │   │   │   ├── main.tsx
 │   │   │   │   │   └── PanelApp.tsx
-│   │   │   │   └── pet/                # 桌宠窗口 UI
+│   │   │   │   └── pet/                # 桌宠窗口 UI（v0.3 规划）
 │   │   │   │       ├── components/
 │   │   │   │       │   ├── PetCanvas/
 │   │   │   │       │   └── StatusBubble/
@@ -162,31 +168,35 @@ std::panic::set_hook → 捕获 panic 信息
 │   │   │       └── EULA.md             # 用户协议正文（内嵌构建）
 │   │   └── src-tauri/
 │   │       ├── Cargo.toml              # 依赖 qzh-profile、win-* 等 packages
-│   │       ├── tauri.conf.json         # 多窗口配置（panel + pet）
+│   │       ├── tauri.conf.json         # 窗口配置（当前 panel；v0.3 加 pet）
+│   │       ├── tauri.windows.conf.json # Windows 打包资源与 NSIS hook
 │   │       └── src/
 │   │           ├── main.rs
-│   │           ├── lib.rs              # Tauri Builder 薄壳（~100 行）
+│   │           ├── lib.rs              # Tauri Builder 薄壳
 │   │           ├── bootstrap/          # 启动期装配（logging/agreement/update/profile/input）
 │   │           ├── tray.rs             # 系统托盘图标与菜单
 │   │           ├── engine/
 │   │           │   └── mod.rs          # re-export burst-engine / win-input 公开 API
 │   │           └── commands/
 │   │               ├── app.rs          # 协议同意 / 检查更新 / 退出
+│   │               ├── ddhid_diagnostic.rs
 │   │               ├── driver.rs       # 驱动安装卸载 + 提权重启
 │   │               ├── engine.rs       # 规则 CRUD + 输入模式切换
+│   │               ├── import_profile.rs
 │   │               ├── profile.rs      # 配置文件 CRUD
-│   │               ├── repair.rs       # 环境诊断与修复
+│   │               ├── repair.rs       # 诊断修复
+│   │               ├── resource_integrity.rs
 │   │               └── status.rs       # 应用状态快照
 │   │
-│   ├── keygen/                         # 兑换码生成 CLI（纯 Rust，不打包进应用）
+│   ├── keygen/                         # 兑换码生成 CLI（v0.4 完整实现）
 │   │   ├── Cargo.toml
 │   │   └── src/main.rs
 │   │
-│   └── release-server/                 # 落地页服务（Axum，仅展示，文件托管在 GitHub）
+│   └── release-server/                 # 落地页服务（v0.5 规划，文件托管在 GitHub Releases）
 │       ├── Cargo.toml
 │       ├── config.toml                 # 端口、GitHub repo 信息、站点基础信息
 │       ├── content/
-│       │   └── changelog.toml          # 更新日志数据（手动维护，每次发布追加）
+│       │   └── changelog.toml          # 可由 CHANGELOG.md 转换生成，避免第二内容源
 │       ├── static/                     # 静态资源（rust-embed 内嵌到二进制）
 │       │   ├── index.html              # 落地页（介绍 + 下载入口 → 跳转 GitHub Releases）
 │       │   ├── download.html           # 下载页（展示最新版本，链接指向 GitHub Releases）
@@ -198,7 +208,7 @@ std::panic::set_hook → 捕获 panic 信息
 │           ├── routes/
 │           │   ├── pages.rs            # GET / /download /changelog → HTML 页面
 │           │   └── health.rs           # GET /health
-│           └── changelog.rs            # 解析 changelog.toml，渲染日志数据
+│           └── changelog.rs            # 解析更新日志数据，渲染日志页
 │
 └── packages/
     ├── crypto/                         # 加密解密 + 许可证校验（Rust lib crate）
@@ -229,7 +239,8 @@ std::panic::set_hook → 捕获 panic 信息
     ├── win-sysinfo/                    # Windows 系统信息 + 注册表 + 安装前置检测
     ├── win-input/                      # SendInput / Interception / DD-HID 输入注入
     ├── burst-engine/                   # BurstEngine + LL keyboard/mouse hook
-    └── win-driver/                     # 驱动安装卸载 + ShellExecuteExW + PowerShell
+    ├── win-driver/                     # 驱动安装卸载 + ShellExecuteExW + PowerShell
+    └── resource-integrity/             # 打包资源完整性校验
 ```
 
 ---
@@ -240,21 +251,25 @@ std::panic::set_hook → 捕获 panic 信息
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  qzhua.exe（单一 Tauri 进程）                             │
+│  FlairBloom.exe（单一 Tauri 进程）                        │
 │                                                          │
-│  ┌─────────────────┐   Tauri emit_all()  ┌────────────┐ │
+│  ┌─────────────────┐   Tauri events      ┌────────────┐ │
 │  │  Rust 后端       │ ──────────────────→ │ 面板窗口   │ │
 │  │  - 连发引擎      │                     │ WebView    │ │
 │  │  - 系统托盘      │ ──────────────────→ │ 桌宠窗口   │ │
-│  │  - 配置监听      │                     │ WebView    │ │
-│  │  - 许可证校验    │                     └────────────┘ │
+│  │  - 更新检查      │                     │ WebView    │ │
+│  │  - 驱动诊断      │                     └────────────┘ │
+│  │  - 许可证校验    │                                    │
 │  └─────────────────┘                                     │
 └──────────────────────────────────────────────────────────┘
                │ HTTPS
        ┌───────┴────────┐
-       │ release-server │
+       │ GitHub Releases │
+       │ release-server  │
        └────────────────┘
 ```
+
+进度：面板窗口、托盘、更新检查、驱动诊断已落地；桌宠窗口、许可证激活和 release-server 分别进入 v0.3 / v0.4 / v0.5。
 
 ### 发布基础设施
 
@@ -262,9 +277,10 @@ std::panic::set_hook → 捕获 panic 信息
 | ------------------ | ------------------------ | ---------------------------------------------- |
 | 安装包托管         | GitHub Releases          | `.exe` / `.nsis.zip` + `.sig` 签名文件         |
 | Tauri updater 端点 | GitHub Releases          | 每次发布上传 `latest.json`（updater manifest） |
-| 私钥存储           | GitHub Actions Secrets   | Tauri 签名私钥、Ed25519 许可证私钥             |
-| CI/CD 构建         | GitHub Actions           | 推 tag 触发自动构建、签名、发布                |
-| 落地页             | release-server（自托管） | 仅渲染 HTML，下载链接指向 GitHub Releases      |
+| 私钥存储           | GitHub Actions Secrets   | Tauri 签名私钥、Ed25519 许可证私钥，构建 / 签发时注入 |
+| CI/CD 构建         | GitHub Actions           | 推 tag 触发 Windows x64 构建，发布 Draft       |
+| Release 正文       | `CHANGELOG.md`           | `scripts/extract-changelog.ts` 自动提取版本节  |
+| 落地页             | release-server（自托管） | v0.5 规划；仅渲染 HTML，下载链接指向 GitHub Releases |
 
 ### Tauri updater 配置
 
@@ -282,65 +298,38 @@ std::panic::set_hook → 捕获 panic 信息
 }
 ```
 
-每次 GitHub Actions 发布时自动生成并上传 `latest.json`（Tauri 标准 updater manifest 格式）。
+每次 GitHub Actions 发布时由 `tauri-action` 生成并上传 `latest.json`（Tauri 标准 updater manifest 格式）。
 
 ### GitHub Actions 发布流程
 
 ```
 推送 tag（v1.2.0）
   → actions/checkout
-  → 矩阵构建（matrix.os: [windows-latest, macos-latest]）
-      ├── 各平台分别安装 Rust + Node.js + pnpm
-      ├── pnpm install && pnpm build
-      └── cargo tauri build（从 Secrets 注入 Tauri 签名私钥）
-  → 合并产物，生成 latest.json（updater manifest）
-  → 创建 GitHub Release，上传：
-      ├── qzhua_1.2.0_x64-setup.exe          # Windows
-      ├── qzhua_1.2.0_x64-setup.nsis.zip
-      ├── qzhua_1.2.0_x64-setup.nsis.zip.sig
-      ├── qzhua_1.2.0_x64.dmg                # macOS（v1.0 后）
-      └── latest.json
-  → 触发 release-server 落地页更新（可选 webhook）
-
-注：Tauri 不支持交叉编译，各平台必须在对应 runner 上构建。仓库设为 public 享受无限 Actions 分钟数。
+  → 安装 pnpm / Node.js 22 / Rust stable（x86_64-pc-windows-msvc）
+  → pnpm install
+  → pnpm check:resources
+  → 解析上一稳定版本 tag
+  → scripts/extract-changelog.ts 提取当前 tag 的 CHANGELOG 版本节
+  → tauri-apps/tauri-action 构建并创建 Draft Release
+      ├── Windows x64 NSIS 安装包
+      ├── updater manifest / 签名文件
+      └── Release 正文（来自 CHANGELOG.md）
 ```
 
-### release-server 路由（落地页服务）
+注：当前 release workflow 只构建 Windows x64；v1.0 前评估 macOS / Linux 构建矩阵。
+
+### release-server 路由（v0.5 规划）
 
 | 路由             | 用途                                                      |
 | ---------------- | --------------------------------------------------------- |
 | `GET /`          | 落地页（介绍 + 功能 + 截图 + 下载按钮 → GitHub Releases） |
 | `GET /download`  | 下载页（最新版本信息，链接指向 GitHub Releases）          |
-| `GET /changelog` | 更新日志页（读取 changelog.toml）                         |
+| `GET /changelog` | 更新日志页（由 `CHANGELOG.md` 转换 / 提取）               |
 | `GET /health`    | 健康检查                                                  |
-
-### changelog.toml 数据格式
-
-```toml
-[[versions]]
-version = "1.2.0"
-date = "2025-06-01"
-title = "修复与优化"
-notes = [
-    "修复连发引擎在部分游戏中失效的问题",
-    "优化桌宠动画流畅度",
-]
-
-[[versions]]
-version = "1.1.0"
-date = "2025-05-01"
-title = "新增功能"
-notes = [
-    "新增随机抖动功能（亲友专属功能）",
-    "新增宏录制与回放",
-]
-```
-
-每次发布时追加一条记录，`GET /changelog` 倒序渲染。
 
 ---
 
-**单进程多窗口**：面板和桌宠是同一 Tauri 应用的两个独立 WebView 窗口，各自有独立的 HTML 入口（`panel.html` / `pet.html`），通过 Tauri 内置事件系统通信。
+**单进程多窗口**：面板和桌宠是同一 Tauri 应用的两个独立 WebView 窗口，各自有独立的 HTML 入口（`panel.html` / `pet.html`），通过 Tauri 事件系统通信。当前进度为 `panel` 已实现，`pet` 在 v0.3 加入。
 
 **窗口配置（tauri.conf.json）：**
 
@@ -349,14 +338,18 @@ notes = [
   "windows": [
     {
       "label": "panel",
-      "url": "panel.html",
+      "url": "/panel.html",
       "visible": false,
-      "width": 900,
-      "height": 600
+      "width": 405,
+      "height": 720,
+      "resizable": false,
+      "maximizable": false,
+      "decorations": false,
+      "transparent": true
     },
     {
       "label": "pet",
-      "url": "pet.html",
+      "url": "/pet.html",
       "transparent": true,
       "decorations": false,
       "alwaysOnTop": true,
@@ -373,9 +366,11 @@ notes = [
 
 ```
 引擎状态变更（Rust）
-  → app.emit_all("engine_state", payload)
-  → 面板窗口更新状态显示
-  → 桌宠窗口驱动动画状态机切换
+  → app.emit("global-enabled-changed", payload)
+  → app.emit("app-status-changed", payload)
+  → app.emit("update-*", payload)
+  → 面板窗口更新状态显示；激活态规则当前由前端轮询 `get_active_rules`
+  → v0.3 桌宠窗口再抽象统一状态事件源
 ```
 
 ### Crate 依赖图
@@ -389,7 +384,10 @@ packages/crypto      packages/migrate
          └────────────────────┘
     apps/main/src-tauri      apps/keygen
 
-apps/release-server（仅依赖 axum / tokio / rust-embed）
+packages/win-input  ← packages/burst-engine ← apps/main/src-tauri
+packages/win-driver / win-sysinfo / resource-integrity ← apps/main/src-tauri
+
+apps/release-server（v0.5：axum / tokio / rust-embed）
 ```
 
 ### 数据存储路径约定
@@ -397,11 +395,12 @@ apps/release-server（仅依赖 axum / tokio / rust-embed）
 | 数据类型           | 路径                                        | 说明                                                                       |
 | ------------------ | ------------------------------------------- | -------------------------------------------------------------------------- |
 | 配置文件（`.qzh`） | `{app_data_dir}/profiles/`                  | 用户导入/导出通过文件对话框，不暴露内部路径                                |
-| 应用设置           | `{app_data_dir}/settings.json`              | `tauri-plugin-store` 管理，`#[serde(default)]` + `packages/migrate` 迁移链 |
-| 日志               | `{app_log_dir}/`                            | `tracing-appender` 按天滚动，保留 7 天                                     |
-| 崩溃日志           | `{app_log_dir}/crash-YYYY-MM-DD-HHmmss.log` | panic hook 写入                                                            |
+| 应用设置           | `{app_data_dir}/settings.json`              | `tauri-plugin-store` 管理；复杂 settings 迁移待接入 `packages/migrate` |
+| 待安装更新包       | `{app_local_data_dir}/pending_update/`      | 静默下载完成后暂存，下次启动自动安装                                       |
+| 日志               | `log_dir()`                                 | Windows: `%LOCALAPPDATA%\fun.xwink.flairbloom\logs`；macOS: `~/Library/Logs/fun.xwink.flairbloom` |
+| 崩溃日志           | `log_dir()/crash-{unix_ts}.log`             | panic hook 写入                                                            |
 
-`app_data_dir` / `app_log_dir` 由 Tauri `PathResolver` 跨平台解析，Windows 对应 `%APPDATA%\qzhua`，macOS 对应 `~/Library/Application Support/qzhua`。
+`app_data_dir` / `app_local_data_dir` 由 Tauri `PathResolver` 跨平台解析；日志目录由 `bootstrap/logging.rs` 显式定义。
 
 ### 输入参数约束
 
@@ -427,11 +426,13 @@ apps/release-server（仅依赖 axum / tokio / rust-embed）
 
 ## 桌宠模式设计
 
+本节是 v0.3 设计稿，当前代码库尚未包含桌宠窗口入口。
+
 ### 点击穿透
 
 使用 Tauri 内置 `Window::set_ignore_cursor_events(bool)`（跨平台，Windows / macOS 均支持）。
 
-rdev 全局鼠标监听计算光标是否进入桌宠窗口区域：
+跨平台鼠标位置监听方案待定，优先使用 Tauri / 系统 API；避免为桌宠重新引入与连发引擎无关的全局输入依赖。监听逻辑用于计算光标是否进入桌宠窗口区域：
 
 - 进入 → `set_ignore_cursor_events(false)` 关闭穿透（支持拖拽和右键）
 - 离开 → `set_ignore_cursor_events(true)` 恢复穿透
@@ -495,8 +496,8 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 {
   "agreed": true,
   "agreed_at": 1748000000,
-  "agreement_version": "1.0",
-  "app_version_at_agree": "1.0.0"
+  "agreement_version": "1.2",
+  "app_version_at_agree": "0.2.4"
 }
 ```
 
@@ -520,14 +521,18 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 
 | 功能                     | 实现位置                                        |
 | ------------------------ | ----------------------------------------------- |
-| 用户协议（首次启动）     | apps/main — AgreementPage                       |
+| 用户协议（首次启动）     | apps/main — AgreementDialog + bootstrap/agreement.rs |
 | 按压连发                 | packages/burst-engine                           |
 | 一键连发（热键 Toggle）  | packages/burst-engine                           |
-| 配置文件 CRUD + 导入导出 | apps/main — commands/profile.rs                 |
+| 键盘 / 鼠标 / 滚轮连发   | packages/burst-engine + packages/win-input      |
+| 三档输入模式             | packages/win-input + apps/main/src-tauri/commands/engine.rs |
+| 配置文件 CRUD            | apps/main — commands/profile.rs                 |
+| 外部配置导入             | apps/main — commands/import_profile.rs + ImportDialog |
 | `.qzh` 加密格式          | packages/qzh-format + packages/qzh-profile      |
-| 快速切换配置文件         | 面板 UI + 托盘菜单                              |
+| 快速切换配置文件         | 面板 UI + 设置面板配置卡片                      |
+| 设置面板                 | SettingsDialog（通用 / 热键 / 声音 / 配置文件） |
+| 诊断修复                 | commands/repair.rs + RepairDialog               |
 | 系统托盘 & 开机自启      | apps/main/src-tauri — tray.rs                   |
-| 桌宠模式（基础动画）     | apps/main — pet/PetApp.tsx                      |
 | 自动升级                 | apps/main — bootstrap/update.rs + commands/app.rs |
 
 ### 亲友专属功能（兑换码激活，限时）
@@ -540,6 +545,8 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 | 条件配置集     | apps/main/src-tauri — watcher.rs                |
 | 回放速度调节   | apps/main/src-tauri — engine/macro_play.rs      |
 | 桌宠扩展动画包 | apps/main — pet/（激活后解锁）                  |
+
+注：鼠标连点当前已作为核心体验开放；v0.4 可按 `MOUSE_BURST` feature bit 收敛为亲友专属或保留开放策略。
 
 ---
 
@@ -614,12 +621,13 @@ pub fn migrate(mut data: Value, from: u32, to: u32) -> Result<Value> {
 - 仅当字段**重命名、移动、删除或类型变更**时才递增 `schema_version`
 - 每次递增必须同步编写对应迁移函数，不允许跳版本
 
-**版本历史（持续追加）：**
+**schema 版本进度（持续追加）：**
 
 | schema_version | 变更内容                                              | 引入版本 |
 | -------------- | ----------------------------------------------------- | -------- |
 | 1              | 初始 schema                                           | v0.1     |
 | 2              | 按键字段 `u32` VK → `KeyId`（键盘 + 鼠标 5 键统一）   | v0.2     |
+| 3              | `MouseButton` 新增 `WheelUp` / `WheelDown`，支持滚轮连发 | v0.2.4 |
 
 ---
 
@@ -628,6 +636,8 @@ pub fn migrate(mut data: Value, from: u32, to: u32) -> Result<Value> {
 payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `expiry u64` / `features u32`
 
 兑换码格式：`QZHUA-XXXXX-XXXXX-XXXXX-XXXXX`（Base32，Ed25519 签名 + payload）
+
+密钥策略：Ed25519 私钥寄存在 GitHub Secrets，仅在签发 / 构建流程中注入；私钥不进入主应用二进制。主应用只内置由构建注入的校验公钥。
 
 ---
 
@@ -642,11 +652,11 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 **基础设施（一次性）**
 
 - [x] Monorepo 初始化：根 `Cargo.toml`、`pnpm-workspace.yaml`、`packages/` 骨架
-- [x] `apps/main` Tauri v2 + Vite 多页（panel），`tauri.conf.json` 单窗口配置
+- [x] `apps/main` Tauri v2 + Vite 单页（panel），`tauri.conf.json` 单窗口配置
 - [x] `packages/crypto` 骨架（AES-256-GCM + HKDF + Ed25519 校验）
 - [x] `packages/migrate` 骨架（`run_migrations()` 泛型函数）
 - [x] `packages/qzh-format` 骨架（`FileHeader` + `read/write_encrypted`）+ `packages/qzh-profile`（`Profile` / `BurstRule` 数据结构 + `schema_migrate.rs`）
-- [x] GitHub Actions `release.yml`：推 tag 触发矩阵构建（`windows-latest` / `macos-latest`）→ 签名 → 发布 GitHub Release
+- [x] GitHub Actions `release.yml`：推 tag 触发 Windows x64 构建 → 签名 → 创建 Draft Release
 - [x] GitHub Secrets：`TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` 已配置
 - [x] `tauri.conf.json` updater endpoint 指向 GitHub Releases `latest.json`
 - [x] `tauri-plugin-single-instance`（防重复启动）
@@ -656,7 +666,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 - [x] `windows_sys` `WH_KEYBOARD_LL` / `WH_MOUSE_LL` 全局键鼠监听 + `SendInput` / Interception / DD-HID 三通道模拟
 - [x] `SIM_MARKER` + `PENDING_INJECTIONS` 过滤模拟事件循环，`pressed_keys` 过滤 OS key-repeat
-- [x] `catch_unwind` 包裹引擎主循环，panic 后自动重启
+- [x] `catch_unwind` 包裹连发循环，panic 后记录日志并补发释放事件
 - [x] 按压连发状态机（持键发送，抬键停止）
 - [x] Toggle 连发状态机（热键开关，与 Hold 模式统一由 `burst-engine` 低级 hook 驱动）
 - [x] 多规则并行支持
@@ -682,7 +692,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **系统托盘**
 
-- [x] 托盘图标 + 菜单（菜单文字区分启用/禁用状态；图标切换待 v0.2 补充）
+- [x] 托盘图标 + 菜单（菜单文字区分启用/禁用状态；启用/禁用动态图标切换待补充）
 - [x] 托盘菜单：全局开关 / 打开面板 / 退出
 
 **自动更新**
@@ -705,11 +715,15 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] `std::panic::set_hook` 捕获崩溃，写独立崩溃日志（`crash-{ts}.log`）
 - [ ] 崩溃提示窗口（打开日志文件夹 / 复制路径 / 关闭）— 当前仅写日志，未弹窗
 - [x] 前端 JS 错误转发到 Rust logger（`log_from_frontend` command）
-- [x] 设置页"查看日志文件夹"入口（`PanelApp.tsx` 调 `open_log_dir`）
+- [x] 关于 / 诊断入口可打开日志、数据、安装、驱动目录（`open_app_dir` 白名单）
 
 **设置面板**
 
-- [ ] 设置面板骨架：通用 / 配置文件 / 关于 分区，后续迭代按需填充内容
+- [x] 设置面板：通用 / 热键 / 声音 / 配置文件四个分区
+- [x] 通用分区：开机自启、关闭行为
+- [x] 热键分区：全局开启 / 停止、面板显隐
+- [x] 声音分区：全局开关播报、语句、语音、语速、音调、音量、试听
+- [x] 配置文件分区：配置卡片、新建、切换、重命名、删除、导入入口
 
 **首次引导**
 
@@ -717,10 +731,11 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **完整配置管理**
 
-- [x] 后端命令骨架：`save_profile` / `load_profile` / `list_profiles` / `init_default_profile` / `get_active_profile_path`（`commands/profile.rs`）
-- [ ] 多配置文件 UI：新建 / 重命名 / 删除（缺 `rename_profile` / `delete_profile` 后端命令 + 面板 UI）
-- [ ] 配置文件下拉快速切换
-- [ ] 导入 / 导出 `.qzh` 文件
+- [x] 后端命令：`save_profile` / `load_profile` / `list_profiles` / `init_default_profile` / `get_active_profile_path` / `rename_profile` / `delete_profile` / `fork_active_profile`
+- [x] 多配置文件 UI：新建 / 切换 / 重命名 / 删除
+- [x] 默认配置保护：修改默认配置自动 fork
+- [x] 外部配置导入：支持丐帮高手 `config.json` 扫描、预览、导入
+- [ ] 导入 / 导出原生 `.qzh` 文件
 - [ ] `notify` 监听配置文件变更自动 reload；失效时定时轮询兜底
 
 **托盘完善**
@@ -732,26 +747,37 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 **面板完善**
 
 - [x] 更新提示弹窗（含更新说明）
-- [ ] 热键冲突检测与提示
+- [x] 热键冲突检测与提示
 - [x] 规则启用/禁用开关（`BurstRule.enabled` 字段已就位）
-- [ ] 连发间隔滑块 + 数值输入
+- [x] 连发间隔数值输入（10ms–10000ms）
+- [ ] 连发间隔滑块 / 步进器优化
 
 **连发引擎稳定性**
 
-- [x] `set_rules` 替换规则列表前停止所有已运行的连发线程并清空 toggle 状态，防止删除规则后孤儿线程永久运行
-- [x] `set_rules` Tauri 命令加入入参校验（规则数 ≤ 64、`interval_ms` 在 `[10, 10000]`），防止非法值绕过 `profile.rs::validate()` 进入引擎导致忙循环（`commands/engine.rs:19`）
-- [x] Hold 连发中模拟 KeyRelease 未过滤：已改用 `dwExtraInfo = SIM_MARKER` 标记所有 SendInput 事件，hook 统一过滤，不再误触发 `on_key_release`
-- [x] 跨规则干扰：同上，模拟 target_key 的 release 带 SIM_MARKER，不会进入其他规则的 stop_burst
-- [x] Toggle / 全局热键未过滤 OS key-repeat：引擎用 `pressed_keys: HashSet<KeyId>` 记录物理按下状态，仅首次 down 进入 `on_key_press`，up 后释放；不依赖 `KBDLLHOOKSTRUCT.flags` 保留位
+- [x] 规则热更新：替换规则前停止连发线程并清空 toggle 状态
+- [x] 后端入参校验：规则数、间隔范围、DD-HID 特殊约束在命令层 / profile 层双重校验
+- [x] 模拟事件过滤：SendInput 使用 `SIM_MARKER`，驱动通道使用 `PENDING_INJECTIONS`
+- [x] 多规则隔离：模拟目标键不会触发其他规则的启动 / 停止逻辑
+- [x] OS key-repeat 过滤：`pressed_keys: HashSet<KeyId>` 只响应物理首次按下
 
-**键盘全键位 + 鼠标连发（v0.2.0）**
+**输入范围扩展**
 
-- [x] 数据模型：`packages/qzh-profile/src/key_id.rs` 引入 tagged `KeyId = Keyboard(u32) | Mouse(MouseButton)`；`BurstRule.{trigger_key,target_key,stop_key}` 与 `Hotkeys.global_toggle` 全部 `u32` → `KeyId`
+- [x] 数据模型：`packages/qzh-profile/src/key_id.rs` 引入 tagged `KeyId = Keyboard(u32) | Mouse(MouseButton)`；`BurstRule.{trigger_key,target_key,stop_key}` 与 `Hotkeys.{global_toggle,global_stop,panel_toggle}` 全部改用 `KeyId`
 - [x] schema v1→v2 自动迁移：旧裸 VK 包装为 `{kind:"keyboard",code:VK}`，可选字段 `null` 保留
 - [x] 全局物理按键 hook 扩鼠标：与键盘 hook 共用消息循环线程加装 `WH_MOUSE_LL`，识别 5 键 + `WM_XBUTTONDOWN/UP` 高 16 位的 X1/X2，过滤 SIM_MARKER 与自循环
 - [x] 三通道注入支持鼠标 5 键：SendInput `INPUT_MOUSE` + `MOUSEEVENTF_*`、DD `DD_btn`（X1/X2 不在值域，自动回退 SendInput + 一次 warn）、Interception `InterceptionMouseStroke` + 鼠标设备扫描
 - [x] 前端 KeyCapture 扩约 120 项键盘白名单（F13–F24 / 小键盘 / OEM 标点 / 编辑键 / 修饰键独立位）+ 鼠标 5 键 onMouseDown 录入
 - [x] DD-HID schema validate 拦截 `target_key = Mouse(X1|X2)`，UI 提示用户改用 SendInput / Interception 模式
+
+**v0.2 收尾能力**
+
+- [x] 全局热键：配置级开启键 / 停止键 / 面板显隐键，启动期立即生效
+- [x] 声音反馈：全局开关切换语音播报，支持系统语音列表兼容回退
+- [x] 诊断修复：管理员权限、开机自启、输入模式、驱动状态、安装前置检查、DD-HID / Interception 残留修复
+- [x] 驱动资源完整性校验与 DD-HID 诊断报告导出
+- [x] WebView 聚焦场景热键中继与默认快捷键拦截
+- [x] schema v2→v3：新增滚轮上 / 下，SendInput、Interception、DD-HID 三通道支持滚轮注入
+- [x] 面板显隐热键使用最小化 / 恢复语义；托盘打开、托盘双击、再次启动统一唤回面板
 
 **发布 v0.2**
 
@@ -764,10 +790,10 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [ ] `tauri.conf.json` 新增 pet 窗口（transparent / decorations:false / alwaysOnTop）
 - [ ] Vite 新增 `pet.html` 入口
 - [ ] `Window::set_ignore_cursor_events()` 点击穿透控制
-- [ ] rdev 鼠标坐标检测，hover 时关闭穿透，离开恢复
+- [ ] 鼠标坐标检测，hover 时关闭穿透，离开恢复
 - [ ] 拖拽移动 + 位置持久化
 - [ ] 桌宠前端：SVG 角色 + CSS 动画（Idle / Burst / Hover）
-- [ ] `useEngineStatus` hook（监听 Tauri `engine_state` 事件）
+- [ ] `useEngineStatus` hook（复用 `global-enabled-changed` / `app-status-changed`，并为激活规则补统一事件）
 - [ ] `usePetAnim` 动画状态机
 - [ ] 右键菜单（开关 / 打开面板 / 退出）
 - [ ] 左键状态气泡（3 秒淡出）
@@ -785,7 +811,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 **许可证**
 
 - [ ] `apps/keygen` CLI：生成 Ed25519 密钥对，签名输出兑换码
-- [ ] GitHub Secrets 存储 Ed25519 私钥（仅 keygen 使用，不进应用二进制）
+- [ ] GitHub Secrets 注入 Ed25519 签发 / 构建流程（私钥不进主应用二进制）
 - [ ] 激活面板 UI：输入兑换码、显示到期时间和已激活功能
 - [ ] 引擎启动时读取激活记录，按 feature bits 控制功能开关
 - [ ] 到期前 7 天 UI 提醒（面板 banner + 桌宠状态气泡）
@@ -798,7 +824,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **亲友专属功能**
 
-- [ ] 鼠标连点（按压 / Toggle）
+- [ ] 鼠标连点限制策略（当前开放，v0.4 决定是否按 `MOUSE_BURST` 收敛）
 - [ ] 随机抖动（间隔 ± 可配置随机偏差）
 - [ ] 宏录制（事件流 + 时间戳，存为 `.qzh`）
 - [ ] 宏回放（原速 / 倍速）+ 热键绑定
@@ -814,7 +840,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [ ] `apps/release-server` Axum 服务，`rust-embed` 内嵌静态资源
 - [ ] 落地页 `/`（介绍 + 截图 + 下载按钮 → GitHub Releases）
 - [ ] 下载页 `/download`（平台 + 版本信息）
-- [ ] 更新日志页 `/changelog`（读取 `changelog.toml`）
+- [ ] 更新日志页 `/changelog`（读取 / 转换 `CHANGELOG.md`，避免维护第二份内容源）
 - [ ] 健康检查 `/health`
 - [ ] 桌宠激活后解锁扩展动画状态
 
@@ -827,7 +853,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [ ] 条件配置集（检测活动进程，自动切换配置文件）
 - [ ] 回放速度调节 UI（0.5x / 1x / 2x）
 - [ ] 桌宠扩展动画包（付费解锁）
-- [ ] Mac 兼容（辅助功能权限引导，`rdev`/`enigo` macOS 适配）
+- [ ] Mac 兼容（辅助功能权限引导，评估 macOS 原生监听 / 注入实现）
 - [ ] Azure Trusted Signing 代码签名（GitHub Actions 集成，每次 release 自动签名）；早期版本在安装说明中注明 SmartScreen 绕过方式（"更多信息 → 仍要运行"）
 
 ---
@@ -835,7 +861,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 ### 待定（最低优先级）
 
 - [ ] 桌宠输入响应模式（`gilrs` 手柄 + 键鼠动画反馈，参考 Dongocat）
-- [ ] 多平台 release-server 支持（darwin-aarch64、linux-x86_64）
+- [ ] 多平台发布与下载页支持（darwin-aarch64、linux-x86_64）
 
 ---
 
@@ -854,14 +880,14 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 | 密钥派生          | `hkdf` + `sha2`                                            |
 | 许可证签名校验    | `ed25519-dalek`                                            |
 | 兑换码编解码      | `base32`                                                   |
-| 配置文件变更监听  | `notify`                                                   |
-| 手柄输入监听      | `gilrs`（阶段三）                                          |
-| HTTP 更新服务     | `axum` + `tokio`                                           |
+| 配置文件变更监听  | `notify`（规划，当前未接入）                              |
+| 手柄输入监听      | `gilrs`（待定低优先级）                                    |
+| HTTP 更新服务     | GitHub Releases + Tauri updater；独立 `axum` 落地页待定    |
 | 应用状态持久化    | `tauri-plugin-store`                                       |
 | 开机自启          | `tauri-plugin-autostart`                                   |
 | 前端动画          | CSS 关键帧 + SVG（MVP）/ Lottie（后期）                    |
-| 前端 UI           | React + TypeScript + Tailwind CSS                          |
-| 多页构建          | Vite multi-page（panel.html + pet.html）                   |
+| 前端 UI           | React + TypeScript + 原生 CSS                              |
+| 前端构建          | Vite（当前 `panel.html` 单入口，`pet.html` 待 v0.3）       |
 | Monorepo 管理     | Cargo workspace + pnpm workspaces                          |
 
 ---
@@ -870,14 +896,16 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 | #   | 风险                       | 缓解方案                                                            | 状态 |
 | --- | -------------------------- | ------------------------------------------------------------------- | ---- |
-| ①   | rdev + enigo 事件循环      | `AtomicUsize` sim_count 过滤模拟事件                                | 确认 |
+| ①   | 低级 hook 与模拟输入自循环 | `SIM_MARKER` + `PENDING_INJECTIONS` 过滤模拟事件                    | 消除 |
 | ②   | 反作弊软件拦截模拟输入     | 不做技术规避，EULA + 文档明确说明                                   | 确认 |
-| ③   | 桌宠被全屏游戏覆盖         | 文档 QA 告知，建议边框全屏                                          | 确认 |
-| ④   | 点击穿透时无法触发右键菜单 | rdev hover 检测，动态调用 `set_ignore_cursor_events()`              | 确认 |
+| ③   | 桌宠被全屏游戏覆盖         | 桌宠未实现；实现时文档 QA 告知，建议边框全屏                       | 待评估 |
+| ④   | 点击穿透时无法触发右键菜单 | 桌宠未实现；规划动态调用 `set_ignore_cursor_events()`               | 待评估 |
 | ⑤   | AES 密钥被逆向提取         | 接受"防普通用户"定位，不对抗专业逆向                                | 确认 |
 | ⑥   | 系统时间回拨绕过许可证     | payload 含 issue_time 做下界校验；`last_verified_at` 列为扩展优化点 | 确认 |
-| ⑦   | Named Pipe 连接失败        | 架构改为单一 Tauri 多窗口，风险消除                                 | 消除 |
+| ⑦   | 多窗口 IPC 复杂度          | 当前只有面板窗口；后续桌宠继续使用 Tauri event，不引入 Named Pipe    | 消除 |
 | ⑧   | 更新包被中间人替换         | Tauri updater 强制 .sig 签名验证 + HTTPS                            | 确认 |
 | ⑨   | Mac 点击穿透 API 不同      | 改用 Tauri 内置 `set_ignore_cursor_events()`，跨平台，风险消除      | 消除 |
-| ⑩   | SIM_COUNT 竞态（非 Unicode 键） | 已用 `windows_sys` 替换 rdev/enigo，`SendInput` 的 `dwExtraInfo = SIM_MARKER` 精确标记，hook 统一过滤，无竞态 | 消除 |
+| ⑩   | SIM_COUNT 竞态（非 Unicode 键） | 已用 `windows_sys` + `SIM_MARKER` 精确标记，hook 统一过滤，无竞态 | 消除 |
 | ⑪   | 模拟 KeyRelease 未过滤 | 同上，所有 SendInput（含 key_up）均带 SIM_MARKER，hook 不再区分 press/release 统一跳过 | 消除 |
+| ⑫   | DD-HID / Interception 驱动残留 | 诊断修复提供安装前置检查、残留识别、深度清理与重启提示 | 缓解 |
+| ⑬   | WebView 聚焦吞掉热键 / 默认快捷键抢占 | 前端中继键盘事件到后端，并阻止非编辑区默认快捷键 | 缓解 |
