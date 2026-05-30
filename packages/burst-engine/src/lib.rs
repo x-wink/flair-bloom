@@ -8,17 +8,18 @@ use std::{
     collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicBool, Ordering},
+        mpsc::{self, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 #[cfg(windows)]
 use tracing::error;
 use tracing::info;
+use win_input::key_events;
 #[cfg(windows)]
 use win_input::{clear_pending_injections, try_consume_injection, SIM_MARKER};
-use win_input::{key_down, key_up};
 #[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{LPARAM, WPARAM},
@@ -58,23 +59,47 @@ pub fn rehook_keyboard() {
 #[cfg(not(windows))]
 pub fn rehook_keyboard() {}
 
-type ActiveLoops = Arc<
-    Mutex<
-        HashMap<
-            String,
-            (
-                Arc<AtomicBool>,
-                thread::Thread,
-                KeyId,
-                thread::JoinHandle<()>,
-            ),
-        >,
-    >,
->;
 type GlobalChangedCb = Arc<Mutex<Option<Box<dyn Fn(bool) + Send + Sync>>>>;
 type PanelToggleCb = Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
 type PhysicalKeys = Arc<Mutex<HashSet<KeyId>>>;
 type SimulatedKeys = Arc<Mutex<HashMap<KeyId, usize>>>;
+type ActiveRules = Arc<Mutex<HashSet<String>>>;
+type KeyEvent = (KeyId, bool);
+
+#[derive(Clone)]
+struct ScheduledRuleConfig {
+    id: String,
+    target_key: KeyId,
+    interval_ms: u32,
+    allow_while_physical_down: bool,
+}
+
+enum SchedulerCommand {
+    Start(ScheduledRuleConfig),
+    Stop(String),
+    StopAll,
+    Shutdown,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PulsePhase {
+    Down,
+    Up,
+}
+
+struct ScheduledRule {
+    config: ScheduledRuleConfig,
+    hold_ms: u64,
+    rest_ms: u64,
+    phase: PulsePhase,
+    next_at: Instant,
+    is_down: bool,
+}
+
+#[derive(Default)]
+struct TargetHold {
+    owners: HashMap<String, bool>,
+}
 
 #[derive(Default)]
 struct RuleSnapshot {
@@ -138,38 +163,83 @@ fn record_simulated_up(simulated_keys: &SimulatedKeys, key: KeyId) -> bool {
     true
 }
 
+fn plan_key_down(
+    key: KeyId,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+    allow_while_physical_down: bool,
+    events: &mut Vec<KeyEvent>,
+) -> bool {
+    if !allow_while_physical_down && physical_key_down(physical_keys, key) {
+        return false;
+    }
+    record_simulated_down(simulated_keys, key);
+    events.push((key, false));
+    true
+}
+
+fn plan_key_up(
+    key: KeyId,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+    allow_while_physical_down: bool,
+) -> Option<KeyEvent> {
+    if !record_simulated_up(simulated_keys, key) {
+        return None;
+    }
+    if allow_while_physical_down || !physical_key_down(physical_keys, key) {
+        Some((key, true))
+    } else {
+        None
+    }
+}
+
+fn emit_key_events(events: &[KeyEvent]) {
+    if !events.is_empty() {
+        key_events(events);
+    }
+}
+
+#[cfg(test)]
 fn safe_key_down(
     key: KeyId,
     physical_keys: &PhysicalKeys,
     simulated_keys: &SimulatedKeys,
     allow_while_physical_down: bool,
 ) -> bool {
-    if !allow_while_physical_down && physical_key_down(physical_keys, key) {
-        return false;
-    }
-    key_down(key);
-    record_simulated_down(simulated_keys, key);
-    true
+    let mut events = Vec::new();
+    let started = plan_key_down(
+        key,
+        physical_keys,
+        simulated_keys,
+        allow_while_physical_down,
+        &mut events,
+    );
+    emit_key_events(&events);
+    started
 }
 
+#[cfg(test)]
 fn safe_key_up(
     key: KeyId,
     physical_keys: &PhysicalKeys,
     simulated_keys: &SimulatedKeys,
     allow_while_physical_down: bool,
 ) {
-    if !record_simulated_up(simulated_keys, key) {
-        return;
-    }
-    if allow_while_physical_down || !physical_key_down(physical_keys, key) {
-        key_up(key);
+    if let Some(event) = plan_key_up(
+        key,
+        physical_keys,
+        simulated_keys,
+        allow_while_physical_down,
+    ) {
+        emit_key_events(&[event]);
     }
 }
 
 fn release_simulated_key(key: KeyId, physical_keys: &PhysicalKeys, simulated_keys: &SimulatedKeys) {
     let was_down = revive(simulated_keys.lock()).remove(&key).is_some();
     if was_down && !physical_key_down(physical_keys, key) {
-        key_up(key);
+        emit_key_events(&[(key, true)]);
     }
 }
 
@@ -178,11 +248,385 @@ fn release_simulated_keys(physical_keys: &PhysicalKeys, simulated_keys: &Simulat
         .drain()
         .map(|(key, _)| key)
         .collect();
+    let mut events = Vec::new();
     for key in keys {
         if !physical_key_down(physical_keys, key) {
-            key_up(key);
+            events.push((key, true));
         }
     }
+    emit_key_events(&events);
+}
+
+impl ScheduledRule {
+    fn new(config: ScheduledRuleConfig, now: Instant) -> Self {
+        let interval_ms = config.interval_ms as u64;
+        let hold_ms = (interval_ms / 3)
+            .clamp(5, 30)
+            .min(interval_ms.saturating_sub(1));
+        Self {
+            config,
+            hold_ms,
+            rest_ms: interval_ms - hold_ms,
+            phase: PulsePhase::Down,
+            next_at: now,
+            is_down: false,
+        }
+    }
+}
+
+fn spawn_scheduler(
+    rx: Receiver<SchedulerCommand>,
+    physical_keys: PhysicalKeys,
+    simulated_keys: SimulatedKeys,
+    active_rules: ActiveRules,
+) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_scheduler(rx, &physical_keys, &simulated_keys, &active_rules);
+        }));
+        if result.is_err() {
+            revive(active_rules.lock()).clear();
+            release_simulated_keys(&physical_keys, &simulated_keys);
+        }
+    })
+}
+
+fn run_scheduler(
+    rx: Receiver<SchedulerCommand>,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+    active_rules: &ActiveRules,
+) {
+    let mut rules = HashMap::<String, ScheduledRule>::new();
+    let mut target_holds = HashMap::<KeyId, TargetHold>::new();
+    loop {
+        while let Ok(cmd) = rx.try_recv() {
+            if handle_scheduler_command(
+                cmd,
+                &mut rules,
+                &mut target_holds,
+                physical_keys,
+                simulated_keys,
+                active_rules,
+            ) {
+                cleanup_scheduler_rules(
+                    &mut rules,
+                    &mut target_holds,
+                    physical_keys,
+                    simulated_keys,
+                    active_rules,
+                    true,
+                );
+                return;
+            }
+        }
+
+        let mut events = Vec::new();
+        step_due_rules(
+            &mut rules,
+            &mut target_holds,
+            physical_keys,
+            simulated_keys,
+            &mut events,
+        );
+        emit_key_events(&events);
+
+        let timeout = next_scheduler_timeout(&rules);
+        let command = match timeout {
+            Some(timeout) => match rx.recv_timeout(timeout) {
+                Ok(cmd) => Some(cmd),
+                Err(RecvTimeoutError::Timeout) => None,
+                Err(RecvTimeoutError::Disconnected) => {
+                    cleanup_scheduler_rules(
+                        &mut rules,
+                        &mut target_holds,
+                        physical_keys,
+                        simulated_keys,
+                        active_rules,
+                        true,
+                    );
+                    return;
+                }
+            },
+            None => match rx.recv() {
+                Ok(cmd) => Some(cmd),
+                Err(_) => {
+                    cleanup_scheduler_rules(
+                        &mut rules,
+                        &mut target_holds,
+                        physical_keys,
+                        simulated_keys,
+                        active_rules,
+                        true,
+                    );
+                    return;
+                }
+            },
+        };
+
+        if let Some(cmd) = command {
+            if handle_scheduler_command(
+                cmd,
+                &mut rules,
+                &mut target_holds,
+                physical_keys,
+                simulated_keys,
+                active_rules,
+            ) {
+                cleanup_scheduler_rules(
+                    &mut rules,
+                    &mut target_holds,
+                    physical_keys,
+                    simulated_keys,
+                    active_rules,
+                    true,
+                );
+                return;
+            }
+        }
+    }
+}
+
+fn handle_scheduler_command(
+    cmd: SchedulerCommand,
+    rules: &mut HashMap<String, ScheduledRule>,
+    target_holds: &mut HashMap<KeyId, TargetHold>,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+    active_rules: &ActiveRules,
+) -> bool {
+    match cmd {
+        SchedulerCommand::Start(config) => {
+            rules.insert(
+                config.id.clone(),
+                ScheduledRule::new(config, Instant::now()),
+            );
+            false
+        }
+        SchedulerCommand::Stop(rule_id) => {
+            if let Some(rule) = rules.remove(&rule_id) {
+                stop_scheduled_rule(rule, target_holds, physical_keys, simulated_keys);
+            }
+            false
+        }
+        SchedulerCommand::StopAll => {
+            cleanup_scheduler_rules(
+                rules,
+                target_holds,
+                physical_keys,
+                simulated_keys,
+                active_rules,
+                false,
+            );
+            false
+        }
+        SchedulerCommand::Shutdown => true,
+    }
+}
+
+fn stop_scheduled_rule(
+    rule: ScheduledRule,
+    target_holds: &mut HashMap<KeyId, TargetHold>,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+) {
+    if rule.is_down {
+        let mut events = Vec::new();
+        release_target_owner(
+            &rule.config.id,
+            rule.config.target_key,
+            target_holds,
+            physical_keys,
+            simulated_keys,
+            rule.config.allow_while_physical_down,
+            &mut events,
+        );
+        emit_key_events(&events);
+    }
+}
+
+fn cleanup_scheduler_rules(
+    rules: &mut HashMap<String, ScheduledRule>,
+    target_holds: &mut HashMap<KeyId, TargetHold>,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+    active_rules: &ActiveRules,
+    clear_active_rules: bool,
+) {
+    let mut events = Vec::new();
+    for (_, rule) in rules.drain() {
+        if rule.is_down {
+            release_target_owner(
+                &rule.config.id,
+                rule.config.target_key,
+                target_holds,
+                physical_keys,
+                simulated_keys,
+                rule.config.allow_while_physical_down,
+                &mut events,
+            );
+        }
+    }
+    release_all_target_holds(target_holds, physical_keys, simulated_keys, &mut events);
+    emit_key_events(&events);
+    if clear_active_rules {
+        revive(active_rules.lock()).clear();
+    }
+    release_simulated_keys(physical_keys, simulated_keys);
+}
+
+fn acquire_target_owner(
+    rule_id: &str,
+    target_key: KeyId,
+    target_holds: &mut HashMap<KeyId, TargetHold>,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+    allow_while_physical_down: bool,
+    events: &mut Vec<KeyEvent>,
+) -> bool {
+    if let Some(hold) = target_holds.get_mut(&target_key) {
+        hold.owners
+            .insert(rule_id.to_string(), allow_while_physical_down);
+        return true;
+    }
+
+    if !plan_key_down(
+        target_key,
+        physical_keys,
+        simulated_keys,
+        allow_while_physical_down,
+        events,
+    ) {
+        return false;
+    }
+
+    let mut hold = TargetHold::default();
+    hold.owners
+        .insert(rule_id.to_string(), allow_while_physical_down);
+    target_holds.insert(target_key, hold);
+    true
+}
+
+fn release_target_owner(
+    rule_id: &str,
+    target_key: KeyId,
+    target_holds: &mut HashMap<KeyId, TargetHold>,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+    allow_while_physical_down: bool,
+    events: &mut Vec<KeyEvent>,
+) {
+    let release_allows_physical_down = {
+        let Some(hold) = target_holds.get_mut(&target_key) else {
+            return;
+        };
+        let release_allows_physical_down = hold
+            .owners
+            .remove(rule_id)
+            .unwrap_or(allow_while_physical_down);
+        if !hold.owners.is_empty() {
+            return;
+        }
+        release_allows_physical_down
+    };
+    target_holds.remove(&target_key);
+    if let Some(event) = plan_key_up(
+        target_key,
+        physical_keys,
+        simulated_keys,
+        release_allows_physical_down,
+    ) {
+        events.push(event);
+    }
+}
+
+fn release_all_target_holds(
+    target_holds: &mut HashMap<KeyId, TargetHold>,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+    events: &mut Vec<KeyEvent>,
+) {
+    let holds: Vec<_> = target_holds
+        .drain()
+        .map(|(target_key, hold)| {
+            let allow = hold.owners.into_values().any(|v| v);
+            (target_key, allow)
+        })
+        .collect();
+    for (target_key, allow_while_physical_down) in holds {
+        if let Some(event) = plan_key_up(
+            target_key,
+            physical_keys,
+            simulated_keys,
+            allow_while_physical_down,
+        ) {
+            events.push(event);
+        }
+    }
+}
+
+fn step_due_rules(
+    rules: &mut HashMap<String, ScheduledRule>,
+    target_holds: &mut HashMap<KeyId, TargetHold>,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+    events: &mut Vec<KeyEvent>,
+) {
+    let now = Instant::now();
+    let due_ids: Vec<_> = rules
+        .iter()
+        .filter(|(_, rule)| rule.next_at <= now)
+        .map(|(id, _)| id.clone())
+        .collect();
+
+    for id in due_ids {
+        let Some(rule) = rules.get_mut(&id) else {
+            continue;
+        };
+        match rule.phase {
+            PulsePhase::Down => {
+                if acquire_target_owner(
+                    &rule.config.id,
+                    rule.config.target_key,
+                    target_holds,
+                    physical_keys,
+                    simulated_keys,
+                    rule.config.allow_while_physical_down,
+                    events,
+                ) {
+                    rule.is_down = true;
+                    rule.phase = PulsePhase::Up;
+                    rule.next_at = now + Duration::from_millis(rule.hold_ms);
+                } else {
+                    rule.next_at = now + Duration::from_millis(rule.config.interval_ms as u64);
+                }
+            }
+            PulsePhase::Up => {
+                if rule.is_down {
+                    release_target_owner(
+                        &rule.config.id,
+                        rule.config.target_key,
+                        target_holds,
+                        physical_keys,
+                        simulated_keys,
+                        rule.config.allow_while_physical_down,
+                        events,
+                    );
+                    rule.is_down = false;
+                }
+                rule.phase = PulsePhase::Down;
+                rule.next_at = now + Duration::from_millis(rule.rest_ms);
+            }
+        }
+    }
+}
+
+fn next_scheduler_timeout(rules: &HashMap<String, ScheduledRule>) -> Option<Duration> {
+    let now = Instant::now();
+    rules
+        .values()
+        .map(|rule| rule.next_at.saturating_duration_since(now))
+        .min()
 }
 
 /// 关键路径锁兜底：若前一持锁者 panic 导致 Mutex 中毒,强行复活并继续。
@@ -195,8 +639,9 @@ fn revive<T>(r: std::sync::LockResult<T>) -> T {
 pub struct BurstEngine {
     pub global_enabled: Arc<AtomicBool>,
     rules: Arc<Mutex<Arc<RuleSnapshot>>>,
-    /// rule_id -> (cancel_flag, thread_handle, target_key, join_handle)
-    active_loops: ActiveLoops,
+    active_rules: ActiveRules,
+    scheduler_tx: Sender<SchedulerCommand>,
+    scheduler_handle: Option<thread::JoinHandle<()>>,
     toggle_states: Arc<Mutex<HashMap<String, bool>>>,
     /// 当前物理按下的键；用于过滤 OS 生成的 key-repeat。
     pressed_keys: PhysicalKeys,
@@ -217,13 +662,25 @@ impl Default for BurstEngine {
 
 impl BurstEngine {
     pub fn new() -> Self {
+        let pressed_keys = Arc::new(Mutex::new(HashSet::new()));
+        let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
+        let active_rules = Arc::new(Mutex::new(HashSet::new()));
+        let (scheduler_tx, scheduler_rx) = mpsc::channel();
+        let scheduler_handle = Some(spawn_scheduler(
+            scheduler_rx,
+            pressed_keys.clone(),
+            simulated_keys.clone(),
+            active_rules.clone(),
+        ));
         Self {
             global_enabled: Arc::new(AtomicBool::new(false)),
             rules: Arc::new(Mutex::new(Arc::new(RuleSnapshot::default()))),
-            active_loops: Arc::new(Mutex::new(HashMap::new())),
+            active_rules,
+            scheduler_tx,
+            scheduler_handle,
             toggle_states: Arc::new(Mutex::new(HashMap::new())),
-            pressed_keys: Arc::new(Mutex::new(HashSet::new())),
-            simulated_keys: Arc::new(Mutex::new(HashMap::new())),
+            pressed_keys,
+            simulated_keys,
             hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
             on_global_changed: Arc::new(Mutex::new(None)),
             on_panel_toggle: Arc::new(Mutex::new(None)),
@@ -237,13 +694,8 @@ impl BurstEngine {
     /// 取消所有正在运行的连发循环并清空 toggle 状态。
     /// 在全局开关关闭时调用，防止连发线程继续注入按键。
     pub fn cancel_all_loops(&self) {
-        let mut loops = revive(self.active_loops.lock());
-        for (cancel, thread_handle, _, _) in loops.values() {
-            cancel.store(true, Ordering::SeqCst);
-            thread_handle.unpark();
-            thread_handle.unpark();
-        }
-        loops.clear();
+        revive(self.active_rules.lock()).clear();
+        let _ = self.scheduler_tx.send(SchedulerCommand::StopAll);
         revive(self.toggle_states.lock()).clear();
         release_simulated_keys(&self.pressed_keys, &self.simulated_keys);
         #[cfg(windows)]
@@ -275,7 +727,7 @@ impl BurstEngine {
     /// 当前正在执行连发的规则 ID 集合：hold 模式表示触发键被按住，toggle 模式表示已开启。
     /// 用于前端轮询展示激活态视觉反馈。
     pub fn get_active_ids(&self) -> Vec<String> {
-        revive(self.active_loops.lock()).keys().cloned().collect()
+        revive(self.active_rules.lock()).iter().cloned().collect()
     }
 
     /// 返回 true 表示引擎处理了本次按键（热键触发或规则匹配），false 表示未匹配或重复按下。
@@ -375,61 +827,7 @@ impl BurstEngine {
     }
 
     fn start_hold_burst(&self, rule: &BurstRule) {
-        if revive(self.active_loops.lock()).contains_key(&rule.id) {
-            return;
-        }
-        let cancel = Arc::new(AtomicBool::new(false));
-        let cancel_clone = cancel.clone();
-        let target_key = rule.target_key;
-        let allow_while_physical_down = rule.trigger_key == rule.target_key;
-        let physical_keys = self.pressed_keys.clone();
-        let simulated_keys = self.simulated_keys.clone();
-        let interval_ms = rule.interval_ms;
-        // spawn 在锁外执行，避免 thread::spawn panic 时中毒 Mutex
-        let handle = thread::spawn(move || {
-            let hold_ms = (interval_ms as u64 / 3)
-                .clamp(5, 30)
-                .min((interval_ms as u64).saturating_sub(1));
-            let rest_ms = interval_ms as u64 - hold_ms;
-            let result = std::panic::catch_unwind(|| {
-                while !cancel_clone.load(Ordering::SeqCst) {
-                    if !safe_key_down(
-                        target_key,
-                        &physical_keys,
-                        &simulated_keys,
-                        allow_while_physical_down,
-                    ) {
-                        thread::park_timeout(Duration::from_millis(interval_ms as u64));
-                        continue;
-                    }
-                    thread::park_timeout(Duration::from_millis(hold_ms));
-                    safe_key_up(
-                        target_key,
-                        &physical_keys,
-                        &simulated_keys,
-                        allow_while_physical_down,
-                    );
-                    if cancel_clone.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    thread::park_timeout(Duration::from_millis(rest_ms));
-                }
-            });
-            if result.is_err() {
-                release_simulated_key(target_key, &physical_keys, &simulated_keys);
-            }
-        });
-        let mut loops = revive(self.active_loops.lock());
-        if loops.contains_key(&rule.id) {
-            // spawn 后极罕见的并发插入：取消刚启动的线程
-            cancel.store(true, Ordering::SeqCst);
-            handle.thread().unpark();
-            return;
-        }
-        loops.insert(
-            rule.id.clone(),
-            (cancel, handle.thread().clone(), target_key, handle),
-        );
+        self.start_scheduled_burst(rule, rule.trigger_key == rule.target_key);
     }
 
     fn handle_toggle_press(&self, rule: &BurstRule) {
@@ -447,82 +845,44 @@ impl BurstEngine {
     }
 
     fn start_toggle_burst(&self, rule: &BurstRule) {
-        if revive(self.active_loops.lock()).contains_key(&rule.id) {
-            return;
-        }
-        let cancel = Arc::new(AtomicBool::new(false));
-        let cancel_clone = cancel.clone();
-        let target_key = rule.target_key;
-        let physical_keys = self.pressed_keys.clone();
-        let simulated_keys = self.simulated_keys.clone();
-        let interval_ms = rule.interval_ms;
-        let handle = thread::spawn(move || {
-            let hold_ms = (interval_ms as u64 / 3)
-                .clamp(5, 30)
-                .min((interval_ms as u64).saturating_sub(1));
-            let rest_ms = interval_ms as u64 - hold_ms;
-            let result = std::panic::catch_unwind(|| {
-                while !cancel_clone.load(Ordering::SeqCst) {
-                    if !safe_key_down(target_key, &physical_keys, &simulated_keys, false) {
-                        thread::park_timeout(Duration::from_millis(interval_ms as u64));
-                        continue;
-                    }
-                    thread::park_timeout(Duration::from_millis(hold_ms));
-                    safe_key_up(target_key, &physical_keys, &simulated_keys, false);
-                    if cancel_clone.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    thread::park_timeout(Duration::from_millis(rest_ms));
-                }
-            });
-            if result.is_err() {
-                release_simulated_key(target_key, &physical_keys, &simulated_keys);
+        self.start_scheduled_burst(rule, false);
+    }
+
+    fn start_scheduled_burst(&self, rule: &BurstRule, allow_while_physical_down: bool) {
+        {
+            let mut active = revive(self.active_rules.lock());
+            if !active.insert(rule.id.clone()) {
+                return;
             }
-        });
-        let mut loops = revive(self.active_loops.lock());
-        if loops.contains_key(&rule.id) {
-            cancel.store(true, Ordering::SeqCst);
-            handle.thread().unpark();
-            return;
         }
-        loops.insert(
-            rule.id.clone(),
-            (cancel, handle.thread().clone(), target_key, handle),
-        );
+
+        let cmd = SchedulerCommand::Start(ScheduledRuleConfig {
+            id: rule.id.clone(),
+            target_key: rule.target_key,
+            interval_ms: rule.interval_ms,
+            allow_while_physical_down,
+        });
+        if self.scheduler_tx.send(cmd).is_err() {
+            revive(self.active_rules.lock()).remove(&rule.id);
+            release_simulated_key(rule.target_key, &self.pressed_keys, &self.simulated_keys);
+        }
     }
 
     fn stop_burst(&self, rule_id: &str) {
-        if let Some((cancel, thread_handle, _, _join)) =
-            revive(self.active_loops.lock()).remove(rule_id)
-        {
-            cancel.store(true, Ordering::SeqCst);
-            // 调用两次覆盖 hold_ms 和 rest_ms 两个 park 点：
-            // token 是单 bit，若线程在 hold_ms 睡眠则第一次唤醒、第二次 no-op；
-            // 若 token 已被 hold_ms 消耗而线程进入 rest_ms，第二次唤醒 rest_ms。
-            thread_handle.unpark();
-            thread_handle.unpark();
+        if revive(self.active_rules.lock()).remove(rule_id) {
+            let _ = self
+                .scheduler_tx
+                .send(SchedulerCommand::Stop(rule_id.to_string()));
         }
     }
 }
 
 impl Drop for BurstEngine {
     fn drop(&mut self) {
-        let entries: Vec<_> = {
-            let mut loops = revive(self.active_loops.lock());
-            loops.drain().map(|(_, v)| v).collect()
-        };
-        // 先全部发出取消信号
-        for (cancel, thread_handle, _, _) in &entries {
-            cancel.store(true, Ordering::SeqCst);
-            thread_handle.unpark();
-            thread_handle.unpark();
-        }
-        // join 后再补发 key_up，确保线程已完成自身的 key_up，避免与线程竞态
-        for (_, _, target_key, join_handle) in entries {
-            // 仅在线程 panic 时补发 key_up；正常退出路径线程已自行调用
-            if join_handle.join().is_err() {
-                release_simulated_key(target_key, &self.pressed_keys, &self.simulated_keys);
-            }
+        revive(self.active_rules.lock()).clear();
+        let _ = self.scheduler_tx.send(SchedulerCommand::Shutdown);
+        if let Some(handle) = self.scheduler_handle.take() {
+            let _ = handle.join();
         }
         release_simulated_keys(&self.pressed_keys, &self.simulated_keys);
         #[cfg(windows)]
@@ -909,6 +1269,54 @@ mod tests {
 
         release_simulated_keys(&physical_keys, &simulated_keys);
         assert!(revive(simulated_keys.lock()).is_empty());
+    }
+
+    #[test]
+    fn step_due_rules_merges_same_target_pulses() {
+        let target = KeyId::Keyboard(0x45);
+        let physical_keys = Arc::new(Mutex::new(HashSet::new()));
+        let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
+        let now = Instant::now();
+        let mut rules = HashMap::from([
+            (
+                "a".to_string(),
+                ScheduledRule::new(
+                    ScheduledRuleConfig {
+                        id: "a".to_string(),
+                        target_key: target,
+                        interval_ms: 10,
+                        allow_while_physical_down: false,
+                    },
+                    now,
+                ),
+            ),
+            (
+                "b".to_string(),
+                ScheduledRule::new(
+                    ScheduledRuleConfig {
+                        id: "b".to_string(),
+                        target_key: target,
+                        interval_ms: 10,
+                        allow_while_physical_down: false,
+                    },
+                    now,
+                ),
+            ),
+        ]);
+        let mut target_holds = HashMap::new();
+        let mut events = Vec::new();
+
+        step_due_rules(
+            &mut rules,
+            &mut target_holds,
+            &physical_keys,
+            &simulated_keys,
+            &mut events,
+        );
+
+        assert_eq!(events, vec![(target, false)]);
+        assert_eq!(revive(simulated_keys.lock()).get(&target), Some(&1));
+        assert_eq!(target_holds.get(&target).unwrap().owners.len(), 2);
     }
 
     #[test]

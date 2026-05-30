@@ -41,10 +41,10 @@
 
 ### Phase 3：单调度器与批量注入
 
-- [ ] 把每规则线程替换为单 scheduler 线程，使用绝对 deadline 管理 `down/up`。
-- [ ] 多规则同一 deadline 到期时批量发送 SendInput。
-- [ ] 同一目标键的重叠脉冲合并，避免规则互相提前抬键。
-- [ ] 错过 deadline 时跳过追赶，不补偿风暴。
+- [x] 把每规则线程替换为单 scheduler 线程，使用绝对 deadline 管理 `down/up`。
+- [x] 多规则同一 deadline 到期时批量发送 SendInput。
+- [x] 同一目标键的重叠脉冲合并，避免规则互相提前抬键。
+- [x] 错过 deadline 时跳过追赶，不补偿风暴。
 
 ### Phase 4：可观测与压测
 

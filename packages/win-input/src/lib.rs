@@ -319,9 +319,9 @@ impl InputMode {
 }
 
 #[cfg(windows)]
-unsafe fn send_kbd_via_sendinput(vk: u32, flags: u32) {
+fn build_kbd_sendinput(vk: u32, flags: u32) -> INPUT {
     // SAFETY: MapVirtualKeyW 对任意 u32 安全
-    let scan_ex = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX);
+    let scan_ex = unsafe { MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX) };
     let scan = (scan_ex & 0xFF) as u16;
     let prefix = (scan_ex >> 8) & 0xFF;
     let (w_vk, w_scan, scan_flags) = if scan == 0 || prefix == 0xE1 {
@@ -334,7 +334,7 @@ unsafe fn send_kbd_via_sendinput(vk: u32, flags: u32) {
         };
         (0u16, scan, KEYEVENTF_SCANCODE | ext)
     };
-    let input = INPUT {
+    INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {
             ki: KEYBDINPUT {
@@ -345,16 +345,21 @@ unsafe fn send_kbd_via_sendinput(vk: u32, flags: u32) {
                 dwExtraInfo: SIM_MARKER,
             },
         },
-    };
+    }
+}
+
+#[cfg(windows)]
+unsafe fn send_kbd_via_sendinput(vk: u32, flags: u32) {
+    let input = build_kbd_sendinput(vk, flags);
     // SAFETY: input 是栈上完整初始化的 INPUT_KEYBOARD
     SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
 }
 
 #[cfg(windows)]
-unsafe fn send_wheel_via_sendinput(up: bool) {
+fn build_wheel_sendinput(up: bool) -> INPUT {
     // WHEEL_DELTA = 120 per notch；向下用补码表示负值
     let mouse_data: u32 = if up { 120u32 } else { (-120i32) as u32 };
-    let input = INPUT {
+    INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
             mi: MOUSEINPUT {
@@ -366,13 +371,18 @@ unsafe fn send_wheel_via_sendinput(up: bool) {
                 dwExtraInfo: SIM_MARKER,
             },
         },
-    };
+    }
+}
+
+#[cfg(windows)]
+unsafe fn send_wheel_via_sendinput(up: bool) {
+    let input = build_wheel_sendinput(up);
     // SAFETY: input 是栈上完整初始化的 INPUT_MOUSE
     SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
 }
 
 #[cfg(windows)]
-unsafe fn send_mouse_via_sendinput(button: MouseButton, is_up: bool) {
+fn build_mouse_sendinput(button: MouseButton, is_up: bool) -> INPUT {
     let (dw_flags, mouse_data) = match (button, is_up) {
         (MouseButton::Left, false) => (MOUSEEVENTF_LEFTDOWN, 0),
         (MouseButton::Left, true) => (MOUSEEVENTF_LEFTUP, 0),
@@ -387,7 +397,7 @@ unsafe fn send_mouse_via_sendinput(button: MouseButton, is_up: bool) {
         // WheelUp/WheelDown 由 dispatch 提前处理，不应到达此处
         (MouseButton::WheelUp | MouseButton::WheelDown, _) => unreachable!(),
     };
-    let input = INPUT {
+    INPUT {
         r#type: INPUT_MOUSE,
         Anonymous: INPUT_0 {
             mi: MOUSEINPUT {
@@ -399,7 +409,12 @@ unsafe fn send_mouse_via_sendinput(button: MouseButton, is_up: bool) {
                 dwExtraInfo: SIM_MARKER,
             },
         },
-    };
+    }
+}
+
+#[cfg(windows)]
+unsafe fn send_mouse_via_sendinput(button: MouseButton, is_up: bool) {
+    let input = build_mouse_sendinput(button, is_up);
     // SAFETY: input 是栈上完整初始化的 INPUT_MOUSE
     SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
 }
@@ -422,6 +437,15 @@ pub fn key_up(key: KeyId) {
     let _ = key;
 }
 
+pub fn key_events(events: &[(KeyId, bool)]) {
+    #[cfg(windows)]
+    {
+        dispatch_batch(events);
+    }
+    #[cfg(not(windows))]
+    let _ = events;
+}
+
 #[cfg(windows)]
 fn send_via_sendinput(key: KeyId, is_up: bool) {
     // SAFETY: 各 send_*_via_sendinput 的 Safety 契约由调用方保证
@@ -439,6 +463,62 @@ fn send_via_sendinput(key: KeyId, is_up: bool) {
         KeyId::Mouse(btn) => unsafe {
             send_mouse_via_sendinput(btn, is_up);
         },
+    }
+}
+
+#[cfg(windows)]
+fn build_sendinput_event(key: KeyId, is_up: bool) -> Option<INPUT> {
+    match key {
+        KeyId::Keyboard(vk) => {
+            let flags = if is_up { KEYEVENTF_KEYUP } else { 0 };
+            Some(build_kbd_sendinput(vk, flags))
+        }
+        KeyId::Mouse(MouseButton::WheelUp | MouseButton::WheelDown) => {
+            if is_up {
+                None
+            } else {
+                let up = matches!(key, KeyId::Mouse(MouseButton::WheelUp));
+                Some(build_wheel_sendinput(up))
+            }
+        }
+        KeyId::Mouse(btn) => Some(build_mouse_sendinput(btn, is_up)),
+    }
+}
+
+#[cfg(windows)]
+fn send_batch_via_sendinput(events: &[(KeyId, bool)]) {
+    let inputs: Vec<_> = events
+        .iter()
+        .filter_map(|&(key, is_up)| build_sendinput_event(key, is_up))
+        .collect();
+    if inputs.is_empty() {
+        return;
+    }
+    // SAFETY: inputs 是完整初始化的 INPUT 数组，长度和元素大小均正确。
+    unsafe {
+        SendInput(
+            inputs.len() as u32,
+            inputs.as_ptr(),
+            std::mem::size_of::<INPUT>() as i32,
+        );
+    }
+}
+
+#[cfg(windows)]
+fn dispatch_batch(events: &[(KeyId, bool)]) {
+    if events.is_empty() {
+        return;
+    }
+    let mode = CURRENT_MODE
+        .get()
+        .map(|a| a.load(std::sync::atomic::Ordering::SeqCst))
+        .unwrap_or(MODE_SENDINPUT);
+    if mode == MODE_SENDINPUT {
+        send_batch_via_sendinput(events);
+        return;
+    }
+    for &(key, is_up) in events {
+        dispatch(key, is_up);
     }
 }
 
