@@ -66,34 +66,6 @@ const GLOBAL_LABELS: Record<string, string> = {
   panel_toggle: '面板显隐键',
 };
 
-const HIGH_RISK_TARGET_VK = new Set([
-  0x41, // A
-  0x44, // D
-  0x53, // S
-  0x57, // W
-  0x10, // Shift
-  0x11, // Ctrl
-  0x12, // Alt
-  0x20, // Space
-  0x25, // ArrowLeft
-  0x26, // ArrowUp
-  0x27, // ArrowRight
-  0x28, // ArrowDown
-  0xa0, // Left Shift
-  0xa1, // Right Shift
-  0xa2, // Left Ctrl
-  0xa3, // Right Ctrl
-  0xa4, // Left Alt
-  0xa5, // Right Alt
-]);
-
-const HIGH_RISK_MOUSE_TARGETS = new Set(['left', 'right', 'middle']);
-
-function isHighRiskTarget(key: KeyId): boolean {
-  if (key.kind === 'keyboard') return HIGH_RISK_TARGET_VK.has(key.code);
-  return HIGH_RISK_MOUSE_TARGETS.has(key.code);
-}
-
 // ── 主算法 ────────────────────────────────────────────────────────────────────
 
 export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[] {
@@ -214,31 +186,6 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
           field: 'trigger_key' as const,
           label: '被触发',
         })),
-      ],
-    });
-  }
-
-  // ── 5. 高风险目标键提示（warning）────────────────────────────────────────────
-  // 不禁止同键 Hold：它是按压连发的常规用法；这里只提醒该目标键可能影响移动/跳跃/拖拽。
-  for (const rule of enabled) {
-    if (!isHighRiskTarget(rule.target_key)) continue;
-
-    const sameKeyHold = rule.mode === 'hold' && keyEq(rule.trigger_key, rule.target_key);
-    conflicts.push({
-      id: `high-risk-target-${rule.id}-${keyStr(rule.target_key)}`,
-      severity: 'warning',
-      key: rule.target_key,
-      message: sameKeyHold
-        ? `${keyLabel(rule.target_key)} 是常用移动/操作键，同键按压连发会周期性抬起该键，可能影响移动、跳跃、冲刺或拖拽`
-        : `${keyLabel(rule.target_key)} 是常用移动/操作键，作为连发目标可能影响移动、跳跃、冲刺或拖拽`,
-      participants: [
-        {
-          kind: 'rule',
-          ruleId: rule.id,
-          ruleMode: rule.mode,
-          field: 'target_key',
-          label: rule.mode === 'hold' ? '按压连发目标' : '切换连发目标',
-        },
       ],
     });
   }
