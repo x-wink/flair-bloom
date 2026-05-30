@@ -7,7 +7,7 @@ import {
 } from 'react';
 import './CardList.css';
 
-type CardListColumns = 'one' | 'three';
+type CardListColumns = 'one' | 'two' | 'three';
 
 interface CardListProps extends HTMLAttributes<HTMLDivElement> {
   columns?: CardListColumns;

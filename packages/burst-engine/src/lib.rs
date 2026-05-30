@@ -1207,11 +1207,15 @@ impl BurstEngine {
         revive(self.active_rules.lock()).clear();
         self.metrics.set_active_rules(0);
         self.metrics.add_stop_command();
-        let _ = self
+        if self
             .scheduler_tx
-            .send(SchedulerCommand::StopAll(Instant::now()));
+            .send(SchedulerCommand::StopAll(Instant::now()))
+            .is_err()
+        {
+            // The scheduler owns planned key-down/up ordering. Only fall back here if it is gone.
+            release_simulated_keys(&self.pressed_keys, &self.simulated_keys);
+        }
         revive(self.toggle_states.lock()).clear();
-        release_simulated_keys(&self.pressed_keys, &self.simulated_keys);
         #[cfg(windows)]
         clear_pending_injections();
     }
@@ -1698,6 +1702,29 @@ mod tests {
         }
     }
 
+    fn engine_with_scheduler_tx(
+        tx: std::sync::mpsc::Sender<SchedulerCommand>,
+        simulated_keys: SimulatedKeys,
+    ) -> BurstEngine {
+        BurstEngine {
+            global_enabled: Arc::new(AtomicBool::new(false)),
+            rules: Arc::new(Mutex::new(Arc::new(RuleSnapshot::default()))),
+            active_rules: Arc::new(Mutex::new(HashSet::new())),
+            scheduler_tx: SchedulerCommandSender::new(tx, SchedulerWake::new()),
+            scheduler_handle: None,
+            scheduler_wait_mode: Arc::new(AtomicU8::new(wait_mode_to_u8(
+                SchedulerWaitMode::default(),
+            ))),
+            metrics: Arc::new(EngineMetrics::new()),
+            toggle_states: Arc::new(Mutex::new(HashMap::new())),
+            pressed_keys: Arc::new(Mutex::new(HashSet::new())),
+            simulated_keys,
+            hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
+            on_global_changed: Arc::new(Mutex::new(None)),
+            on_panel_toggle: Arc::new(Mutex::new(None)),
+        }
+    }
+
     #[test]
     fn repeated_keydown_does_not_retrigger_global_toggle_before_release() {
         let engine = BurstEngine::new();
@@ -1820,6 +1847,31 @@ mod tests {
         let simulated_keys = Arc::new(Mutex::new(HashMap::from([(key, 2)])));
 
         release_simulated_keys(&physical_keys, &simulated_keys);
+        assert!(revive(simulated_keys.lock()).is_empty());
+    }
+
+    #[test]
+    fn cancel_all_loops_leaves_simulated_ledger_for_scheduler_when_stop_all_is_queued() {
+        let key = KeyId::Keyboard(0x45);
+        let (tx, _rx) = mpsc::channel();
+        let simulated_keys = Arc::new(Mutex::new(HashMap::from([(key, 1)])));
+        let engine = engine_with_scheduler_tx(tx, simulated_keys.clone());
+
+        engine.cancel_all_loops();
+
+        assert_eq!(revive(simulated_keys.lock()).get(&key), Some(&1));
+    }
+
+    #[test]
+    fn cancel_all_loops_releases_simulated_ledger_when_scheduler_is_unavailable() {
+        let key = KeyId::Keyboard(0x45);
+        let (tx, rx) = mpsc::channel();
+        drop(rx);
+        let simulated_keys = Arc::new(Mutex::new(HashMap::from([(key, 1)])));
+        let engine = engine_with_scheduler_tx(tx, simulated_keys.clone());
+
+        engine.cancel_all_loops();
+
         assert!(revive(simulated_keys.lock()).is_empty());
     }
 

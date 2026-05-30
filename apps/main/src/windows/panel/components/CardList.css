@@ -7,6 +7,10 @@
   grid-template-columns: 1fr;
 }
 
+.fb-card-list--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .fb-card-list--three {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -56,6 +60,7 @@
 }
 
 @media (max-width: 420px) {
+  .fb-card-list--two,
   .fb-card-list--three {
     grid-template-columns: 1fr;
   }
