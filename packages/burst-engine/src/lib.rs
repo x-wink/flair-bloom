@@ -74,6 +74,46 @@ type ActiveLoops = Arc<
 type GlobalChangedCb = Arc<Mutex<Option<Box<dyn Fn(bool) + Send + Sync>>>>;
 type PanelToggleCb = Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
 
+#[derive(Default)]
+struct RuleSnapshot {
+    rules: Vec<BurstRule>,
+    press_index: HashMap<KeyId, Vec<usize>>,
+    hold_release_index: HashMap<KeyId, Vec<usize>>,
+}
+
+impl RuleSnapshot {
+    fn new(rules: Vec<BurstRule>) -> Self {
+        let mut snapshot = Self {
+            rules,
+            press_index: HashMap::new(),
+            hold_release_index: HashMap::new(),
+        };
+        for (idx, rule) in snapshot.rules.iter().enumerate() {
+            if !rule.enabled {
+                continue;
+            }
+            match rule.mode {
+                BurstMode::Hold => {
+                    push_rule_index(&mut snapshot.press_index, rule.trigger_key, idx);
+                    push_rule_index(&mut snapshot.hold_release_index, rule.trigger_key, idx);
+                }
+                BurstMode::Toggle => {
+                    push_rule_index(&mut snapshot.press_index, rule.trigger_key, idx);
+                    let stop = rule.stop_key.unwrap_or(rule.trigger_key);
+                    if stop != rule.trigger_key {
+                        push_rule_index(&mut snapshot.press_index, stop, idx);
+                    }
+                }
+            }
+        }
+        snapshot
+    }
+}
+
+fn push_rule_index(index: &mut HashMap<KeyId, Vec<usize>>, key: KeyId, rule_idx: usize) {
+    index.entry(key).or_default().push(rule_idx);
+}
+
 /// 关键路径锁兜底：若前一持锁者 panic 导致 Mutex 中毒,强行复活并继续。
 /// 按键工具最差故障是键盘卡死,值得给一层硬兜底；连发线程已被 catch_unwind
 /// 包裹,持锁期间也仅做 HashMap/Vec 操作,正常路径不会中毒。
@@ -83,7 +123,7 @@ fn revive<T>(r: std::sync::LockResult<T>) -> T {
 
 pub struct BurstEngine {
     pub global_enabled: Arc<AtomicBool>,
-    rules: Arc<Mutex<Vec<BurstRule>>>,
+    rules: Arc<Mutex<Arc<RuleSnapshot>>>,
     /// rule_id -> (cancel_flag, thread_handle, target_key, join_handle)
     active_loops: ActiveLoops,
     toggle_states: Arc<Mutex<HashMap<String, bool>>>,
@@ -106,7 +146,7 @@ impl BurstEngine {
     pub fn new() -> Self {
         Self {
             global_enabled: Arc::new(AtomicBool::new(false)),
-            rules: Arc::new(Mutex::new(Vec::new())),
+            rules: Arc::new(Mutex::new(Arc::new(RuleSnapshot::default()))),
             active_loops: Arc::new(Mutex::new(HashMap::new())),
             toggle_states: Arc::new(Mutex::new(HashMap::new())),
             pressed_keys: Arc::new(Mutex::new(HashSet::new())),
@@ -146,12 +186,15 @@ impl BurstEngine {
     }
 
     pub fn set_rules(&self, rules: Vec<BurstRule>) {
+        let snapshot = Arc::new(RuleSnapshot::new(rules));
+        let mut current = revive(self.rules.lock());
+        // 持有规则锁期间取消旧循环，避免 cancel 后、快照替换前又按旧规则启动。
         self.cancel_all_loops();
-        *revive(self.rules.lock()) = rules;
+        *current = snapshot;
     }
 
     pub fn get_rules(&self) -> Vec<BurstRule> {
-        revive(self.rules.lock()).clone()
+        revive(self.rules.lock()).rules.clone()
     }
 
     /// 当前正在执行连发的规则 ID 集合：hold 模式表示触发键被按住，toggle 模式表示已开启。
@@ -206,9 +249,13 @@ impl BurstEngine {
         if !self.global_enabled.load(Ordering::SeqCst) {
             return false;
         }
-        let rules = revive(self.rules.lock()).clone();
         let mut handled = false;
-        for rule in rules.iter().filter(|r| r.enabled) {
+        let rules = revive(self.rules.lock()).clone();
+        let Some(indices) = rules.press_index.get(&key) else {
+            return false;
+        };
+        for &idx in indices {
+            let rule = &rules.rules[idx];
             match rule.mode {
                 BurstMode::Hold => {
                     if rule.trigger_key == key {
@@ -243,10 +290,11 @@ impl BurstEngine {
         revive(self.pressed_keys.lock()).remove(&key);
 
         let rules = revive(self.rules.lock()).clone();
-        for rule in rules
-            .iter()
-            .filter(|r| r.enabled && r.trigger_key == key && r.mode == BurstMode::Hold)
-        {
+        let Some(indices) = rules.hold_release_index.get(&key) else {
+            return;
+        };
+        for &idx in indices {
+            let rule = &rules.rules[idx];
             self.stop_burst(&rule.id);
         }
     }
@@ -703,6 +751,37 @@ mod tests {
     }
 
     #[test]
+    fn hold_rule_allows_same_trigger_and_target() {
+        let engine = BurstEngine::new();
+        let key = KeyId::Keyboard(0x51);
+        engine.global_enabled.store(true, Ordering::SeqCst);
+        engine.set_rules(vec![rule("hold-same-q", BurstMode::Hold, key, key)]);
+
+        assert!(engine.on_key_press(key));
+        assert_eq!(engine.get_active_ids(), vec!["hold-same-q".to_string()]);
+
+        engine.on_key_release(key);
+        assert!(engine.get_active_ids().is_empty());
+    }
+
+    #[test]
+    fn disabled_rule_is_not_indexed_for_press_or_release() {
+        let engine = BurstEngine::new();
+        let trigger = KeyId::Keyboard(0x51);
+        let target = KeyId::Keyboard(0x45);
+        let mut disabled = rule("disabled-hold-q", BurstMode::Hold, trigger, target);
+        disabled.enabled = false;
+        engine.global_enabled.store(true, Ordering::SeqCst);
+        engine.set_rules(vec![disabled]);
+
+        assert!(!engine.on_key_press(trigger));
+        assert!(engine.get_active_ids().is_empty());
+
+        engine.on_key_release(trigger);
+        assert!(engine.get_active_ids().is_empty());
+    }
+
+    #[test]
     fn toggle_rule_still_toggles_after_release_and_next_down() {
         let engine = BurstEngine::new();
         let trigger = KeyId::Keyboard(0x51);
@@ -718,6 +797,24 @@ mod tests {
 
         engine.on_key_release(trigger);
         engine.on_key_press(trigger);
+        assert!(engine.get_active_ids().is_empty());
+    }
+
+    #[test]
+    fn toggle_rule_with_distinct_stop_is_indexed_by_stop_key() {
+        let engine = BurstEngine::new();
+        let trigger = KeyId::Keyboard(0x51);
+        let stop = KeyId::Keyboard(0x52);
+        let target = KeyId::Keyboard(0x45);
+        let mut toggle = rule("toggle-q", BurstMode::Toggle, trigger, target);
+        toggle.stop_key = Some(stop);
+        engine.global_enabled.store(true, Ordering::SeqCst);
+        engine.set_rules(vec![toggle]);
+
+        assert!(engine.on_key_press(trigger));
+        assert_eq!(engine.get_active_ids(), vec!["toggle-q".to_string()]);
+
+        assert!(engine.on_key_press(stop));
         assert!(engine.get_active_ids().is_empty());
     }
 
