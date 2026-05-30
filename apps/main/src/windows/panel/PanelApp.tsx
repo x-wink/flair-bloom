@@ -316,16 +316,34 @@ export default function PanelApp() {
       })
       .catch(() => {});
 
+    if (!('speechSynthesis' in window)) return;
+
+    const speechSynthesis = window.speechSynthesis;
     const loadVoices = () => {
-      const voices = window.speechSynthesis
+      const voices = speechSynthesis
         .getVoices()
         .filter((v) => v.lang.startsWith('zh') || v.lang.startsWith('en'))
         .map((v) => v.name);
       if (voices.length > 0) setAvailableVoices(voices);
     };
     loadVoices();
-    window.speechSynthesis.addEventListener('voiceschanged', loadVoices);
-    return () => window.speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+
+    if (
+      typeof speechSynthesis.addEventListener === 'function' &&
+      typeof speechSynthesis.removeEventListener === 'function'
+    ) {
+      speechSynthesis.addEventListener('voiceschanged', loadVoices);
+      return () => speechSynthesis.removeEventListener('voiceschanged', loadVoices);
+    }
+
+    const previousVoicesChanged = speechSynthesis.onvoiceschanged;
+    speechSynthesis.onvoiceschanged = (event) => {
+      previousVoicesChanged?.call(speechSynthesis, event);
+      loadVoices();
+    };
+    return () => {
+      speechSynthesis.onvoiceschanged = previousVoicesChanged;
+    };
   }, []);
 
   useEffect(() => {
