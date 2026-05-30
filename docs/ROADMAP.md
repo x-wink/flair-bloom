@@ -82,6 +82,7 @@ Monorepo 结构，Rust workspace + pnpm workspace 双层管理。
 - **异常兜底优先于继续连发**：输入后端失败、规则热更新、全局关闭、窗口上下文切换、线程 panic 或应用退出时，必须停止注入并释放应用确认由自身模拟按下的键。
 - **自循环不可发生**：SendInput / Interception 使用 `SIM_MARKER`，DD-HID 使用 pending 队列；注入事件不得触发规则启动、停止或级联。
 - **热路径轻量化**：低级 hook 回调不得做阻塞 I/O、驱动调用、长时间锁等待或全量规则复制；规则匹配应使用不可变快照和索引。
+- **10ms 精度可对比**：10ms 连发是主要使用场景，调度模式默认标准等待；用户可在设置面板切换高精度 waitable timer，失败时自动降级标准等待路径。
 
 #### 连发引擎安全目标
 
@@ -92,7 +93,7 @@ Monorepo 结构，Rust workspace + pnpm workspace 双层管理。
 | 卡键兜底           | 所有异常停止路径最终进入空闲态，不遗留应用模拟的按下状态             |
 | 后端降级           | DD-HID / Interception 不可用时降级 SendInput；仍失败则停止注入并提示 |
 | 配置热更新安全     | 替换规则前取消活动循环并清空 toggle 状态，防止旧规则继续注入         |
-| 性能边界           | 普通配置无感；64 条规则 / 10ms 压测场景不出现线程爆炸或 hook 超时    |
+| 性能边界           | 普通配置无感；64 条规则 / 10ms 压测场景不出现线程爆炸或 hook 超时，scheduler 唤醒抖动可观测 |
 
 ### 四、日志完善，崩溃可追溯
 
@@ -783,6 +784,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] OS key-repeat 过滤：`pressed_keys: HashSet<KeyId>` 只响应物理首次按下
 - [x] 连发热路径优化：规则快照索引、轻量 hook、单调度器、批量注入与异常兜底统一化（任务文档：`docs/BURST_ENGINE_OPTIMIZATION.md`）
 - [x] 目标键语义通用化：不按具体键位用途做产品侧判定，用户自行决定配置含义
+- [x] 10ms 高精度调度：Windows scheduler 接入可回退高精度 waitable timer，设置面板可切换标准等待 / 高精度 timer 以对比低间隔连发唤醒抖动
 
 **输入范围扩展**
 

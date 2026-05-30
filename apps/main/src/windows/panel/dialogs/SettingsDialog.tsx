@@ -11,6 +11,7 @@ import './SettingsDialog.css';
 
 export type SettingsTab = 'general' | 'hotkeys' | 'sound' | 'profiles';
 type SettingsInputMode = 'sendinput' | 'interception' | 'dd_hid';
+type SchedulerWaitMode = 'standard' | 'high_precision';
 type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
 
 export interface SoundSettings {
@@ -29,6 +30,8 @@ interface Props {
   appVersion: string;
   inputMode: SettingsInputMode;
   switchingMode: boolean;
+  schedulerWaitMode: SchedulerWaitMode;
+  switchingSchedulerWaitMode: boolean;
   globalEnabled: boolean;
   togglingGlobal: boolean;
   closeBehavior: CloseBehavior | null;
@@ -45,6 +48,7 @@ interface Props {
   isDefaultProfile: boolean;
   onClose: () => void;
   onSelectInputMode: (mode: SettingsInputMode) => void;
+  onSelectSchedulerWaitMode: (mode: SchedulerWaitMode) => void;
   onToggleGlobal: () => void;
   onSetCloseBehavior: (choice: CloseBehavior | null) => void;
   hotkeys: { global_toggle: KeyId | null; global_stop: KeyId | null; panel_toggle: KeyId | null };
@@ -87,6 +91,16 @@ const INPUT_MODE_HINTS: Record<SettingsInputMode, string> = {
   sendinput: 'SendInput',
   interception: 'Interception',
   dd_hid: 'DD-HID',
+};
+
+const SCHEDULER_WAIT_MODE_LABELS: Record<SchedulerWaitMode, string> = {
+  standard: '标准等待',
+  high_precision: '高精度 timer',
+};
+
+const SCHEDULER_WAIT_MODE_HINTS: Record<SchedulerWaitMode, string> = {
+  standard: '默认',
+  high_precision: '10ms 对比',
 };
 
 const CLOSE_BEHAVIOR_OPTIONS: {
@@ -232,6 +246,25 @@ export default function SettingsDialog(props: Props) {
                 ))}
               </CardList>
               <p className="settings-note">驱动安装与卸载操作请前往「诊断修复」。</p>
+            </SettingsSection>
+
+            <SettingsSection title="调度精度">
+              <CardList columns="two" role="radiogroup" aria-label="调度精度">
+                {(['standard', 'high_precision'] as SchedulerWaitMode[]).map((mode) => (
+                  <CardListButton
+                    key={mode}
+                    role="radio"
+                    aria-checked={props.schedulerWaitMode === mode}
+                    active={props.schedulerWaitMode === mode}
+                    className="settings-choice"
+                    disabled={props.switchingSchedulerWaitMode}
+                    onClick={() => props.onSelectSchedulerWaitMode(mode)}
+                  >
+                    <span>{SCHEDULER_WAIT_MODE_LABELS[mode]}</span>
+                    <small>{SCHEDULER_WAIT_MODE_HINTS[mode]}</small>
+                  </CardListButton>
+                ))}
+              </CardList>
             </SettingsSection>
 
             <SettingsSection title="关闭行为">

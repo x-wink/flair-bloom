@@ -7,6 +7,7 @@ use std::sync::{atomic::AtomicU32, RwLock, Weak};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{
+        atomic::AtomicU8,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
@@ -22,8 +23,12 @@ use win_input::key_events;
 use win_input::{clear_pending_injections, try_consume_injection, SIM_MARKER};
 #[cfg(windows)]
 use windows_sys::Win32::{
-    Foundation::{LPARAM, WPARAM},
-    System::Threading::GetCurrentThreadId,
+    Foundation::{CloseHandle, HANDLE, LPARAM, WAIT_FAILED, WAIT_OBJECT_0, WPARAM},
+    System::Threading::{
+        CreateEventW, CreateWaitableTimerExW, GetCurrentThreadId, SetEvent, SetWaitableTimer,
+        WaitForMultipleObjects, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, INFINITE,
+        SYNCHRONIZATION_SYNCHRONIZE, TIMER_MODIFY_STATE,
+    },
     UI::WindowsAndMessaging::{
         CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
         TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
@@ -80,7 +85,324 @@ enum SchedulerCommand {
     Start(ScheduledRuleConfig),
     Stop(String, Instant),
     StopAll(Instant),
+    SetWaitMode(SchedulerWaitMode),
     Shutdown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SchedulerWaitMode {
+    #[default]
+    Standard,
+    HighPrecision,
+}
+
+impl SchedulerWaitMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Standard => "standard",
+            Self::HighPrecision => "high_precision",
+        }
+    }
+}
+
+impl std::str::FromStr for SchedulerWaitMode {
+    type Err = ();
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "standard" => Ok(Self::Standard),
+            "high_precision" => Ok(Self::HighPrecision),
+            _ => Err(()),
+        }
+    }
+}
+
+fn wait_mode_to_u8(mode: SchedulerWaitMode) -> u8 {
+    match mode {
+        SchedulerWaitMode::Standard => 0,
+        SchedulerWaitMode::HighPrecision => 1,
+    }
+}
+
+fn wait_mode_from_u8(value: u8) -> SchedulerWaitMode {
+    match value {
+        1 => SchedulerWaitMode::HighPrecision,
+        _ => SchedulerWaitMode::Standard,
+    }
+}
+
+#[derive(Clone)]
+struct SchedulerWake {
+    #[cfg(windows)]
+    command_event: Option<Arc<WinHandle>>,
+}
+
+impl SchedulerWake {
+    fn new() -> Self {
+        Self {
+            #[cfg(windows)]
+            command_event: WinHandle::create_auto_reset_event().map(Arc::new),
+        }
+    }
+
+    fn notify(&self) {
+        #[cfg(windows)]
+        if let Some(event) = &self.command_event {
+            if !event.set() {
+                error!("唤醒连发 scheduler 命令事件失败，命令可能延迟到下一次 timer 唤醒");
+            }
+        }
+    }
+}
+
+struct SchedulerCommandSender {
+    tx: Sender<SchedulerCommand>,
+    wake: SchedulerWake,
+}
+
+impl SchedulerCommandSender {
+    fn new(tx: Sender<SchedulerCommand>, wake: SchedulerWake) -> Self {
+        Self { tx, wake }
+    }
+
+    fn send(&self, cmd: SchedulerCommand) -> Result<(), mpsc::SendError<SchedulerCommand>> {
+        self.tx.send(cmd)?;
+        self.wake.notify();
+        Ok(())
+    }
+}
+
+enum SchedulerWaitOutcome {
+    Command(SchedulerCommand),
+    Timeout,
+    Disconnected,
+}
+
+struct SchedulerWaiter {
+    mode: SchedulerWaitMode,
+    #[cfg(windows)]
+    high_precision: Option<HighPrecisionWaiter>,
+}
+
+impl SchedulerWaiter {
+    fn new(wake: SchedulerWake, mode: SchedulerWaitMode) -> Self {
+        #[cfg(windows)]
+        {
+            let high_precision = match mode {
+                SchedulerWaitMode::Standard => None,
+                SchedulerWaitMode::HighPrecision => Self::create_high_precision(&wake),
+            };
+            Self {
+                mode,
+                high_precision,
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = wake;
+            Self { mode }
+        }
+    }
+
+    fn set_mode(&mut self, wake: &SchedulerWake, mode: SchedulerWaitMode) {
+        if self.mode == mode {
+            return;
+        }
+        self.mode = mode;
+        #[cfg(windows)]
+        {
+            self.high_precision = match mode {
+                SchedulerWaitMode::Standard => {
+                    info!("连发 scheduler 已切换为标准等待");
+                    None
+                }
+                SchedulerWaitMode::HighPrecision => Self::create_high_precision(wake),
+            };
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = wake;
+        }
+    }
+
+    fn wait(
+        &mut self,
+        rx: &Receiver<SchedulerCommand>,
+        timeout: Option<Duration>,
+    ) -> SchedulerWaitOutcome {
+        #[cfg(windows)]
+        if self.mode == SchedulerWaitMode::HighPrecision {
+            let Some(waiter) = &self.high_precision else {
+                return wait_standard(rx, timeout);
+            };
+            match waiter.wait(rx, timeout) {
+                Ok(outcome) => return outcome,
+                Err(reason) => {
+                    error!("Windows 高精度 scheduler 等待失败，降级标准等待路径: {reason}");
+                    self.high_precision = None;
+                }
+            }
+        }
+
+        wait_standard(rx, timeout)
+    }
+
+    #[cfg(windows)]
+    fn create_high_precision(wake: &SchedulerWake) -> Option<HighPrecisionWaiter> {
+        let high_precision = wake
+            .command_event
+            .clone()
+            .and_then(HighPrecisionWaiter::new);
+        if high_precision.is_some() {
+            info!("连发 scheduler 已切换为 Windows 高精度 waitable timer");
+        } else {
+            info!("Windows 高精度 waitable timer 不可用，scheduler 保持标准等待路径");
+        }
+        high_precision
+    }
+}
+
+fn wait_standard(
+    rx: &Receiver<SchedulerCommand>,
+    timeout: Option<Duration>,
+) -> SchedulerWaitOutcome {
+    match timeout {
+        Some(timeout) => match rx.recv_timeout(timeout) {
+            Ok(cmd) => SchedulerWaitOutcome::Command(cmd),
+            Err(RecvTimeoutError::Timeout) => SchedulerWaitOutcome::Timeout,
+            Err(RecvTimeoutError::Disconnected) => SchedulerWaitOutcome::Disconnected,
+        },
+        None => match rx.recv() {
+            Ok(cmd) => SchedulerWaitOutcome::Command(cmd),
+            Err(_) => SchedulerWaitOutcome::Disconnected,
+        },
+    }
+}
+
+#[cfg(windows)]
+struct HighPrecisionWaiter {
+    command_event: Arc<WinHandle>,
+    timer: WinHandle,
+}
+
+#[cfg(windows)]
+impl HighPrecisionWaiter {
+    fn new(command_event: Arc<WinHandle>) -> Option<Self> {
+        let timer = WinHandle::create_high_resolution_timer()?;
+        Some(Self {
+            command_event,
+            timer,
+        })
+    }
+
+    fn wait(
+        &self,
+        rx: &Receiver<SchedulerCommand>,
+        timeout: Option<Duration>,
+    ) -> Result<SchedulerWaitOutcome, &'static str> {
+        let handles = [self.command_event.raw(), self.timer.raw()];
+        let handle_count = if let Some(timeout) = timeout {
+            if timeout.is_zero() {
+                return Ok(SchedulerWaitOutcome::Timeout);
+            }
+            let due_time = duration_to_relative_100ns(timeout);
+            // SAFETY: timer 是 CreateWaitableTimerExW 返回的有效句柄；due_time 指针在调用期间有效；
+            // completion routine 为空，lparam 为空，设置一次性相对时间。
+            let ok = unsafe {
+                SetWaitableTimer(self.timer.raw(), &due_time, 0, None, std::ptr::null(), 0)
+            };
+            if ok == 0 {
+                return Err("SetWaitableTimer");
+            }
+            handles.len() as u32
+        } else {
+            1
+        };
+
+        // SAFETY: handles 前 handle_count 个元素均为有效同步对象句柄；不等待全部对象；
+        // INFINITE 只阻塞 scheduler 线程，命令 event 会唤醒它。
+        let wait = unsafe { WaitForMultipleObjects(handle_count, handles.as_ptr(), 0, INFINITE) };
+        match wait {
+            WAIT_OBJECT_0 => match rx.try_recv() {
+                Ok(cmd) => Ok(SchedulerWaitOutcome::Command(cmd)),
+                Err(mpsc::TryRecvError::Empty) => Ok(SchedulerWaitOutcome::Timeout),
+                Err(mpsc::TryRecvError::Disconnected) => Ok(SchedulerWaitOutcome::Disconnected),
+            },
+            value if value == WAIT_OBJECT_0 + 1 => Ok(SchedulerWaitOutcome::Timeout),
+            WAIT_FAILED => Err("WaitForMultipleObjects"),
+            _ => Err("WaitForMultipleObjects: unexpected result"),
+        }
+    }
+}
+
+#[cfg(windows)]
+fn duration_to_relative_100ns(timeout: Duration) -> i64 {
+    let ticks = timeout
+        .as_nanos()
+        .saturating_add(99)
+        .saturating_div(100)
+        .clamp(1, i64::MAX as u128) as i64;
+    -ticks
+}
+
+#[cfg(windows)]
+struct WinHandle {
+    raw: HANDLE,
+}
+
+#[cfg(windows)]
+unsafe impl Send for WinHandle {}
+
+#[cfg(windows)]
+unsafe impl Sync for WinHandle {}
+
+#[cfg(windows)]
+impl WinHandle {
+    fn create_auto_reset_event() -> Option<Self> {
+        // SAFETY: 安全属性和名称为空；auto-reset、初始未触发的匿名事件。
+        let raw = unsafe { CreateEventW(std::ptr::null(), 0, 0, std::ptr::null()) };
+        if raw.is_null() {
+            info!("无法创建 scheduler 命令唤醒事件，高精度 timer 将不启用");
+            return None;
+        }
+        Some(Self { raw })
+    }
+
+    fn create_high_resolution_timer() -> Option<Self> {
+        // SAFETY: 安全属性和名称为空；创建匿名高精度 waitable timer。
+        let raw = unsafe {
+            CreateWaitableTimerExW(
+                std::ptr::null(),
+                std::ptr::null(),
+                CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+                TIMER_MODIFY_STATE | SYNCHRONIZATION_SYNCHRONIZE,
+            )
+        };
+        if raw.is_null() {
+            info!("Windows 高精度 waitable timer 不可用，scheduler 降级标准等待路径");
+            return None;
+        }
+        Some(Self { raw })
+    }
+
+    fn raw(&self) -> HANDLE {
+        self.raw
+    }
+
+    fn set(&self) -> bool {
+        // SAFETY: raw 是 CreateEventW 返回的事件句柄；SetEvent 可跨线程唤醒等待者。
+        unsafe { SetEvent(self.raw) != 0 }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for WinHandle {
+    fn drop(&mut self) {
+        if !self.raw.is_null() {
+            // SAFETY: raw 由本对象拥有，Drop 只执行一次。
+            unsafe { CloseHandle(self.raw) };
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -420,6 +742,8 @@ impl ScheduledRule {
 
 fn spawn_scheduler(
     rx: Receiver<SchedulerCommand>,
+    wake: SchedulerWake,
+    wait_mode: Arc<AtomicU8>,
     physical_keys: PhysicalKeys,
     simulated_keys: SimulatedKeys,
     active_rules: ActiveRules,
@@ -427,7 +751,15 @@ fn spawn_scheduler(
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_scheduler(rx, &physical_keys, &simulated_keys, &active_rules, &metrics);
+            run_scheduler(
+                rx,
+                wake,
+                wait_mode,
+                &physical_keys,
+                &simulated_keys,
+                &active_rules,
+                &metrics,
+            );
         }));
         if result.is_err() {
             revive(active_rules.lock()).clear();
@@ -439,6 +771,8 @@ fn spawn_scheduler(
 
 fn run_scheduler(
     rx: Receiver<SchedulerCommand>,
+    wake: SchedulerWake,
+    wait_mode: Arc<AtomicU8>,
     physical_keys: &PhysicalKeys,
     simulated_keys: &SimulatedKeys,
     active_rules: &ActiveRules,
@@ -446,10 +780,17 @@ fn run_scheduler(
 ) {
     let mut rules = HashMap::<String, ScheduledRule>::new();
     let mut target_holds = HashMap::<KeyId, TargetHold>::new();
+    let mut waiter = SchedulerWaiter::new(
+        wake.clone(),
+        wait_mode_from_u8(wait_mode.load(Ordering::Relaxed)),
+    );
     loop {
         while let Ok(cmd) = rx.try_recv() {
             if handle_scheduler_command(
                 cmd,
+                &wake,
+                &mut waiter,
+                &wait_mode,
                 &mut rules,
                 &mut target_holds,
                 physical_keys,
@@ -482,41 +823,28 @@ fn run_scheduler(
         metrics.add_injected_events(events.len());
 
         let timeout = next_scheduler_timeout(&rules);
-        let command = match timeout {
-            Some(timeout) => match rx.recv_timeout(timeout) {
-                Ok(cmd) => Some(cmd),
-                Err(RecvTimeoutError::Timeout) => None,
-                Err(RecvTimeoutError::Disconnected) => {
-                    cleanup_scheduler_rules(
-                        &mut rules,
-                        &mut target_holds,
-                        physical_keys,
-                        simulated_keys,
-                        active_rules,
-                        true,
-                    );
-                    return;
-                }
-            },
-            None => match rx.recv() {
-                Ok(cmd) => Some(cmd),
-                Err(_) => {
-                    cleanup_scheduler_rules(
-                        &mut rules,
-                        &mut target_holds,
-                        physical_keys,
-                        simulated_keys,
-                        active_rules,
-                        true,
-                    );
-                    return;
-                }
-            },
+        let command = match waiter.wait(&rx, timeout) {
+            SchedulerWaitOutcome::Command(cmd) => Some(cmd),
+            SchedulerWaitOutcome::Timeout => None,
+            SchedulerWaitOutcome::Disconnected => {
+                cleanup_scheduler_rules(
+                    &mut rules,
+                    &mut target_holds,
+                    physical_keys,
+                    simulated_keys,
+                    active_rules,
+                    true,
+                );
+                return;
+            }
         };
 
         if let Some(cmd) = command {
             if handle_scheduler_command(
                 cmd,
+                &wake,
+                &mut waiter,
+                &wait_mode,
                 &mut rules,
                 &mut target_holds,
                 physical_keys,
@@ -538,8 +866,15 @@ fn run_scheduler(
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "scheduler 命令处理需要同时更新等待器、规则表、目标持有账本和安全兜底状态"
+)]
 fn handle_scheduler_command(
     cmd: SchedulerCommand,
+    wake: &SchedulerWake,
+    waiter: &mut SchedulerWaiter,
+    wait_mode: &AtomicU8,
     rules: &mut HashMap<String, ScheduledRule>,
     target_holds: &mut HashMap<KeyId, TargetHold>,
     physical_keys: &PhysicalKeys,
@@ -572,6 +907,11 @@ fn handle_scheduler_command(
                 active_rules,
                 false,
             );
+            false
+        }
+        SchedulerCommand::SetWaitMode(mode) => {
+            wait_mode.store(wait_mode_to_u8(mode), Ordering::Relaxed);
+            waiter.set_mode(wake, mode);
             false
         }
         SchedulerCommand::Shutdown => true,
@@ -798,8 +1138,9 @@ pub struct BurstEngine {
     pub global_enabled: Arc<AtomicBool>,
     rules: Arc<Mutex<Arc<RuleSnapshot>>>,
     active_rules: ActiveRules,
-    scheduler_tx: Sender<SchedulerCommand>,
+    scheduler_tx: SchedulerCommandSender,
     scheduler_handle: Option<thread::JoinHandle<()>>,
+    scheduler_wait_mode: Arc<AtomicU8>,
     metrics: Metrics,
     toggle_states: Arc<Mutex<HashMap<String, bool>>>,
     /// 当前物理按下的键；用于过滤 OS 生成的 key-repeat。
@@ -826,8 +1167,14 @@ impl BurstEngine {
         let active_rules = Arc::new(Mutex::new(HashSet::new()));
         let metrics = Arc::new(EngineMetrics::new());
         let (scheduler_tx, scheduler_rx) = mpsc::channel();
+        let scheduler_wake = SchedulerWake::new();
+        let scheduler_wait_mode =
+            Arc::new(AtomicU8::new(wait_mode_to_u8(SchedulerWaitMode::default())));
+        let scheduler_tx = SchedulerCommandSender::new(scheduler_tx, scheduler_wake.clone());
         let scheduler_handle = Some(spawn_scheduler(
             scheduler_rx,
+            scheduler_wake,
+            scheduler_wait_mode.clone(),
             pressed_keys.clone(),
             simulated_keys.clone(),
             active_rules.clone(),
@@ -839,6 +1186,7 @@ impl BurstEngine {
             active_rules,
             scheduler_tx,
             scheduler_handle,
+            scheduler_wait_mode,
             metrics,
             toggle_states: Arc::new(Mutex::new(HashMap::new())),
             pressed_keys,
@@ -898,6 +1246,16 @@ impl BurstEngine {
 
     pub fn metrics_snapshot(&self) -> EngineMetricsSnapshot {
         self.metrics.snapshot()
+    }
+
+    pub fn scheduler_wait_mode(&self) -> SchedulerWaitMode {
+        wait_mode_from_u8(self.scheduler_wait_mode.load(Ordering::Relaxed))
+    }
+
+    pub fn set_scheduler_wait_mode(&self, mode: SchedulerWaitMode) {
+        self.scheduler_wait_mode
+            .store(wait_mode_to_u8(mode), Ordering::Relaxed);
+        let _ = self.scheduler_tx.send(SchedulerCommand::SetWaitMode(mode));
     }
 
     #[cfg(windows)]
@@ -1463,6 +1821,46 @@ mod tests {
 
         release_simulated_keys(&physical_keys, &simulated_keys);
         assert!(revive(simulated_keys.lock()).is_empty());
+    }
+
+    #[test]
+    fn scheduler_waiter_receives_woken_command() {
+        let (tx, rx) = mpsc::channel();
+        let wake = SchedulerWake::new();
+        let sender = SchedulerCommandSender::new(tx, wake.clone());
+        let mut waiter = SchedulerWaiter::new(wake, SchedulerWaitMode::Standard);
+
+        assert!(sender.send(SchedulerCommand::Shutdown).is_ok());
+
+        assert!(matches!(
+            waiter.wait(&rx, Some(Duration::from_secs(1))),
+            SchedulerWaitOutcome::Command(SchedulerCommand::Shutdown)
+        ));
+    }
+
+    #[test]
+    fn standard_wait_zero_timeout_returns_timeout() {
+        let (_tx, rx) = mpsc::channel();
+
+        assert!(matches!(
+            wait_standard(&rx, Some(Duration::ZERO)),
+            SchedulerWaitOutcome::Timeout
+        ));
+    }
+
+    #[test]
+    fn scheduler_wait_mode_defaults_to_standard_and_can_change() {
+        let engine = BurstEngine::new();
+        assert_eq!(engine.scheduler_wait_mode(), SchedulerWaitMode::Standard);
+
+        engine.set_scheduler_wait_mode(SchedulerWaitMode::HighPrecision);
+        assert_eq!(
+            engine.scheduler_wait_mode(),
+            SchedulerWaitMode::HighPrecision
+        );
+
+        engine.set_scheduler_wait_mode(SchedulerWaitMode::Standard);
+        assert_eq!(engine.scheduler_wait_mode(), SchedulerWaitMode::Standard);
     }
 
     #[test]

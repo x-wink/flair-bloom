@@ -1,8 +1,9 @@
 //! 输入后端初始化：从 settings.json 读取 input_mode，或优先使用 CLI 参数。
 
+use crate::engine::BurstEngine;
+use std::sync::Arc;
 #[cfg(windows)]
 use tauri::Manager;
-#[cfg(windows)]
 use tauri_plugin_store::StoreExt;
 
 pub fn init_input_backend(app: &tauri::AppHandle) {
@@ -38,6 +39,19 @@ pub fn init_input_backend(app: &tauri::AppHandle) {
     }
     #[cfg(not(windows))]
     let _ = app;
+}
+
+pub fn init_scheduler_wait_mode(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
+    let stored_mode: Option<String> = app.store(crate::STORE_PATH).ok().and_then(|store| {
+        store
+            .get("scheduler_wait_mode")
+            .and_then(|v| v.as_str().map(|s| s.to_string()))
+    });
+    let mode = stored_mode
+        .as_deref()
+        .and_then(|v| v.parse::<burst_engine::SchedulerWaitMode>().ok())
+        .unwrap_or_default();
+    engine.set_scheduler_wait_mode(mode);
 }
 
 #[cfg(windows)]
