@@ -73,6 +73,8 @@ type ActiveLoops = Arc<
 >;
 type GlobalChangedCb = Arc<Mutex<Option<Box<dyn Fn(bool) + Send + Sync>>>>;
 type PanelToggleCb = Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
+type PhysicalKeys = Arc<Mutex<HashSet<KeyId>>>;
+type SimulatedKeys = Arc<Mutex<HashMap<KeyId, usize>>>;
 
 #[derive(Default)]
 struct RuleSnapshot {
@@ -114,6 +116,75 @@ fn push_rule_index(index: &mut HashMap<KeyId, Vec<usize>>, key: KeyId, rule_idx:
     index.entry(key).or_default().push(rule_idx);
 }
 
+fn physical_key_down(physical_keys: &PhysicalKeys, key: KeyId) -> bool {
+    revive(physical_keys.lock()).contains(&key)
+}
+
+fn record_simulated_down(simulated_keys: &SimulatedKeys, key: KeyId) {
+    let mut keys = revive(simulated_keys.lock());
+    *keys.entry(key).or_default() += 1;
+}
+
+fn record_simulated_up(simulated_keys: &SimulatedKeys, key: KeyId) -> bool {
+    let mut keys = revive(simulated_keys.lock());
+    let Some(count) = keys.get_mut(&key) else {
+        return false;
+    };
+    if *count <= 1 {
+        keys.remove(&key);
+    } else {
+        *count -= 1;
+    }
+    true
+}
+
+fn safe_key_down(
+    key: KeyId,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+    allow_while_physical_down: bool,
+) -> bool {
+    if !allow_while_physical_down && physical_key_down(physical_keys, key) {
+        return false;
+    }
+    key_down(key);
+    record_simulated_down(simulated_keys, key);
+    true
+}
+
+fn safe_key_up(
+    key: KeyId,
+    physical_keys: &PhysicalKeys,
+    simulated_keys: &SimulatedKeys,
+    allow_while_physical_down: bool,
+) {
+    if !record_simulated_up(simulated_keys, key) {
+        return;
+    }
+    if allow_while_physical_down || !physical_key_down(physical_keys, key) {
+        key_up(key);
+    }
+}
+
+fn release_simulated_key(key: KeyId, physical_keys: &PhysicalKeys, simulated_keys: &SimulatedKeys) {
+    let was_down = revive(simulated_keys.lock()).remove(&key).is_some();
+    if was_down && !physical_key_down(physical_keys, key) {
+        key_up(key);
+    }
+}
+
+fn release_simulated_keys(physical_keys: &PhysicalKeys, simulated_keys: &SimulatedKeys) {
+    let keys: Vec<_> = revive(simulated_keys.lock())
+        .drain()
+        .map(|(key, _)| key)
+        .collect();
+    for key in keys {
+        if !physical_key_down(physical_keys, key) {
+            key_up(key);
+        }
+    }
+}
+
 /// 关键路径锁兜底：若前一持锁者 panic 导致 Mutex 中毒,强行复活并继续。
 /// 按键工具最差故障是键盘卡死,值得给一层硬兜底；连发线程已被 catch_unwind
 /// 包裹,持锁期间也仅做 HashMap/Vec 操作,正常路径不会中毒。
@@ -128,7 +199,9 @@ pub struct BurstEngine {
     active_loops: ActiveLoops,
     toggle_states: Arc<Mutex<HashMap<String, bool>>>,
     /// 当前物理按下的键；用于过滤 OS 生成的 key-repeat。
-    pressed_keys: Arc<Mutex<HashSet<KeyId>>>,
+    pressed_keys: PhysicalKeys,
+    /// 应用确认由自身模拟按下、尚未配对释放的键；异常停止时用于兜底释放。
+    simulated_keys: SimulatedKeys,
     hotkeys: Arc<Mutex<Hotkeys>>,
     /// 全局开关状态被热键改变时调用（由 app 层注册，用于同步托盘与前端）。
     on_global_changed: GlobalChangedCb,
@@ -150,6 +223,7 @@ impl BurstEngine {
             active_loops: Arc::new(Mutex::new(HashMap::new())),
             toggle_states: Arc::new(Mutex::new(HashMap::new())),
             pressed_keys: Arc::new(Mutex::new(HashSet::new())),
+            simulated_keys: Arc::new(Mutex::new(HashMap::new())),
             hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
             on_global_changed: Arc::new(Mutex::new(None)),
             on_panel_toggle: Arc::new(Mutex::new(None)),
@@ -171,6 +245,7 @@ impl BurstEngine {
         }
         loops.clear();
         revive(self.toggle_states.lock()).clear();
+        release_simulated_keys(&self.pressed_keys, &self.simulated_keys);
         #[cfg(windows)]
         clear_pending_injections();
     }
@@ -306,6 +381,9 @@ impl BurstEngine {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_clone = cancel.clone();
         let target_key = rule.target_key;
+        let allow_while_physical_down = rule.trigger_key == rule.target_key;
+        let physical_keys = self.pressed_keys.clone();
+        let simulated_keys = self.simulated_keys.clone();
         let interval_ms = rule.interval_ms;
         // spawn 在锁外执行，避免 thread::spawn panic 时中毒 Mutex
         let handle = thread::spawn(move || {
@@ -315,9 +393,22 @@ impl BurstEngine {
             let rest_ms = interval_ms as u64 - hold_ms;
             let result = std::panic::catch_unwind(|| {
                 while !cancel_clone.load(Ordering::SeqCst) {
-                    key_down(target_key);
+                    if !safe_key_down(
+                        target_key,
+                        &physical_keys,
+                        &simulated_keys,
+                        allow_while_physical_down,
+                    ) {
+                        thread::park_timeout(Duration::from_millis(interval_ms as u64));
+                        continue;
+                    }
                     thread::park_timeout(Duration::from_millis(hold_ms));
-                    key_up(target_key);
+                    safe_key_up(
+                        target_key,
+                        &physical_keys,
+                        &simulated_keys,
+                        allow_while_physical_down,
+                    );
                     if cancel_clone.load(Ordering::SeqCst) {
                         break;
                     }
@@ -325,7 +416,7 @@ impl BurstEngine {
                 }
             });
             if result.is_err() {
-                key_up(target_key);
+                release_simulated_key(target_key, &physical_keys, &simulated_keys);
             }
         });
         let mut loops = revive(self.active_loops.lock());
@@ -362,6 +453,8 @@ impl BurstEngine {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_clone = cancel.clone();
         let target_key = rule.target_key;
+        let physical_keys = self.pressed_keys.clone();
+        let simulated_keys = self.simulated_keys.clone();
         let interval_ms = rule.interval_ms;
         let handle = thread::spawn(move || {
             let hold_ms = (interval_ms as u64 / 3)
@@ -370,9 +463,12 @@ impl BurstEngine {
             let rest_ms = interval_ms as u64 - hold_ms;
             let result = std::panic::catch_unwind(|| {
                 while !cancel_clone.load(Ordering::SeqCst) {
-                    key_down(target_key);
+                    if !safe_key_down(target_key, &physical_keys, &simulated_keys, false) {
+                        thread::park_timeout(Duration::from_millis(interval_ms as u64));
+                        continue;
+                    }
                     thread::park_timeout(Duration::from_millis(hold_ms));
-                    key_up(target_key);
+                    safe_key_up(target_key, &physical_keys, &simulated_keys, false);
                     if cancel_clone.load(Ordering::SeqCst) {
                         break;
                     }
@@ -380,7 +476,7 @@ impl BurstEngine {
                 }
             });
             if result.is_err() {
-                key_up(target_key);
+                release_simulated_key(target_key, &physical_keys, &simulated_keys);
             }
         });
         let mut loops = revive(self.active_loops.lock());
@@ -425,9 +521,10 @@ impl Drop for BurstEngine {
         for (_, _, target_key, join_handle) in entries {
             // 仅在线程 panic 时补发 key_up；正常退出路径线程已自行调用
             if join_handle.join().is_err() {
-                key_up(target_key);
+                release_simulated_key(target_key, &self.pressed_keys, &self.simulated_keys);
             }
         }
+        release_simulated_keys(&self.pressed_keys, &self.simulated_keys);
         #[cfg(windows)]
         clear_pending_injections();
     }
@@ -779,6 +876,39 @@ mod tests {
 
         engine.on_key_release(trigger);
         assert!(engine.get_active_ids().is_empty());
+    }
+
+    #[test]
+    fn safe_key_down_skips_when_physical_target_is_down() {
+        let key = KeyId::Keyboard(0x57);
+        let physical_keys = Arc::new(Mutex::new(HashSet::from([key])));
+        let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
+
+        assert!(!safe_key_down(key, &physical_keys, &simulated_keys, false));
+        assert!(revive(simulated_keys.lock()).is_empty());
+    }
+
+    #[test]
+    fn safe_key_down_allows_same_key_hold_pulse() {
+        let key = KeyId::Keyboard(0x57);
+        let physical_keys = Arc::new(Mutex::new(HashSet::from([key])));
+        let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
+
+        assert!(safe_key_down(key, &physical_keys, &simulated_keys, true));
+        assert_eq!(revive(simulated_keys.lock()).get(&key), Some(&1));
+
+        safe_key_up(key, &physical_keys, &simulated_keys, true);
+        assert!(revive(simulated_keys.lock()).is_empty());
+    }
+
+    #[test]
+    fn release_simulated_keys_drains_ledger() {
+        let key = KeyId::Keyboard(0x45);
+        let physical_keys = Arc::new(Mutex::new(HashSet::new()));
+        let simulated_keys = Arc::new(Mutex::new(HashMap::from([(key, 2)])));
+
+        release_simulated_keys(&physical_keys, &simulated_keys);
+        assert!(revive(simulated_keys.lock()).is_empty());
     }
 
     #[test]
