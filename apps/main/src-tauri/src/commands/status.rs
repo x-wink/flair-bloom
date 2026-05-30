@@ -29,7 +29,7 @@ pub struct AppStatus {
     pub interception_installed: DriverStatus,
     pub dd_hid_installed: DriverStatus,
     pub input_mode: String,
-    pub scheduler_wait_mode: String,
+    pub scheduler_hp_degraded: bool,
     pub platform: &'static str,
     pub os_family: &'static str,
     pub os_version: String,
@@ -52,7 +52,7 @@ impl AppStatus {
             interception_installed: collect_interception_installed(),
             dd_hid_installed: collect_dd_hid_installed(),
             input_mode: collect_input_mode(),
-            scheduler_wait_mode: collect_scheduler_wait_mode(app),
+            scheduler_hp_degraded: collect_scheduler_hp_degraded(app),
             platform: std::env::consts::OS,
             os_family: std::env::consts::FAMILY,
             os_version: win_sysinfo::os_version(),
@@ -147,19 +147,11 @@ fn collect_input_mode() -> String {
     "sendinput".to_string()
 }
 
-fn collect_scheduler_wait_mode(app: &AppHandle) -> String {
-    use tauri_plugin_store::StoreExt;
-    app.store(crate::STORE_PATH)
-        .ok()
-        .and_then(|store| {
-            store
-                .get("scheduler_wait_mode")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-        })
-        .and_then(|v| v.parse::<burst_engine::SchedulerWaitMode>().ok())
-        .unwrap_or_default()
-        .as_str()
-        .to_string()
+fn collect_scheduler_hp_degraded(app: &AppHandle) -> bool {
+    use crate::commands::engine::EngineState;
+    app.try_state::<EngineState>()
+        .map(|s| s.0.scheduler_hp_degraded())
+        .unwrap_or(false)
 }
 
 fn collect_autostart_enabled(app: &AppHandle) -> bool {
@@ -211,7 +203,7 @@ mod tests {
             interception_installed: DriverStatus::Installed,
             dd_hid_installed: DriverStatus::PendingReboot,
             input_mode: "dd_hid".to_string(),
-            scheduler_wait_mode: "standard".to_string(),
+            scheduler_hp_degraded: false,
             platform: "windows",
             os_family: "windows",
             os_version: "Windows 11 23H2 (Build 22631.4317)".to_string(),
@@ -237,7 +229,7 @@ mod tests {
             "interception_installed",
             "dd_hid_installed",
             "input_mode",
-            "scheduler_wait_mode",
+            "scheduler_hp_degraded",
             "platform",
             "os_family",
             "os_version",
@@ -254,7 +246,7 @@ mod tests {
             assert!(obj.contains_key(key), "缺少键 {key}");
         }
         assert_eq!(obj["input_mode"], "dd_hid");
-        assert_eq!(obj["scheduler_wait_mode"], "standard");
+        assert!(obj["scheduler_hp_degraded"].is_boolean());
         assert_eq!(obj["arch"], "x64");
         assert_eq!(obj["locale"], "zh-CN");
         // 三态序列化为 snake_case 字符串，前端按枚举值匹配

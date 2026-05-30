@@ -7,7 +7,6 @@ use std::sync::{atomic::AtomicU32, RwLock, Weak};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{
-        atomic::AtomicU8,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
@@ -89,51 +88,9 @@ enum SchedulerCommand {
         sent_at: Instant,
         ack: Option<Sender<()>>,
     },
-    SetWaitMode(SchedulerWaitMode),
     Shutdown,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum SchedulerWaitMode {
-    #[default]
-    Standard,
-    HighPrecision,
-}
-
-impl SchedulerWaitMode {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Standard => "standard",
-            Self::HighPrecision => "high_precision",
-        }
-    }
-}
-
-impl std::str::FromStr for SchedulerWaitMode {
-    type Err = ();
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "standard" => Ok(Self::Standard),
-            "high_precision" => Ok(Self::HighPrecision),
-            _ => Err(()),
-        }
-    }
-}
-
-fn wait_mode_to_u8(mode: SchedulerWaitMode) -> u8 {
-    match mode {
-        SchedulerWaitMode::Standard => 0,
-        SchedulerWaitMode::HighPrecision => 1,
-    }
-}
-
-fn wait_mode_from_u8(value: u8) -> SchedulerWaitMode {
-    match value {
-        1 => SchedulerWaitMode::HighPrecision,
-        _ => SchedulerWaitMode::Standard,
-    }
-}
 
 #[derive(Clone)]
 struct SchedulerWake {
@@ -183,49 +140,39 @@ enum SchedulerWaitOutcome {
 }
 
 struct SchedulerWaiter {
-    mode: SchedulerWaitMode,
     #[cfg(windows)]
     high_precision: Option<HighPrecisionWaiter>,
+    on_degraded: PanelToggleCb,
+    hp_degraded: Arc<AtomicBool>,
 }
 
 impl SchedulerWaiter {
-    fn new(wake: SchedulerWake, mode: SchedulerWaitMode) -> Self {
+    fn new(wake: SchedulerWake, on_degraded: PanelToggleCb, hp_degraded: Arc<AtomicBool>) -> Self {
         #[cfg(windows)]
         {
-            let high_precision = match mode {
-                SchedulerWaitMode::Standard => None,
-                SchedulerWaitMode::HighPrecision => Self::create_high_precision(&wake),
-            };
-            Self {
-                mode,
-                high_precision,
+            let high_precision = wake
+                .command_event
+                .clone()
+                .and_then(HighPrecisionWaiter::new);
+            if high_precision.is_some() {
+                info!("连发 scheduler 启用 Windows 高精度 waitable timer");
+            } else {
+                hp_degraded.store(true, Ordering::SeqCst);
+                info!("Windows 高精度 waitable timer 不可用，scheduler 降级标准等待路径");
             }
-        }
-        #[cfg(not(windows))]
-        {
-            let _ = wake;
-            Self { mode }
-        }
-    }
-
-    fn set_mode(&mut self, wake: &SchedulerWake, mode: SchedulerWaitMode) {
-        if self.mode == mode {
-            return;
-        }
-        self.mode = mode;
-        #[cfg(windows)]
-        {
-            self.high_precision = match mode {
-                SchedulerWaitMode::Standard => {
-                    info!("连发 scheduler 已切换为标准等待");
-                    None
-                }
-                SchedulerWaitMode::HighPrecision => Self::create_high_precision(wake),
+            return Self {
+                high_precision,
+                on_degraded,
+                hp_degraded,
             };
         }
         #[cfg(not(windows))]
         {
             let _ = wake;
+            Self {
+                on_degraded,
+                hp_degraded,
+            }
         }
     }
 
@@ -235,34 +182,21 @@ impl SchedulerWaiter {
         timeout: Option<Duration>,
     ) -> SchedulerWaitOutcome {
         #[cfg(windows)]
-        if self.mode == SchedulerWaitMode::HighPrecision {
-            let Some(waiter) = &self.high_precision else {
-                return wait_standard(rx, timeout);
-            };
+        if let Some(waiter) = &self.high_precision {
             match waiter.wait(rx, timeout) {
                 Ok(outcome) => return outcome,
                 Err(reason) => {
                     error!("Windows 高精度 scheduler 等待失败，降级标准等待路径: {reason}");
                     self.high_precision = None;
+                    self.hp_degraded.store(true, Ordering::SeqCst);
+                    if let Some(f) = revive(self.on_degraded.lock()).as_ref() {
+                        f();
+                    }
                 }
             }
         }
 
         wait_standard(rx, timeout)
-    }
-
-    #[cfg(windows)]
-    fn create_high_precision(wake: &SchedulerWake) -> Option<HighPrecisionWaiter> {
-        let high_precision = wake
-            .command_event
-            .clone()
-            .and_then(HighPrecisionWaiter::new);
-        if high_precision.is_some() {
-            info!("连发 scheduler 已切换为 Windows 高精度 waitable timer");
-        } else {
-            info!("Windows 高精度 waitable timer 不可用，scheduler 保持标准等待路径");
-        }
-        high_precision
     }
 }
 
@@ -747,7 +681,8 @@ impl ScheduledRule {
 fn spawn_scheduler(
     rx: Receiver<SchedulerCommand>,
     wake: SchedulerWake,
-    wait_mode: Arc<AtomicU8>,
+    hp_degraded: Arc<AtomicBool>,
+    on_degraded: PanelToggleCb,
     physical_keys: PhysicalKeys,
     simulated_keys: SimulatedKeys,
     active_rules: ActiveRules,
@@ -758,7 +693,8 @@ fn spawn_scheduler(
             run_scheduler(
                 rx,
                 wake,
-                wait_mode,
+                hp_degraded,
+                on_degraded,
                 &physical_keys,
                 &simulated_keys,
                 &active_rules,
@@ -776,7 +712,8 @@ fn spawn_scheduler(
 fn run_scheduler(
     rx: Receiver<SchedulerCommand>,
     wake: SchedulerWake,
-    wait_mode: Arc<AtomicU8>,
+    hp_degraded: Arc<AtomicBool>,
+    on_degraded: PanelToggleCb,
     physical_keys: &PhysicalKeys,
     simulated_keys: &SimulatedKeys,
     active_rules: &ActiveRules,
@@ -784,17 +721,11 @@ fn run_scheduler(
 ) {
     let mut rules = HashMap::<String, ScheduledRule>::new();
     let mut target_holds = HashMap::<KeyId, TargetHold>::new();
-    let mut waiter = SchedulerWaiter::new(
-        wake.clone(),
-        wait_mode_from_u8(wait_mode.load(Ordering::Relaxed)),
-    );
+    let mut waiter = SchedulerWaiter::new(wake, on_degraded, hp_degraded);
     loop {
         while let Ok(cmd) = rx.try_recv() {
             if handle_scheduler_command(
                 cmd,
-                &wake,
-                &mut waiter,
-                &wait_mode,
                 &mut rules,
                 &mut target_holds,
                 physical_keys,
@@ -846,9 +777,6 @@ fn run_scheduler(
         if let Some(cmd) = command {
             if handle_scheduler_command(
                 cmd,
-                &wake,
-                &mut waiter,
-                &wait_mode,
                 &mut rules,
                 &mut target_holds,
                 physical_keys,
@@ -870,15 +798,8 @@ fn run_scheduler(
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "scheduler 命令处理需要同时更新等待器、规则表、目标持有账本和安全兜底状态"
-)]
 fn handle_scheduler_command(
     cmd: SchedulerCommand,
-    wake: &SchedulerWake,
-    waiter: &mut SchedulerWaiter,
-    wait_mode: &AtomicU8,
     rules: &mut HashMap<String, ScheduledRule>,
     target_holds: &mut HashMap<KeyId, TargetHold>,
     physical_keys: &PhysicalKeys,
@@ -914,11 +835,6 @@ fn handle_scheduler_command(
             if let Some(ack) = ack {
                 let _ = ack.send(());
             }
-            false
-        }
-        SchedulerCommand::SetWaitMode(mode) => {
-            wait_mode.store(wait_mode_to_u8(mode), Ordering::Relaxed);
-            waiter.set_mode(wake, mode);
             false
         }
         SchedulerCommand::Shutdown => true,
@@ -1147,7 +1063,10 @@ pub struct BurstEngine {
     active_rules: ActiveRules,
     scheduler_tx: SchedulerCommandSender,
     scheduler_handle: Option<thread::JoinHandle<()>>,
-    scheduler_wait_mode: Arc<AtomicU8>,
+    /// 高精度 timer 是否已降级为标准等待。
+    scheduler_hp_degraded: Arc<AtomicBool>,
+    /// 调度器降级时调用（由 app 层注册，用于通知前端）。
+    on_scheduler_degraded: PanelToggleCb,
     metrics: Metrics,
     toggle_states: Arc<Mutex<HashMap<String, bool>>>,
     /// 当前物理按下的键；用于过滤 OS 生成的 key-repeat。
@@ -1175,13 +1094,14 @@ impl BurstEngine {
         let metrics = Arc::new(EngineMetrics::new());
         let (scheduler_tx, scheduler_rx) = mpsc::channel();
         let scheduler_wake = SchedulerWake::new();
-        let scheduler_wait_mode =
-            Arc::new(AtomicU8::new(wait_mode_to_u8(SchedulerWaitMode::default())));
+        let scheduler_hp_degraded = Arc::new(AtomicBool::new(false));
+        let on_scheduler_degraded: PanelToggleCb = Arc::new(Mutex::new(None));
         let scheduler_tx = SchedulerCommandSender::new(scheduler_tx, scheduler_wake.clone());
         let scheduler_handle = Some(spawn_scheduler(
             scheduler_rx,
             scheduler_wake,
-            scheduler_wait_mode.clone(),
+            scheduler_hp_degraded.clone(),
+            on_scheduler_degraded.clone(),
             pressed_keys.clone(),
             simulated_keys.clone(),
             active_rules.clone(),
@@ -1193,7 +1113,8 @@ impl BurstEngine {
             active_rules,
             scheduler_tx,
             scheduler_handle,
-            scheduler_wait_mode,
+            scheduler_hp_degraded,
+            on_scheduler_degraded,
             metrics,
             toggle_states: Arc::new(Mutex::new(HashMap::new())),
             pressed_keys,
@@ -1261,14 +1182,20 @@ impl BurstEngine {
         self.metrics.snapshot()
     }
 
-    pub fn scheduler_wait_mode(&self) -> SchedulerWaitMode {
-        wait_mode_from_u8(self.scheduler_wait_mode.load(Ordering::Relaxed))
+    /// 返回调度器是否已降级为标准等待（高精度 timer 不可用）。
+    pub fn scheduler_hp_degraded(&self) -> bool {
+        self.scheduler_hp_degraded.load(Ordering::SeqCst)
     }
 
-    pub fn set_scheduler_wait_mode(&self, mode: SchedulerWaitMode) {
-        self.scheduler_wait_mode
-            .store(wait_mode_to_u8(mode), Ordering::Relaxed);
-        let _ = self.scheduler_tx.send(SchedulerCommand::SetWaitMode(mode));
+    /// 注册调度器降级时的回调（由 app 层注册，用于通知前端）。
+    /// 若调度器已降级，注册后立即调用一次。
+    pub fn set_on_scheduler_degraded(&self, f: impl Fn() + Send + Sync + 'static) {
+        *revive(self.on_scheduler_degraded.lock()) = Some(Box::new(f));
+        if self.scheduler_hp_degraded.load(Ordering::SeqCst) {
+            if let Some(cb) = revive(self.on_scheduler_degraded.lock()).as_ref() {
+                cb();
+            }
+        }
     }
 
     #[cfg(windows)]
@@ -1721,9 +1648,8 @@ mod tests {
             active_rules: Arc::new(Mutex::new(HashSet::new())),
             scheduler_tx: SchedulerCommandSender::new(tx, SchedulerWake::new()),
             scheduler_handle: None,
-            scheduler_wait_mode: Arc::new(AtomicU8::new(wait_mode_to_u8(
-                SchedulerWaitMode::default(),
-            ))),
+            scheduler_hp_degraded: Arc::new(AtomicBool::new(false)),
+            on_scheduler_degraded: Arc::new(Mutex::new(None)),
             metrics: Arc::new(EngineMetrics::new()),
             toggle_states: Arc::new(Mutex::new(HashMap::new())),
             pressed_keys: Arc::new(Mutex::new(HashSet::new())),
@@ -1888,7 +1814,11 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         let wake = SchedulerWake::new();
         let sender = SchedulerCommandSender::new(tx, wake.clone());
-        let mut waiter = SchedulerWaiter::new(wake, SchedulerWaitMode::Standard);
+        let mut waiter = SchedulerWaiter::new(
+            wake,
+            Arc::new(Mutex::new(None)),
+            Arc::new(AtomicBool::new(false)),
+        );
 
         assert!(sender.send(SchedulerCommand::Shutdown).is_ok());
 
@@ -1906,21 +1836,6 @@ mod tests {
             wait_standard(&rx, Some(Duration::ZERO)),
             SchedulerWaitOutcome::Timeout
         ));
-    }
-
-    #[test]
-    fn scheduler_wait_mode_defaults_to_standard_and_can_change() {
-        let engine = BurstEngine::new();
-        assert_eq!(engine.scheduler_wait_mode(), SchedulerWaitMode::Standard);
-
-        engine.set_scheduler_wait_mode(SchedulerWaitMode::HighPrecision);
-        assert_eq!(
-            engine.scheduler_wait_mode(),
-            SchedulerWaitMode::HighPrecision
-        );
-
-        engine.set_scheduler_wait_mode(SchedulerWaitMode::Standard);
-        assert_eq!(engine.scheduler_wait_mode(), SchedulerWaitMode::Standard);
     }
 
     #[test]

@@ -1,7 +1,6 @@
 //! 规则 CRUD + 输入模式切换 + 按键捕获。驱动管理已迁至 [`super::driver`]。
 
 use crate::engine::BurstEngine;
-use burst_engine::SchedulerWaitMode;
 use qzh_profile::{BurstRule, Hotkeys, KeyId, MAX_RULES};
 use std::sync::{atomic::Ordering, Arc};
 #[allow(unused_imports)]
@@ -180,30 +179,6 @@ pub fn get_input_mode() -> String {
     {
         "sendinput".to_string()
     }
-}
-
-#[tauri::command]
-pub fn get_scheduler_wait_mode(state: State<EngineState>) -> String {
-    state.0.scheduler_wait_mode().as_str().to_string()
-}
-
-#[tauri::command]
-pub fn set_scheduler_wait_mode(
-    app: AppHandle,
-    state: State<EngineState>,
-    mode: String,
-) -> Result<(), String> {
-    let mode = mode
-        .parse::<SchedulerWaitMode>()
-        .map_err(|_| format!("未知调度模式: {mode}"))?;
-    state.0.set_scheduler_wait_mode(mode);
-
-    if let Ok(store) = app.store(crate::STORE_PATH) {
-        store.set("scheduler_wait_mode", serde_json::json!(mode.as_str()));
-        let _ = store.save();
-    }
-    crate::commands::status::emit_status_changed(&app);
-    Ok(())
 }
 
 #[tauri::command]

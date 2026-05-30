@@ -47,7 +47,6 @@ const DEFAULT_PROFILE_NAME = 'defults';
 
 type BurstMode = 'hold' | 'toggle';
 type InputMode = 'sendinput' | 'interception' | 'dd_hid';
-type SchedulerWaitMode = 'standard' | 'high_precision';
 type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
 
 interface AppStatus {
@@ -55,7 +54,7 @@ interface AppStatus {
   interception_installed: DriverStatus;
   dd_hid_installed: DriverStatus;
   input_mode: string;
-  scheduler_wait_mode: string;
+  scheduler_hp_degraded: boolean;
   platform: string;
   os_family: string;
   os_version: string;
@@ -85,11 +84,6 @@ const INPUT_MODE_LABELS: Record<InputMode, string> = {
   dd_hid: '究极HID',
 };
 const INPUT_MODE_LIST: InputMode[] = ['sendinput', 'interception', 'dd_hid'];
-const SCHEDULER_WAIT_MODE_LIST: SchedulerWaitMode[] = ['standard', 'high_precision'];
-const SCHEDULER_WAIT_MODE_LABELS: Record<SchedulerWaitMode, string> = {
-  standard: '标准等待',
-  high_precision: '高精度 timer',
-};
 
 interface BurstRule {
   id: string;
@@ -212,7 +206,6 @@ export default function PanelApp() {
     null,
   );
   const [inputMode, setInputMode] = useState<InputMode>('sendinput');
-  const [schedulerWaitMode, setSchedulerWaitMode] = useState<SchedulerWaitMode>('standard');
   const [interceptionInstalled, setInterceptionInstalled] = useState<DriverStatus>('not_installed');
   const [ddHidInstalled, setDdHidInstalled] = useState<DriverStatus>('not_installed');
   const [elevated, setElevated] = useState(false);
@@ -248,7 +241,6 @@ export default function PanelApp() {
   const soundRef = useRef<SoundSettings>(DEFAULT_SOUND);
   const [availableVoices, setAvailableVoices] = useState<string[]>([]);
   const [switchingMode, setSwitchingMode] = useState(false);
-  const [switchingSchedulerWaitMode, setSwitchingSchedulerWaitMode] = useState(false);
   const [modePickerOpen, setModePickerOpen] = useState(false);
   const modeBtnRef = useRef<HTMLButtonElement>(null);
   const [rules, setRules] = useState<BurstRule[]>([]);
@@ -272,6 +264,7 @@ export default function PanelApp() {
   const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const updateProgressDoneTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const updateDownloadFailedRef = useRef(false);
+  const hpDegradedShownRef = useRef(false);
   const initialLoadDone = useRef(false);
   const profileNameRef = useRef(profileName);
   const isDefaultProfile = profileName === DEFAULT_PROFILE_NAME;
@@ -297,10 +290,11 @@ export default function PanelApp() {
     if ((INPUT_MODE_LIST as string[]).includes(status.input_mode)) {
       setInputMode(status.input_mode as InputMode);
     }
-    if ((SCHEDULER_WAIT_MODE_LIST as string[]).includes(status.scheduler_wait_mode)) {
-      setSchedulerWaitMode(status.scheduler_wait_mode as SchedulerWaitMode);
+    if (status.scheduler_hp_degraded && !hpDegradedShownRef.current) {
+      hpDegradedShownRef.current = true;
+      toast.warning('调度精度降级：当前系统不支持高精度 timer，已回退标准计时');
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     return () => {
@@ -898,28 +892,6 @@ export default function PanelApp() {
       toast.error(`切换失败：${e}`);
     } finally {
       setSwitchingMode(false);
-    }
-  }
-
-  async function selectSchedulerWaitMode(target: SchedulerWaitMode) {
-    if (switchingSchedulerWaitMode || target === schedulerWaitMode) return;
-    setSwitchingSchedulerWaitMode(true);
-    try {
-      await invoke('set_scheduler_wait_mode', { mode: target });
-      const status = await invoke<AppStatus>('get_app_status');
-      applyAppStatus(status);
-      const actual = status.scheduler_wait_mode;
-      if (actual === target) {
-        toast.success(`已切换为${SCHEDULER_WAIT_MODE_LABELS[target]}`);
-      } else if ((SCHEDULER_WAIT_MODE_LIST as string[]).includes(actual)) {
-        toast.warning(
-          `切换未生效，已停留在${SCHEDULER_WAIT_MODE_LABELS[actual as SchedulerWaitMode]}`,
-        );
-      }
-    } catch (e) {
-      toast.error(`切换失败：${e}`);
-    } finally {
-      setSwitchingSchedulerWaitMode(false);
     }
   }
 
@@ -1594,8 +1566,6 @@ export default function PanelApp() {
           appVersion={appVersion}
           inputMode={inputMode}
           switchingMode={switchingMode}
-          schedulerWaitMode={schedulerWaitMode}
-          switchingSchedulerWaitMode={switchingSchedulerWaitMode}
           globalEnabled={globalEnabled}
           togglingGlobal={togglingGlobal}
           closeBehavior={closeBehaviorPreference}
@@ -1615,7 +1585,6 @@ export default function PanelApp() {
             setShowSettings(false);
             void selectInputMode(mode);
           }}
-          onSelectSchedulerWaitMode={(mode) => void selectSchedulerWaitMode(mode)}
           hotkeys={hotkeys}
           hotkeyConflicts={{
             global_toggle: severityForKey(conflicts, hotkeys.global_toggle),

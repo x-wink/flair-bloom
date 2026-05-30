@@ -14,7 +14,7 @@ mod tray;
 
 use bootstrap::{
     agreement::{check_agreement, AGREEMENT_VERSION},
-    input::{init_input_backend, init_scheduler_wait_mode},
+    input::init_input_backend,
     logging,
     profile::load_or_init_profile,
     update::{check_for_updates, UpdateLock},
@@ -28,8 +28,8 @@ use commands::{
     },
     engine::{
         get_active_rules, get_engine_metrics, get_global_enabled, get_input_mode, get_rules,
-        get_scheduler_wait_mode, relay_key_event, set_global_enabled, set_global_hotkeys,
-        set_input_mode, set_rules, set_scheduler_wait_mode, EngineState,
+        relay_key_event, set_global_enabled, set_global_hotkeys, set_input_mode, set_rules,
+        EngineState,
     },
     import_profile::{import_external_config, preview_import, scan_import_configs},
     log::{log_from_frontend, open_app_dir},
@@ -95,8 +95,6 @@ pub fn run() {
             relay_key_event,
             get_input_mode,
             set_input_mode,
-            get_scheduler_wait_mode,
-            set_scheduler_wait_mode,
             is_driver_installed,
             install_driver,
             uninstall_driver,
@@ -171,10 +169,20 @@ pub fn run() {
                 });
             }
 
+            // 调度器降级回调：高精度 timer 不可用时通知前端
+            {
+                let handle = app.handle().clone();
+                burst_engine.set_on_scheduler_degraded(move || {
+                    let handle = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::commands::status::emit_status_changed(&handle);
+                    });
+                });
+            }
+
             let need_agreement = check_agreement(app.handle());
             load_or_init_profile(app.handle(), &burst_engine);
             init_input_backend(app.handle());
-            init_scheduler_wait_mode(app.handle(), &burst_engine);
             tray::setup_tray(app.handle(), engine_for_tray)?;
 
             if let Some(panel) = app.get_webview_window("panel") {
