@@ -53,9 +53,13 @@ pub fn toggle_autostart(app: AppHandle) -> Result<bool, String> {
     let launch = app.autolaunch();
     let enabled = launch.is_enabled().unwrap_or(false);
     if enabled {
-        launch.disable().map_err(|e| format!("禁用开机自启失败: {e}"))?;
+        launch
+            .disable()
+            .map_err(|e| format!("禁用开机自启失败: {e}"))?;
     } else {
-        launch.enable().map_err(|e| format!("启用开机自启失败: {e}"))?;
+        launch
+            .enable()
+            .map_err(|e| format!("启用开机自启失败: {e}"))?;
     }
     Ok(launch.is_enabled().unwrap_or(!enabled))
 }

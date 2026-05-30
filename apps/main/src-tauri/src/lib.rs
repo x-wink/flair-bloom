@@ -4,7 +4,7 @@
 
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tracing::info;
 
 mod bootstrap;
@@ -27,9 +27,8 @@ use commands::{
         is_elevated, relaunch_as_admin, uninstall_dd_hid_driver, uninstall_driver,
     },
     engine::{
-        get_active_rules, get_global_enabled, get_input_mode, get_rules,
-        relay_key_event, set_global_enabled, set_global_hotkeys, set_input_mode, set_rules,
-        EngineState,
+        get_active_rules, get_global_enabled, get_input_mode, get_rules, relay_key_event,
+        set_global_enabled, set_global_hotkeys, set_input_mode, set_rules, EngineState,
     },
     import_profile::{import_external_config, preview_import, scan_import_configs},
     log::{log_from_frontend, open_app_dir},
@@ -50,6 +49,14 @@ pub const APP_NAME_CN: &str = "气质花按键助手";
 pub const APP_IDENTIFIER: &str = "fun.xwink.flairbloom";
 pub(crate) const STORE_PATH: &str = "settings.json";
 
+pub(crate) fn show_panel<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(panel) = app.get_webview_window("panel") {
+        let _ = panel.show();
+        let _ = panel.unminimize();
+        let _ = panel.set_focus();
+    }
+}
+
 pub fn log_dir() -> std::path::PathBuf {
     logging::log_dir()
 }
@@ -65,7 +72,9 @@ pub fn run() {
     let engine_for_tray = burst_engine.clone();
 
     tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|_app, _args, _cwd| {}))
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_panel(app);
+        }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_autostart::init(
@@ -147,11 +156,11 @@ pub fn run() {
                     tauri::async_runtime::spawn(async move {
                         if let Some(win) = handle.get_webview_window("panel") {
                             let visible = win.is_visible().unwrap_or(false);
-                            if visible {
-                                let _ = win.hide();
+                            let minimized = win.is_minimized().unwrap_or(false);
+                            if visible && !minimized {
+                                let _ = win.minimize();
                             } else {
-                                let _ = win.show();
-                                let _ = win.set_focus();
+                                show_panel(&handle);
                             }
                         }
                     });

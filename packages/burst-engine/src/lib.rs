@@ -3,11 +3,11 @@ use qzh_profile::key_id::KeyId;
 use qzh_profile::key_id::MouseButton;
 use qzh_profile::profile::{BurstMode, BurstRule, Hotkeys};
 #[cfg(windows)]
-use std::sync::{RwLock, Weak};
+use std::sync::{atomic::AtomicU32, RwLock, Weak};
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
     thread,
@@ -421,7 +421,9 @@ unsafe extern "system" fn keyboard_hook_proc(ncode: i32, wparam: WPARAM, lparam:
                 .and_then(|w| w.upgrade());
             if let Some(engine) = engine {
                 match wparam as u32 {
-                    WM_KEYDOWN | WM_SYSKEYDOWN => { engine.on_key_press(key); }
+                    WM_KEYDOWN | WM_SYSKEYDOWN => {
+                        engine.on_key_press(key);
+                    }
                     WM_KEYUP | WM_SYSKEYUP => engine.on_key_release(key),
                     _ => {}
                 }

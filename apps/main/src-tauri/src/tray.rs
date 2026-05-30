@@ -3,7 +3,7 @@ use std::sync::{atomic::Ordering, Arc};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, Runtime,
+    AppHandle, Emitter, Runtime,
 };
 
 pub fn build_menu<R: Runtime>(app: &AppHandle<R>, enabled: bool) -> tauri::Result<Menu<R>> {
@@ -42,10 +42,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>, engine: Arc<BurstEngine>) -> t
                 let _ = app.emit("global-enabled-changed", enabled);
             }
             "open" => {
-                if let Some(panel) = app.get_webview_window("panel") {
-                    let _ = panel.show();
-                    let _ = panel.set_focus();
-                }
+                crate::show_panel(app);
             }
             "quit" => app.exit(0),
             _ => {}
@@ -53,10 +50,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>, engine: Arc<BurstEngine>) -> t
         .on_tray_icon_event(|tray, event| {
             if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
                 let app = tray.app_handle();
-                if let Some(panel) = app.get_webview_window("panel") {
-                    let _ = panel.show();
-                    let _ = panel.set_focus();
-                }
+                crate::show_panel(app);
             }
         })
         .build(app)?;
