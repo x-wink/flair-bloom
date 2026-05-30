@@ -5,9 +5,9 @@ use qzh_profile::profile::{BurstMode, BurstRule, Hotkeys};
 #[cfg(windows)]
 use std::sync::{atomic::AtomicU32, RwLock, Weak};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
         Arc, Mutex,
     },
@@ -65,6 +65,8 @@ type PhysicalKeys = Arc<Mutex<HashSet<KeyId>>>;
 type SimulatedKeys = Arc<Mutex<HashMap<KeyId, usize>>>;
 type ActiveRules = Arc<Mutex<HashSet<String>>>;
 type KeyEvent = (KeyId, bool);
+type Metrics = Arc<EngineMetrics>;
+const DELAY_SAMPLE_LIMIT: usize = 4096;
 
 #[derive(Clone)]
 struct ScheduledRuleConfig {
@@ -76,8 +78,8 @@ struct ScheduledRuleConfig {
 
 enum SchedulerCommand {
     Start(ScheduledRuleConfig),
-    Stop(String),
-    StopAll,
+    Stop(String, Instant),
+    StopAll(Instant),
     Shutdown,
 }
 
@@ -99,6 +101,148 @@ struct ScheduledRule {
 #[derive(Default)]
 struct TargetHold {
     owners: HashMap<String, bool>,
+}
+
+struct EngineMetrics {
+    started_at: Instant,
+    active_rules: AtomicUsize,
+    injected_events: AtomicU64,
+    scheduler_steps: AtomicU64,
+    skipped_pulses: AtomicU64,
+    stop_commands: AtomicU64,
+    delay_samples_us: Mutex<VecDeque<u64>>,
+    hook_samples_us: Mutex<VecDeque<u64>>,
+    stop_response_samples_us: Mutex<VecDeque<u64>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EngineMetricsSnapshot {
+    pub active_rules: usize,
+    pub injected_events: u64,
+    pub injection_rate_per_sec: f64,
+    pub scheduler_steps: u64,
+    pub skipped_pulses: u64,
+    pub stop_commands: u64,
+    pub delay_sample_count: usize,
+    pub delay_p50_us: u64,
+    pub delay_p95_us: u64,
+    pub delay_p99_us: u64,
+    pub delay_max_us: u64,
+    pub hook_sample_count: usize,
+    pub hook_p50_us: u64,
+    pub hook_p95_us: u64,
+    pub hook_p99_us: u64,
+    pub hook_max_us: u64,
+    pub stop_response_sample_count: usize,
+    pub stop_response_p50_us: u64,
+    pub stop_response_p95_us: u64,
+    pub stop_response_p99_us: u64,
+    pub stop_response_max_us: u64,
+}
+
+impl EngineMetrics {
+    fn new() -> Self {
+        Self {
+            started_at: Instant::now(),
+            active_rules: AtomicUsize::new(0),
+            injected_events: AtomicU64::new(0),
+            scheduler_steps: AtomicU64::new(0),
+            skipped_pulses: AtomicU64::new(0),
+            stop_commands: AtomicU64::new(0),
+            delay_samples_us: Mutex::new(VecDeque::with_capacity(DELAY_SAMPLE_LIMIT)),
+            hook_samples_us: Mutex::new(VecDeque::with_capacity(DELAY_SAMPLE_LIMIT)),
+            stop_response_samples_us: Mutex::new(VecDeque::with_capacity(DELAY_SAMPLE_LIMIT)),
+        }
+    }
+
+    fn set_active_rules(&self, count: usize) {
+        self.active_rules.store(count, Ordering::Relaxed);
+    }
+
+    fn add_injected_events(&self, count: usize) {
+        self.injected_events
+            .fetch_add(count as u64, Ordering::Relaxed);
+    }
+
+    fn add_scheduler_step(&self) {
+        self.scheduler_steps.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn add_skipped_pulse(&self) {
+        self.skipped_pulses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn add_stop_command(&self) {
+        self.stop_commands.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn record_delay(&self, delay: Duration) {
+        push_duration_sample(&self.delay_samples_us, delay);
+    }
+
+    #[cfg(windows)]
+    fn record_hook_callback(&self, delay: Duration) {
+        push_duration_sample(&self.hook_samples_us, delay);
+    }
+
+    fn record_stop_response(&self, delay: Duration) {
+        push_duration_sample(&self.stop_response_samples_us, delay);
+    }
+
+    fn snapshot(&self) -> EngineMetricsSnapshot {
+        let delay_samples = sorted_samples(&self.delay_samples_us);
+        let hook_samples = sorted_samples(&self.hook_samples_us);
+        let stop_response_samples = sorted_samples(&self.stop_response_samples_us);
+        let injected_events = self.injected_events.load(Ordering::Relaxed);
+        let elapsed = self.started_at.elapsed().as_secs_f64().max(0.001);
+        EngineMetricsSnapshot {
+            active_rules: self.active_rules.load(Ordering::Relaxed),
+            injected_events,
+            injection_rate_per_sec: injected_events as f64 / elapsed,
+            scheduler_steps: self.scheduler_steps.load(Ordering::Relaxed),
+            skipped_pulses: self.skipped_pulses.load(Ordering::Relaxed),
+            stop_commands: self.stop_commands.load(Ordering::Relaxed),
+            delay_sample_count: delay_samples.len(),
+            delay_p50_us: percentile(&delay_samples, 50),
+            delay_p95_us: percentile(&delay_samples, 95),
+            delay_p99_us: percentile(&delay_samples, 99),
+            delay_max_us: delay_samples.last().copied().unwrap_or(0),
+            hook_sample_count: hook_samples.len(),
+            hook_p50_us: percentile(&hook_samples, 50),
+            hook_p95_us: percentile(&hook_samples, 95),
+            hook_p99_us: percentile(&hook_samples, 99),
+            hook_max_us: hook_samples.last().copied().unwrap_or(0),
+            stop_response_sample_count: stop_response_samples.len(),
+            stop_response_p50_us: percentile(&stop_response_samples, 50),
+            stop_response_p95_us: percentile(&stop_response_samples, 95),
+            stop_response_p99_us: percentile(&stop_response_samples, 99),
+            stop_response_max_us: stop_response_samples.last().copied().unwrap_or(0),
+        }
+    }
+}
+
+fn push_duration_sample(samples: &Mutex<VecDeque<u64>>, duration: Duration) {
+    let delay_us = duration.as_micros().min(u128::from(u64::MAX)) as u64;
+    let mut samples = revive(samples.lock());
+    if samples.len() >= DELAY_SAMPLE_LIMIT {
+        samples.pop_front();
+    }
+    samples.push_back(delay_us);
+}
+
+fn sorted_samples(samples: &Mutex<VecDeque<u64>>) -> Vec<u64> {
+    let mut samples: Vec<_> = revive(samples.lock()).iter().copied().collect();
+    samples.sort_unstable();
+    samples
+}
+
+fn percentile(samples: &[u64], percentile: usize) -> u64 {
+    if samples.is_empty() {
+        return 0;
+    }
+    let last = samples.len() - 1;
+    let idx = (last * percentile).div_ceil(100);
+    samples[idx.min(last)]
 }
 
 #[derive(Default)]
@@ -279,13 +423,15 @@ fn spawn_scheduler(
     physical_keys: PhysicalKeys,
     simulated_keys: SimulatedKeys,
     active_rules: ActiveRules,
+    metrics: Metrics,
 ) -> thread::JoinHandle<()> {
     thread::spawn(move || {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            run_scheduler(rx, &physical_keys, &simulated_keys, &active_rules);
+            run_scheduler(rx, &physical_keys, &simulated_keys, &active_rules, &metrics);
         }));
         if result.is_err() {
             revive(active_rules.lock()).clear();
+            metrics.set_active_rules(0);
             release_simulated_keys(&physical_keys, &simulated_keys);
         }
     })
@@ -296,6 +442,7 @@ fn run_scheduler(
     physical_keys: &PhysicalKeys,
     simulated_keys: &SimulatedKeys,
     active_rules: &ActiveRules,
+    metrics: &EngineMetrics,
 ) {
     let mut rules = HashMap::<String, ScheduledRule>::new();
     let mut target_holds = HashMap::<KeyId, TargetHold>::new();
@@ -308,6 +455,7 @@ fn run_scheduler(
                 physical_keys,
                 simulated_keys,
                 active_rules,
+                metrics,
             ) {
                 cleanup_scheduler_rules(
                     &mut rules,
@@ -327,9 +475,11 @@ fn run_scheduler(
             &mut target_holds,
             physical_keys,
             simulated_keys,
+            metrics,
             &mut events,
         );
         emit_key_events(&events);
+        metrics.add_injected_events(events.len());
 
         let timeout = next_scheduler_timeout(&rules);
         let command = match timeout {
@@ -372,6 +522,7 @@ fn run_scheduler(
                 physical_keys,
                 simulated_keys,
                 active_rules,
+                metrics,
             ) {
                 cleanup_scheduler_rules(
                     &mut rules,
@@ -394,6 +545,7 @@ fn handle_scheduler_command(
     physical_keys: &PhysicalKeys,
     simulated_keys: &SimulatedKeys,
     active_rules: &ActiveRules,
+    metrics: &EngineMetrics,
 ) -> bool {
     match cmd {
         SchedulerCommand::Start(config) => {
@@ -403,13 +555,15 @@ fn handle_scheduler_command(
             );
             false
         }
-        SchedulerCommand::Stop(rule_id) => {
+        SchedulerCommand::Stop(rule_id, sent_at) => {
+            metrics.record_stop_response(sent_at.elapsed());
             if let Some(rule) = rules.remove(&rule_id) {
                 stop_scheduled_rule(rule, target_holds, physical_keys, simulated_keys);
             }
             false
         }
-        SchedulerCommand::StopAll => {
+        SchedulerCommand::StopAll(sent_at) => {
+            metrics.record_stop_response(sent_at.elapsed());
             cleanup_scheduler_rules(
                 rules,
                 target_holds,
@@ -570,6 +724,7 @@ fn step_due_rules(
     target_holds: &mut HashMap<KeyId, TargetHold>,
     physical_keys: &PhysicalKeys,
     simulated_keys: &SimulatedKeys,
+    metrics: &EngineMetrics,
     events: &mut Vec<KeyEvent>,
 ) {
     let now = Instant::now();
@@ -583,6 +738,8 @@ fn step_due_rules(
         let Some(rule) = rules.get_mut(&id) else {
             continue;
         };
+        metrics.add_scheduler_step();
+        metrics.record_delay(now.saturating_duration_since(rule.next_at));
         match rule.phase {
             PulsePhase::Down => {
                 if acquire_target_owner(
@@ -598,6 +755,7 @@ fn step_due_rules(
                     rule.phase = PulsePhase::Up;
                     rule.next_at = now + Duration::from_millis(rule.hold_ms);
                 } else {
+                    metrics.add_skipped_pulse();
                     rule.next_at = now + Duration::from_millis(rule.config.interval_ms as u64);
                 }
             }
@@ -642,6 +800,7 @@ pub struct BurstEngine {
     active_rules: ActiveRules,
     scheduler_tx: Sender<SchedulerCommand>,
     scheduler_handle: Option<thread::JoinHandle<()>>,
+    metrics: Metrics,
     toggle_states: Arc<Mutex<HashMap<String, bool>>>,
     /// 当前物理按下的键；用于过滤 OS 生成的 key-repeat。
     pressed_keys: PhysicalKeys,
@@ -665,12 +824,14 @@ impl BurstEngine {
         let pressed_keys = Arc::new(Mutex::new(HashSet::new()));
         let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
         let active_rules = Arc::new(Mutex::new(HashSet::new()));
+        let metrics = Arc::new(EngineMetrics::new());
         let (scheduler_tx, scheduler_rx) = mpsc::channel();
         let scheduler_handle = Some(spawn_scheduler(
             scheduler_rx,
             pressed_keys.clone(),
             simulated_keys.clone(),
             active_rules.clone(),
+            metrics.clone(),
         ));
         Self {
             global_enabled: Arc::new(AtomicBool::new(false)),
@@ -678,6 +839,7 @@ impl BurstEngine {
             active_rules,
             scheduler_tx,
             scheduler_handle,
+            metrics,
             toggle_states: Arc::new(Mutex::new(HashMap::new())),
             pressed_keys,
             simulated_keys,
@@ -695,7 +857,11 @@ impl BurstEngine {
     /// 在全局开关关闭时调用，防止连发线程继续注入按键。
     pub fn cancel_all_loops(&self) {
         revive(self.active_rules.lock()).clear();
-        let _ = self.scheduler_tx.send(SchedulerCommand::StopAll);
+        self.metrics.set_active_rules(0);
+        self.metrics.add_stop_command();
+        let _ = self
+            .scheduler_tx
+            .send(SchedulerCommand::StopAll(Instant::now()));
         revive(self.toggle_states.lock()).clear();
         release_simulated_keys(&self.pressed_keys, &self.simulated_keys);
         #[cfg(windows)]
@@ -728,6 +894,15 @@ impl BurstEngine {
     /// 用于前端轮询展示激活态视觉反馈。
     pub fn get_active_ids(&self) -> Vec<String> {
         revive(self.active_rules.lock()).iter().cloned().collect()
+    }
+
+    pub fn metrics_snapshot(&self) -> EngineMetricsSnapshot {
+        self.metrics.snapshot()
+    }
+
+    #[cfg(windows)]
+    fn record_hook_callback(&self, started_at: Instant) {
+        self.metrics.record_hook_callback(started_at.elapsed());
     }
 
     /// 返回 true 表示引擎处理了本次按键（热键触发或规则匹配），false 表示未匹配或重复按下。
@@ -854,6 +1029,7 @@ impl BurstEngine {
             if !active.insert(rule.id.clone()) {
                 return;
             }
+            self.metrics.set_active_rules(active.len());
         }
 
         let cmd = SchedulerCommand::Start(ScheduledRuleConfig {
@@ -863,16 +1039,27 @@ impl BurstEngine {
             allow_while_physical_down,
         });
         if self.scheduler_tx.send(cmd).is_err() {
-            revive(self.active_rules.lock()).remove(&rule.id);
+            let mut active = revive(self.active_rules.lock());
+            active.remove(&rule.id);
+            self.metrics.set_active_rules(active.len());
             release_simulated_key(rule.target_key, &self.pressed_keys, &self.simulated_keys);
         }
     }
 
     fn stop_burst(&self, rule_id: &str) {
-        if revive(self.active_rules.lock()).remove(rule_id) {
+        let removed = {
+            let mut active = revive(self.active_rules.lock());
+            let removed = active.remove(rule_id);
+            if removed {
+                self.metrics.set_active_rules(active.len());
+            }
+            removed
+        };
+        if removed {
+            self.metrics.add_stop_command();
             let _ = self
                 .scheduler_tx
-                .send(SchedulerCommand::Stop(rule_id.to_string()));
+                .send(SchedulerCommand::Stop(rule_id.to_string(), Instant::now()));
         }
     }
 }
@@ -880,6 +1067,7 @@ impl BurstEngine {
 impl Drop for BurstEngine {
     fn drop(&mut self) {
         revive(self.active_rules.lock()).clear();
+        self.metrics.set_active_rules(0);
         let _ = self.scheduler_tx.send(SchedulerCommand::Shutdown);
         if let Some(handle) = self.scheduler_handle.take() {
             let _ = handle.join();
@@ -925,6 +1113,7 @@ unsafe extern "system" fn keyboard_hook_proc(ncode: i32, wparam: WPARAM, lparam:
                 .as_ref()
                 .and_then(|w| w.upgrade());
             if let Some(engine) = engine {
+                let started_at = Instant::now();
                 match wparam as u32 {
                     WM_KEYDOWN | WM_SYSKEYDOWN => {
                         engine.on_key_press(key);
@@ -932,6 +1121,7 @@ unsafe extern "system" fn keyboard_hook_proc(ncode: i32, wparam: WPARAM, lparam:
                     WM_KEYUP | WM_SYSKEYUP => engine.on_key_release(key),
                     _ => {}
                 }
+                engine.record_hook_callback(started_at);
             }
         }
     }
@@ -991,11 +1181,13 @@ unsafe extern "system" fn mouse_hook_proc(ncode: i32, wparam: WPARAM, lparam: LP
                     .as_ref()
                     .and_then(|w| w.upgrade());
                 if let Some(engine) = engine {
+                    let started_at = Instant::now();
                     if is_up {
                         engine.on_key_release(key);
                     } else {
                         engine.on_key_press(key);
                     }
+                    engine.record_hook_callback(started_at);
                 }
             }
 
@@ -1020,8 +1212,10 @@ unsafe extern "system" fn mouse_hook_proc(ncode: i32, wparam: WPARAM, lparam: LP
                         .as_ref()
                         .and_then(|w| w.upgrade());
                     if let Some(engine) = engine {
+                        let started_at = Instant::now();
                         engine.on_key_press(key);
                         engine.on_key_release(key);
+                        engine.record_hook_callback(started_at);
                     }
                 }
             }
@@ -1304,6 +1498,7 @@ mod tests {
             ),
         ]);
         let mut target_holds = HashMap::new();
+        let metrics = EngineMetrics::new();
         let mut events = Vec::new();
 
         step_due_rules(
@@ -1311,12 +1506,15 @@ mod tests {
             &mut target_holds,
             &physical_keys,
             &simulated_keys,
+            &metrics,
             &mut events,
         );
 
         assert_eq!(events, vec![(target, false)]);
         assert_eq!(revive(simulated_keys.lock()).get(&target), Some(&1));
         assert_eq!(target_holds.get(&target).unwrap().owners.len(), 2);
+        assert_eq!(metrics.snapshot().injected_events, 0);
+        assert_eq!(metrics.snapshot().scheduler_steps, 2);
     }
 
     #[test]

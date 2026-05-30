@@ -8,6 +8,59 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 pub struct EngineState(pub Arc<BurstEngine>);
 
+#[derive(serde::Serialize)]
+pub struct EngineMetricsDto {
+    pub active_rules: usize,
+    pub injected_events: u64,
+    pub injection_rate_per_sec: f64,
+    pub scheduler_steps: u64,
+    pub skipped_pulses: u64,
+    pub stop_commands: u64,
+    pub delay_sample_count: usize,
+    pub delay_p50_us: u64,
+    pub delay_p95_us: u64,
+    pub delay_p99_us: u64,
+    pub delay_max_us: u64,
+    pub hook_sample_count: usize,
+    pub hook_p50_us: u64,
+    pub hook_p95_us: u64,
+    pub hook_p99_us: u64,
+    pub hook_max_us: u64,
+    pub stop_response_sample_count: usize,
+    pub stop_response_p50_us: u64,
+    pub stop_response_p95_us: u64,
+    pub stop_response_p99_us: u64,
+    pub stop_response_max_us: u64,
+}
+
+impl From<burst_engine::EngineMetricsSnapshot> for EngineMetricsDto {
+    fn from(value: burst_engine::EngineMetricsSnapshot) -> Self {
+        Self {
+            active_rules: value.active_rules,
+            injected_events: value.injected_events,
+            injection_rate_per_sec: value.injection_rate_per_sec,
+            scheduler_steps: value.scheduler_steps,
+            skipped_pulses: value.skipped_pulses,
+            stop_commands: value.stop_commands,
+            delay_sample_count: value.delay_sample_count,
+            delay_p50_us: value.delay_p50_us,
+            delay_p95_us: value.delay_p95_us,
+            delay_p99_us: value.delay_p99_us,
+            delay_max_us: value.delay_max_us,
+            hook_sample_count: value.hook_sample_count,
+            hook_p50_us: value.hook_p50_us,
+            hook_p95_us: value.hook_p95_us,
+            hook_p99_us: value.hook_p99_us,
+            hook_max_us: value.hook_max_us,
+            stop_response_sample_count: value.stop_response_sample_count,
+            stop_response_p50_us: value.stop_response_p50_us,
+            stop_response_p95_us: value.stop_response_p95_us,
+            stop_response_p99_us: value.stop_response_p99_us,
+            stop_response_max_us: value.stop_response_max_us,
+        }
+    }
+}
+
 #[tauri::command]
 pub fn set_global_enabled(app: AppHandle, state: State<EngineState>, enabled: bool) {
     state.0.global_enabled.store(enabled, Ordering::SeqCst);
@@ -95,6 +148,11 @@ pub fn get_rules(state: State<EngineState>) -> Vec<BurstRule> {
 #[tauri::command]
 pub fn get_active_rules(state: State<EngineState>) -> Vec<String> {
     state.0.get_active_ids()
+}
+
+#[tauri::command]
+pub fn get_engine_metrics(state: State<EngineState>) -> EngineMetricsDto {
+    state.0.metrics_snapshot().into()
 }
 
 /// 面板聚焦时 WH_KEYBOARD_LL 不触发，前端将键盘事件中继到引擎统一处理。

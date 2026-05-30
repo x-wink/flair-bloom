@@ -48,9 +48,20 @@
 
 ### Phase 4：可观测与压测
 
-- [ ] 记录活动规则数、注入速率、调度延迟 p50 / p95 / p99。
-- [ ] 建立 Windows release 版压测脚本：1 / 8 / 32 / 64 条规则，10ms / 30ms / 50ms 间隔。
-- [ ] 输出 CPU、线程数、hook 回调耗时、停止响应时间。
+- [x] 记录活动规则数、注入速率、调度延迟 p50 / p95 / p99。
+- [x] 建立 Windows release 版压测脚本：1 / 8 / 32 / 64 条规则，10ms / 30ms / 50ms 间隔。
+- [x] 输出 CPU、线程数、hook 回调耗时、停止响应时间。
+
+可观测入口：
+
+- Tauri command：`get_engine_metrics`，返回活动规则数、注入总数、注入速率、scheduler 延迟、hook 回调耗时、停止响应耗时。
+- Windows 进程采样脚本：`scripts/burst-engine-stress.ps1`，输出 CSV，包含 CPU、线程数、内存和句柄数。
+
+压测矩阵建议：
+
+| 规则数 | 间隔 | 运行方式 |
+| ------ | ---- | -------- |
+| 1 / 8 / 32 / 64 | 10ms / 30ms / 50ms | Windows release 包，启动全局开关后运行 `scripts/burst-engine-stress.ps1 -DurationSeconds 60` |
 
 ## 性能提升预估
 

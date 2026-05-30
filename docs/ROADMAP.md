@@ -781,7 +781,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] 模拟事件过滤：SendInput 使用 `SIM_MARKER`，驱动通道使用 `PENDING_INJECTIONS`
 - [x] 多规则隔离：模拟目标键不会触发其他规则的启动 / 停止逻辑
 - [x] OS key-repeat 过滤：`pressed_keys: HashSet<KeyId>` 只响应物理首次按下
-- [ ] 连发热路径优化：规则快照索引、轻量 hook、单调度器、批量注入与异常兜底统一化（任务文档：`docs/BURST_ENGINE_OPTIMIZATION.md`）
+- [x] 连发热路径优化：规则快照索引、轻量 hook、单调度器、批量注入与异常兜底统一化（任务文档：`docs/BURST_ENGINE_OPTIMIZATION.md`）
 - [x] 高风险目标键提示：WASD / 方向键 / Space / Shift / Ctrl / 鼠标拖拽键作为连发目标时提示可能影响移动、跳跃、冲刺或拖拽
 
 **输入范围扩展**
