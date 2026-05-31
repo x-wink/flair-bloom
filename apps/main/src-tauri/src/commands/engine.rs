@@ -5,6 +5,7 @@ use qzh_profile::{BurstRule, Hotkeys, KeyId, MAX_RULES};
 use std::sync::{atomic::Ordering, Arc};
 #[allow(unused_imports)]
 use tauri::{AppHandle, Emitter, Manager, State};
+#[cfg(windows)]
 use tauri_plugin_store::StoreExt;
 
 pub struct EngineState(pub Arc<BurstEngine>);

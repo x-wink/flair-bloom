@@ -55,12 +55,32 @@ pub const EXPECTED_RESOURCES: &[ExpectedResource] = &[
         size: 1_190_080,
         sha256: "FBE510402B3822C63E94752051B7D5895B67875F22EC48593DE19764A649F8B1",
     },
+    ExpectedResource {
+        rel: "disable-ddhid-driver.cmd",
+        label: "disable-ddhid-driver.cmd",
+        size: 2_603,
+        sha256: "A45E7494CBC1BEDE55EFAE009DC968144F52F48674D8C7FE36FDAA83A354D215",
+    },
 ];
 
 #[allow(dead_code)]
 pub fn check_resources(resources_dir: &Path) -> ResourceHealth {
     let specs = EXPECTED_RESOURCES
         .iter()
+        .map(|expected| ResourceSpec {
+            rel: expected.rel,
+            size: expected.size,
+            sha256: expected.sha256,
+        })
+        .collect::<Vec<_>>();
+    generic_resource_integrity::check_resources(resources_dir, &specs)
+}
+
+#[allow(dead_code)]
+pub fn check_one_resource(resources_dir: &Path, rel: &str) -> ResourceHealth {
+    let specs = EXPECTED_RESOURCES
+        .iter()
+        .filter(|expected| expected.rel == rel)
         .map(|expected| ResourceSpec {
             rel: expected.rel,
             size: expected.size,
@@ -107,6 +127,19 @@ mod tests {
         assert_eq!(
             inf.sha256,
             "17FE3814F57E98DD2AF97F56B63502E474EA5E41CDA1A510FFE435EE6AD7A104"
+        );
+    }
+
+    #[test]
+    fn resource_manifest_includes_ddhid_disable_script() {
+        let script = EXPECTED_RESOURCES
+            .iter()
+            .find(|item| item.rel == "disable-ddhid-driver.cmd")
+            .unwrap();
+        assert_eq!(script.size, 2_603);
+        assert_eq!(
+            script.sha256,
+            "A45E7494CBC1BEDE55EFAE009DC968144F52F48674D8C7FE36FDAA83A354D215"
         );
     }
 }

@@ -43,6 +43,11 @@ const expected: ExpectedResource[] = [
     size: 1_190_080,
     sha256: 'FBE510402B3822C63E94752051B7D5895B67875F22EC48593DE19764A649F8B1',
   },
+  {
+    rel: 'disable-ddhid-driver.cmd',
+    size: 2_603,
+    sha256: 'A45E7494CBC1BEDE55EFAE009DC968144F52F48674D8C7FE36FDAA83A354D215',
+  },
 ];
 
 async function sha256(path: string): Promise<string> {

@@ -23,8 +23,9 @@ use commands::{
     app::{agree_license, check_update, exit_app, needs_agreement, toggle_autostart},
     ddhid_diagnostic::export_dd_hid_diagnostic_report,
     driver::{
-        install_dd_hid_driver, install_driver, is_dd_hid_driver_installed, is_driver_installed,
-        is_elevated, relaunch_as_admin, uninstall_dd_hid_driver, uninstall_driver,
+        disable_dd_hid_driver_service, install_dd_hid_driver, install_driver,
+        is_dd_hid_driver_installed, is_driver_installed, is_elevated, relaunch_as_admin,
+        uninstall_dd_hid_driver, uninstall_driver,
     },
     engine::{
         get_active_rules, get_engine_metrics, get_global_enabled, get_input_mode, get_rules,
@@ -101,6 +102,7 @@ pub fn run() {
             is_dd_hid_driver_installed,
             install_dd_hid_driver,
             uninstall_dd_hid_driver,
+            disable_dd_hid_driver_service,
             is_elevated,
             relaunch_as_admin,
             save_profile,

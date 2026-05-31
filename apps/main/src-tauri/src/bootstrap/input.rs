@@ -2,6 +2,7 @@
 
 #[cfg(windows)]
 use tauri::Manager;
+#[cfg(windows)]
 use tauri_plugin_store::StoreExt;
 
 pub fn init_input_backend(app: &tauri::AppHandle) {

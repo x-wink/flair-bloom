@@ -8,7 +8,8 @@
       "resources/ddhid-driver/ddc.exe",
       "resources/ddhid-driver/ddhid63340.sys",
       "resources/ddhid-driver/ddhid63340.cat",
-      "resources/ddhid-driver/ddhid63340.inf"
+      "resources/ddhid-driver/ddhid63340.inf",
+      "resources/disable-ddhid-driver.cmd"
     ],
     "windows": {
       "nsis": {

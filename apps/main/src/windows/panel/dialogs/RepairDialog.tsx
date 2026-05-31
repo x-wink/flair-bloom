@@ -64,6 +64,7 @@ interface Props {
   onInstallDriver: () => void;
   onUninstallDriver: () => void;
   onInstallDdHid: () => void;
+  onDisableDdHid: () => void;
   onUninstallDdHid: () => void;
 }
 
@@ -121,6 +122,7 @@ export default function RepairDialog({
   onInstallDriver,
   onUninstallDriver,
   onInstallDdHid,
+  onDisableDdHid,
   onUninstallDdHid,
 }: Props) {
   const confirm = useConfirm();
@@ -291,6 +293,11 @@ export default function RepairDialog({
                 {ddHidInstalled === 'not_installed' && (
                   <Button size="sm" variant="outline" tone="primary" onClick={onInstallDdHid}>
                     安装
+                  </Button>
+                )}
+                {ddHidInstalled !== 'not_installed' && (
+                  <Button size="sm" variant="outline" tone="danger" onClick={onDisableDdHid}>
+                    禁用
                   </Button>
                 )}
                 {ddHidInstalled === 'installed' && (

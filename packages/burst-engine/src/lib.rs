@@ -142,7 +142,9 @@ enum SchedulerWaitOutcome {
 struct SchedulerWaiter {
     #[cfg(windows)]
     high_precision: Option<HighPrecisionWaiter>,
+    #[cfg(windows)]
     on_degraded: PanelToggleCb,
+    #[cfg(windows)]
     hp_degraded: Arc<AtomicBool>,
 }
 
@@ -169,10 +171,8 @@ impl SchedulerWaiter {
         #[cfg(not(windows))]
         {
             let _ = wake;
-            Self {
-                on_degraded,
-                hp_degraded,
-            }
+            let _ = (on_degraded, hp_degraded);
+            Self {}
         }
     }
 

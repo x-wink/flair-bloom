@@ -1306,6 +1306,36 @@ export default function PanelApp() {
     }
   }
 
+  async function handleDisableDdHid() {
+    const ok = await confirm({
+      title: '紧急禁用究极HID',
+      description: (
+        <>
+          将切回通用模式，并以管理员权限把 DD-HID 驱动服务设为禁用。这个操作不会删除驱动文件。
+          <br />
+          <br />
+          <strong>完成后必须重启电脑才能确保驱动不再加载。</strong>
+        </>
+      ),
+      confirmText: '禁用',
+      cancelText: '取消',
+      tone: 'danger',
+    });
+    if (!ok) return;
+    try {
+      const r = await invoke<{ message: string; pending_reboot: boolean }>(
+        'disable_dd_hid_driver_service',
+      );
+      if (r.pending_reboot) {
+        toast.warning(r.message, 8000);
+      } else {
+        toast.success(r.message);
+      }
+    } catch (e) {
+      toast.error(`禁用失败：${e}`);
+    }
+  }
+
   function handleAgreed() {
     setShowAgreement(false);
   }
@@ -1757,6 +1787,7 @@ export default function PanelApp() {
           onInstallDriver={() => void handleInstallDriver()}
           onUninstallDriver={() => void handleUninstallDriver()}
           onInstallDdHid={() => void handleInstallDdHid()}
+          onDisableDdHid={() => void handleDisableDdHid()}
           onUninstallDdHid={() => void handleUninstallDdHid()}
         />
       </Overlay>

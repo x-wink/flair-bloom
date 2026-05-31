@@ -25,6 +25,9 @@ pub struct UninstallOutcome {
 }
 
 #[cfg(windows)]
+const DD_HID_DISABLE_SCRIPT: &str = "disable-ddhid-driver.cmd";
+
+#[cfg(windows)]
 fn resource_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let raw = app
         .path()
@@ -201,6 +204,71 @@ pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<UninstallOutcome,
     {
         let _ = app;
         Err("仅 Windows 平台支持卸载 DD-HID 驱动".to_string())
+    }
+}
+
+#[tauri::command]
+pub async fn disable_dd_hid_driver_service(
+    app: AppHandle,
+    state: State<'_, EngineState>,
+) -> Result<UninstallOutcome, String> {
+    let engine = state.0.clone();
+
+    #[cfg(windows)]
+    {
+        use std::sync::atomic::Ordering;
+        use tauri_plugin_store::StoreExt;
+        use win_input::{init_backend, InputMode};
+
+        engine.global_enabled.store(false, Ordering::SeqCst);
+        engine.cancel_all_loops();
+        init_backend(InputMode::SendInput);
+        if let Ok(store) = app.store(crate::STORE_PATH) {
+            store.set("input_mode", serde_json::json!("sendinput"));
+            let _ = store.save();
+        }
+
+        let res_dir = resource_dir(&app)?;
+        let health = crate::commands::resource_integrity::check_one_resource(
+            &res_dir,
+            DD_HID_DISABLE_SCRIPT,
+        );
+        if !health.issues.is_empty() {
+            let details = health
+                .issues
+                .iter()
+                .map(crate::commands::resource_integrity::issue_label)
+                .collect::<Vec<_>>()
+                .join("；");
+            return Err(format!("DD-HID 禁用脚本校验失败，拒绝提权执行：{details}"));
+        }
+
+        let script = res_dir.join(DD_HID_DISABLE_SCRIPT);
+        let params = format!("/c call \"{}\" --online", script.display());
+        let exit = win_driver::elevation::run_elevated_exe_capture(
+            std::path::PathBuf::from("C:\\Windows\\System32\\cmd.exe"),
+            Some(&params),
+        )
+        .await?;
+        crate::commands::status::emit_status_changed(&app);
+
+        match exit {
+            0 => Ok(UninstallOutcome {
+                message: "已禁用 DD-HID 驱动服务并切回通用模式。请立即重启电脑使更改生效。"
+                    .to_string(),
+                pending_reboot: true,
+            }),
+            2 => Ok(UninstallOutcome {
+                message: "未发现 DD-HID 驱动服务键，系统可能已经清理完成。".to_string(),
+                pending_reboot: false,
+            }),
+            n => Err(format!("DD-HID 禁用脚本执行失败，退出码 {n}")),
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (app, state, engine);
+        Err("仅 Windows 平台支持禁用 DD-HID 驱动".to_string())
     }
 }
 
