@@ -2,6 +2,7 @@ use qzh_profile::key_id::KeyId;
 #[cfg(any(test, windows))]
 use qzh_profile::key_id::MouseButton;
 use qzh_profile::profile::{BurstMode, BurstRule, Hotkeys};
+use qzh_profile::MAX_RULES;
 #[cfg(windows)]
 use std::sync::{RwLock, Weak};
 use std::{
@@ -19,7 +20,9 @@ use tracing::error;
 use tracing::info;
 use win_input::key_events;
 #[cfg(windows)]
-use win_input::{clear_pending_injections, clear_relay_injections, try_consume_injection, SIM_MARKER};
+use win_input::{
+    clear_pending_injections, clear_relay_injections, try_consume_injection, SIM_MARKER,
+};
 #[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{CloseHandle, HANDLE, LPARAM, WAIT_FAILED, WAIT_OBJECT_0, WPARAM},
@@ -50,6 +53,8 @@ type KeyEvent = (KeyId, bool);
 type Metrics = Arc<EngineMetrics>;
 const DELAY_SAMPLE_LIMIT: usize = 4096;
 const STOP_ALL_ACK_TIMEOUT: Duration = Duration::from_millis(500);
+const MIN_BURST_INTERVAL_MS: u32 = 10;
+const MAX_BURST_INTERVAL_MS: u32 = 10_000;
 
 #[derive(Clone)]
 struct ScheduledRuleConfig {
@@ -57,6 +62,7 @@ struct ScheduledRuleConfig {
     target_key: KeyId,
     interval_ms: u32,
     allow_while_physical_down: bool,
+    stop_generation: u64,
 }
 
 enum SchedulerCommand {
@@ -69,6 +75,22 @@ enum SchedulerCommand {
     Shutdown,
 }
 
+struct StopAllDepthGuard<'a> {
+    depth: &'a AtomicUsize,
+}
+
+impl<'a> StopAllDepthGuard<'a> {
+    fn new(depth: &'a AtomicUsize) -> Self {
+        depth.fetch_add(1, Ordering::SeqCst);
+        Self { depth }
+    }
+}
+
+impl Drop for StopAllDepthGuard<'_> {
+    fn drop(&mut self) {
+        self.depth.fetch_sub(1, Ordering::SeqCst);
+    }
+}
 
 #[derive(Clone)]
 struct SchedulerWake {
@@ -341,6 +363,14 @@ struct TargetHold {
     owners: HashMap<String, bool>,
 }
 
+struct SchedulerContext<'a> {
+    stop_all_generation: &'a AtomicU64,
+    physical_keys: &'a PhysicalKeys,
+    simulated_keys: &'a SimulatedKeys,
+    active_rules: &'a ActiveRules,
+    metrics: &'a EngineMetrics,
+}
+
 struct EngineMetrics {
     started_at: Instant,
     active_rules: AtomicUsize,
@@ -523,6 +553,24 @@ fn push_rule_index(index: &mut HashMap<KeyId, Vec<usize>>, key: KeyId, rule_idx:
     index.entry(key).or_default().push(rule_idx);
 }
 
+fn normalize_rules_for_engine(rules: Vec<BurstRule>) -> Vec<BurstRule> {
+    let mut normalized = Vec::with_capacity(rules.len().min(MAX_RULES));
+    let mut seen_ids = HashSet::new();
+    for mut rule in rules {
+        if normalized.len() >= MAX_RULES {
+            break;
+        }
+        if !seen_ids.insert(rule.id.clone()) {
+            continue;
+        }
+        rule.interval_ms = rule
+            .interval_ms
+            .clamp(MIN_BURST_INTERVAL_MS, MAX_BURST_INTERVAL_MS);
+        normalized.push(rule);
+    }
+    normalized
+}
+
 fn physical_key_down(physical_keys: &PhysicalKeys, key: KeyId) -> bool {
     revive(physical_keys.lock()).contains(&key)
 }
@@ -649,6 +697,7 @@ fn release_simulated_keys(physical_keys: &PhysicalKeys, simulated_keys: &Simulat
 
 impl ScheduledRule {
     fn new(config: ScheduledRuleConfig, now: Instant) -> Self {
+        debug_assert!((MIN_BURST_INTERVAL_MS..=MAX_BURST_INTERVAL_MS).contains(&config.interval_ms));
         let interval_ms = config.interval_ms as u64;
         let hold_ms = (interval_ms / 3)
             .clamp(5, 30)
@@ -670,6 +719,7 @@ fn spawn_scheduler(
     wake: SchedulerWake,
     hp_degraded: Arc<AtomicBool>,
     on_degraded: PanelToggleCb,
+    stop_all_generation: Arc<AtomicU64>,
     physical_keys: PhysicalKeys,
     simulated_keys: SimulatedKeys,
     active_rules: ActiveRules,
@@ -682,6 +732,7 @@ fn spawn_scheduler(
                 wake,
                 hp_degraded,
                 on_degraded,
+                &stop_all_generation,
                 &physical_keys,
                 &simulated_keys,
                 &active_rules,
@@ -702,6 +753,7 @@ fn run_scheduler(
     wake: SchedulerWake,
     hp_degraded: Arc<AtomicBool>,
     on_degraded: PanelToggleCb,
+    stop_all_generation: &AtomicU64,
     physical_keys: &PhysicalKeys,
     simulated_keys: &SimulatedKeys,
     active_rules: &ActiveRules,
@@ -710,23 +762,22 @@ fn run_scheduler(
     let mut rules = HashMap::<String, ScheduledRule>::new();
     let mut target_holds = HashMap::<KeyId, TargetHold>::new();
     let mut waiter = SchedulerWaiter::new(wake, on_degraded, hp_degraded);
+    let context = SchedulerContext {
+        stop_all_generation,
+        physical_keys,
+        simulated_keys,
+        active_rules,
+        metrics,
+    };
     loop {
         while let Ok(cmd) = rx.try_recv() {
-            if handle_scheduler_command(
-                cmd,
-                &mut rules,
-                &mut target_holds,
-                physical_keys,
-                simulated_keys,
-                active_rules,
-                metrics,
-            ) {
+            if handle_scheduler_command(cmd, &mut rules, &mut target_holds, &context) {
                 cleanup_scheduler_rules(
                     &mut rules,
                     &mut target_holds,
-                    physical_keys,
-                    simulated_keys,
-                    active_rules,
+                    context.physical_keys,
+                    context.simulated_keys,
+                    context.active_rules,
                     true,
                 );
                 return;
@@ -737,13 +788,13 @@ fn run_scheduler(
         step_due_rules(
             &mut rules,
             &mut target_holds,
-            physical_keys,
-            simulated_keys,
-            metrics,
+            context.physical_keys,
+            context.simulated_keys,
+            context.metrics,
             &mut events,
         );
         emit_key_events(&events);
-        metrics.add_injected_events(events.len());
+        context.metrics.add_injected_events(events.len());
 
         let timeout = next_scheduler_timeout(&rules);
         let command = match waiter.wait(&rx, timeout) {
@@ -753,9 +804,9 @@ fn run_scheduler(
                 cleanup_scheduler_rules(
                     &mut rules,
                     &mut target_holds,
-                    physical_keys,
-                    simulated_keys,
-                    active_rules,
+                    context.physical_keys,
+                    context.simulated_keys,
+                    context.active_rules,
                     true,
                 );
                 return;
@@ -763,21 +814,13 @@ fn run_scheduler(
         };
 
         if let Some(cmd) = command {
-            if handle_scheduler_command(
-                cmd,
-                &mut rules,
-                &mut target_holds,
-                physical_keys,
-                simulated_keys,
-                active_rules,
-                metrics,
-            ) {
+            if handle_scheduler_command(cmd, &mut rules, &mut target_holds, &context) {
                 cleanup_scheduler_rules(
                     &mut rules,
                     &mut target_holds,
-                    physical_keys,
-                    simulated_keys,
-                    active_rules,
+                    context.physical_keys,
+                    context.simulated_keys,
+                    context.active_rules,
                     true,
                 );
                 return;
@@ -790,13 +833,13 @@ fn handle_scheduler_command(
     cmd: SchedulerCommand,
     rules: &mut HashMap<String, ScheduledRule>,
     target_holds: &mut HashMap<KeyId, TargetHold>,
-    physical_keys: &PhysicalKeys,
-    simulated_keys: &SimulatedKeys,
-    active_rules: &ActiveRules,
-    metrics: &EngineMetrics,
+    context: &SchedulerContext<'_>,
 ) -> bool {
     match cmd {
         SchedulerCommand::Start(config) => {
+            if config.stop_generation != context.stop_all_generation.load(Ordering::SeqCst) {
+                return false;
+            }
             rules.insert(
                 config.id.clone(),
                 ScheduledRule::new(config, Instant::now()),
@@ -804,20 +847,25 @@ fn handle_scheduler_command(
             false
         }
         SchedulerCommand::Stop(rule_id, sent_at) => {
-            metrics.record_stop_response(sent_at.elapsed());
+            context.metrics.record_stop_response(sent_at.elapsed());
             if let Some(rule) = rules.remove(&rule_id) {
-                stop_scheduled_rule(rule, target_holds, physical_keys, simulated_keys);
+                stop_scheduled_rule(
+                    rule,
+                    target_holds,
+                    context.physical_keys,
+                    context.simulated_keys,
+                );
             }
             false
         }
         SchedulerCommand::StopAll { sent_at, ack } => {
-            metrics.record_stop_response(sent_at.elapsed());
+            context.metrics.record_stop_response(sent_at.elapsed());
             cleanup_scheduler_rules(
                 rules,
                 target_holds,
-                physical_keys,
-                simulated_keys,
-                active_rules,
+                context.physical_keys,
+                context.simulated_keys,
+                context.active_rules,
                 false,
             );
             if let Some(ack) = ack {
@@ -1055,6 +1103,10 @@ pub struct BurstEngine {
     scheduler_hp_degraded: Arc<AtomicBool>,
     /// 调度器降级时调用（由 app 层注册，用于通知前端）。
     on_scheduler_degraded: PanelToggleCb,
+    /// StopAll 进行中的计数闸门；重叠停止流程全部结束前禁止新规则启动。
+    stop_all_depth: Arc<AtomicUsize>,
+    /// StopAll 世代号；scheduler 丢弃和当前世代不一致的陈旧 Start。
+    stop_all_generation: Arc<AtomicU64>,
     metrics: Metrics,
     /// 当前物理按下的键；用于过滤 OS 生成的 key-repeat。
     pressed_keys: PhysicalKeys,
@@ -1082,6 +1134,8 @@ impl BurstEngine {
         let (scheduler_tx, scheduler_rx) = mpsc::channel();
         let scheduler_wake = SchedulerWake::new();
         let scheduler_hp_degraded = Arc::new(AtomicBool::new(false));
+        let stop_all_depth = Arc::new(AtomicUsize::new(0));
+        let stop_all_generation = Arc::new(AtomicU64::new(0));
         let on_scheduler_degraded: PanelToggleCb = Arc::new(Mutex::new(None));
         let scheduler_tx = SchedulerCommandSender::new(scheduler_tx, scheduler_wake.clone());
         let scheduler_handle = Some(spawn_scheduler(
@@ -1089,6 +1143,7 @@ impl BurstEngine {
             scheduler_wake,
             scheduler_hp_degraded.clone(),
             on_scheduler_degraded.clone(),
+            stop_all_generation.clone(),
             pressed_keys.clone(),
             simulated_keys.clone(),
             active_rules.clone(),
@@ -1102,6 +1157,8 @@ impl BurstEngine {
             scheduler_handle,
             scheduler_hp_degraded,
             on_scheduler_degraded,
+            stop_all_depth,
+            stop_all_generation,
             metrics,
             pressed_keys,
             simulated_keys,
@@ -1118,11 +1175,24 @@ impl BurstEngine {
     /// 取消所有正在运行的连发循环。
     /// 在全局开关关闭时调用，防止连发线程继续注入按键。
     pub fn cancel_all_loops(&self) {
-        // 第一次清空：立即让 UI 停止显示活跃状态，并阻止大多数并发 start 请求（insert 返回 false）。
-        revive(self.active_rules.lock()).clear();
-        self.metrics.set_active_rules(0);
+        let _gate = self.begin_stop_all();
+        self.cancel_all_loops_inner();
+    }
+
+    fn begin_stop_all(&self) -> StopAllDepthGuard<'_> {
+        let gate = StopAllDepthGuard::new(&self.stop_all_depth);
+        self.stop_all_generation.fetch_add(1, Ordering::SeqCst);
+        gate
+    }
+
+    fn cancel_all_loops_inner(&self) {
         self.metrics.add_stop_command();
         let (ack_tx, ack_rx) = mpsc::channel();
+        {
+            let mut active = revive(self.active_rules.lock());
+            active.clear();
+            self.metrics.set_active_rules(0);
+        }
         let sent = self.scheduler_tx.send(SchedulerCommand::StopAll {
             sent_at: Instant::now(),
             ack: Some(ack_tx),
@@ -1155,11 +1225,13 @@ impl BurstEngine {
     }
 
     pub fn set_rules(&self, rules: Vec<BurstRule>) {
-        let snapshot = Arc::new(RuleSnapshot::new(rules));
-        let mut current = revive(self.rules.lock());
-        // 持有规则锁期间取消旧循环，避免 cancel 后、快照替换前又按旧规则启动。
-        self.cancel_all_loops();
-        *current = snapshot;
+        let _gate = self.begin_stop_all();
+        let snapshot = Arc::new(RuleSnapshot::new(normalize_rules_for_engine(rules)));
+        {
+            let mut current = revive(self.rules.lock());
+            *current = snapshot;
+        }
+        self.cancel_all_loops_inner();
     }
 
     pub fn get_rules(&self) -> Vec<BurstRule> {
@@ -1214,10 +1286,12 @@ impl BurstEngine {
             let panel = hk.panel_toggle;
             let enabled = self.global_enabled.load(Ordering::SeqCst);
 
-            if panel == Some(key) {
+            if stop == Some(key) && enabled {
                 drop(hk);
-                if let Some(cb) = revive(self.on_panel_toggle.lock()).as_ref() {
-                    cb();
+                self.global_enabled.store(false, Ordering::SeqCst);
+                self.cancel_all_loops();
+                if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
+                    cb(false);
                 }
                 return true;
             }
@@ -1229,18 +1303,19 @@ impl BurstEngine {
                 }
                 return true;
             }
-            if stop == Some(key) && enabled {
+            if panel == Some(key) {
                 drop(hk);
-                self.global_enabled.store(false, Ordering::SeqCst);
-                self.cancel_all_loops();
-                if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
-                    cb(false);
+                if let Some(cb) = revive(self.on_panel_toggle.lock()).as_ref() {
+                    cb();
                 }
                 return true;
             }
         }
 
         if !self.global_enabled.load(Ordering::SeqCst) {
+            return false;
+        }
+        if self.stop_all_depth.load(Ordering::SeqCst) > 0 {
             return false;
         }
         let mut handled = false;
@@ -1266,7 +1341,10 @@ impl BurstEngine {
                         // 两把锁之间存在 TOCTOU 窗口：并发调用可能各自读到旧状态，
                         // 一个认为"未运行→Start"，另一个认为"运行→Stop"，最终
                         // active_rules 与调度器实际状态撕裂，用户需多按才能停止。
-                        enum ToggleAction { Start, Stop }
+                        enum ToggleAction {
+                            Start { generation: u64 },
+                            Stop,
+                        }
                         let action: Option<ToggleAction> = {
                             let mut active = revive(self.active_rules.lock());
                             if active.contains(&rule.id) {
@@ -1278,9 +1356,15 @@ impl BurstEngine {
                                     None
                                 }
                             } else if rule.trigger_key == key {
-                                active.insert(rule.id.clone());
-                                self.metrics.set_active_rules(active.len());
-                                Some(ToggleAction::Start)
+                                if self.stop_all_depth.load(Ordering::SeqCst) > 0 {
+                                    None
+                                } else {
+                                    let generation =
+                                        self.stop_all_generation.load(Ordering::SeqCst);
+                                    active.insert(rule.id.clone());
+                                    self.metrics.set_active_rules(active.len());
+                                    Some(ToggleAction::Start { generation })
+                                }
                             } else {
                                 None
                             }
@@ -1288,32 +1372,13 @@ impl BurstEngine {
                         match action {
                             Some(ToggleAction::Stop) => {
                                 self.metrics.add_stop_command();
-                                let _ = self.scheduler_tx.send(SchedulerCommand::Stop(
-                                    rule.id.clone(),
-                                    Instant::now(),
-                                ));
+                                let _ = self
+                                    .scheduler_tx
+                                    .send(SchedulerCommand::Stop(rule.id.clone(), Instant::now()));
                                 handled = true;
                             }
-                            Some(ToggleAction::Start) => {
-                                let cmd =
-                                    SchedulerCommand::Start(ScheduledRuleConfig {
-                                        id: rule.id.clone(),
-                                        target_key: rule.target_key,
-                                        interval_ms: rule.interval_ms,
-                                        allow_while_physical_down: false,
-                                    });
-                                if self.scheduler_tx.send(cmd).is_err() {
-                                    let mut active = revive(self.active_rules.lock());
-                                    active.remove(&rule.id);
-                                    self.metrics.set_active_rules(active.len());
-                                    release_simulated_key(
-                                        rule.target_key,
-                                        &self.pressed_keys,
-                                        &self.simulated_keys,
-                                    );
-                                } else {
-                                    handled = true;
-                                }
+                            Some(ToggleAction::Start { generation }) => {
+                                handled = self.try_send_start_command(rule, false, generation);
                             }
                             None => {}
                         }
@@ -1342,12 +1407,39 @@ impl BurstEngine {
     }
 
     fn start_scheduled_burst(&self, rule: &BurstRule, allow_while_physical_down: bool) {
-        {
+        let generation = {
             let mut active = revive(self.active_rules.lock());
+            if self.stop_all_depth.load(Ordering::SeqCst) > 0 {
+                return;
+            }
             if !active.insert(rule.id.clone()) {
                 return;
             }
             self.metrics.set_active_rules(active.len());
+            self.stop_all_generation.load(Ordering::SeqCst)
+        };
+
+        let _ = self.try_send_start_command(rule, allow_while_physical_down, generation);
+    }
+
+    fn remove_active_rule_after_start_failure(&self, rule_id: &str) {
+        let mut active = revive(self.active_rules.lock());
+        if active.remove(rule_id) {
+            self.metrics.set_active_rules(active.len());
+        }
+    }
+
+    fn try_send_start_command(
+        &self,
+        rule: &BurstRule,
+        allow_while_physical_down: bool,
+        generation: u64,
+    ) -> bool {
+        if self.stop_all_depth.load(Ordering::SeqCst) > 0
+            || self.stop_all_generation.load(Ordering::SeqCst) != generation
+        {
+            self.remove_active_rule_after_start_failure(&rule.id);
+            return false;
         }
 
         let cmd = SchedulerCommand::Start(ScheduledRuleConfig {
@@ -1355,13 +1447,14 @@ impl BurstEngine {
             target_key: rule.target_key,
             interval_ms: rule.interval_ms,
             allow_while_physical_down,
+            stop_generation: generation,
         });
         if self.scheduler_tx.send(cmd).is_err() {
-            let mut active = revive(self.active_rules.lock());
-            active.remove(&rule.id);
-            self.metrics.set_active_rules(active.len());
+            self.remove_active_rule_after_start_failure(&rule.id);
             release_simulated_key(rule.target_key, &self.pressed_keys, &self.simulated_keys);
+            return false;
         }
+        true
     }
 
     fn stop_burst(&self, rule_id: &str) {
@@ -1648,6 +1741,8 @@ mod tests {
             scheduler_handle: None,
             scheduler_hp_degraded: Arc::new(AtomicBool::new(false)),
             on_scheduler_degraded: Arc::new(Mutex::new(None)),
+            stop_all_depth: Arc::new(AtomicUsize::new(0)),
+            stop_all_generation: Arc::new(AtomicU64::new(0)),
             metrics: Arc::new(EngineMetrics::new()),
             pressed_keys: Arc::new(Mutex::new(HashSet::new())),
             simulated_keys,
@@ -1698,6 +1793,127 @@ mod tests {
         engine.on_key_release(key);
         engine.on_key_press(key);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn global_stop_takes_priority_over_panel_when_hotkeys_conflict() {
+        let engine = BurstEngine::new();
+        let start = KeyId::Keyboard(0x70);
+        let stop = KeyId::Keyboard(0x71);
+        let panel_calls = Arc::new(AtomicUsize::new(0));
+        let panel_calls_for_cb = panel_calls.clone();
+        engine.set_hotkeys(Hotkeys {
+            global_toggle: Some(start),
+            global_stop: Some(stop),
+            panel_toggle: Some(stop),
+        });
+        engine.set_on_panel_toggle(move || {
+            panel_calls_for_cb.fetch_add(1, Ordering::SeqCst);
+        });
+        engine.global_enabled.store(true, Ordering::SeqCst);
+
+        assert!(engine.on_key_press(stop));
+
+        assert!(!engine.global_enabled.load(Ordering::SeqCst));
+        assert_eq!(panel_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn set_rules_normalizes_unsafe_boundaries() {
+        let engine = BurstEngine::new();
+        let rules = (0..=MAX_RULES)
+            .map(|i| {
+                let mut r = rule(
+                    &format!("r{i}"),
+                    BurstMode::Hold,
+                    KeyId::Keyboard(0x51),
+                    KeyId::Keyboard(0x45),
+                );
+                r.interval_ms = if i == 0 { 0 } else { 100_000 };
+                r
+            })
+            .collect();
+
+        engine.set_rules(rules);
+        let rules = engine.get_rules();
+
+        assert_eq!(rules.len(), MAX_RULES);
+        assert_eq!(rules[0].interval_ms, MIN_BURST_INTERVAL_MS);
+        assert!(rules[1..]
+            .iter()
+            .all(|rule| rule.interval_ms == MAX_BURST_INTERVAL_MS));
+    }
+
+    #[test]
+    fn set_rules_deduplicates_rule_ids_before_snapshotting() {
+        let engine = BurstEngine::new();
+        let trigger = KeyId::Keyboard(0x51);
+        let target = KeyId::Keyboard(0x45);
+        let duplicate_trigger = KeyId::Keyboard(0x57);
+        let duplicate_target = KeyId::Keyboard(0x52);
+
+        engine.set_rules(vec![
+            rule("same-id", BurstMode::Hold, trigger, target),
+            rule(
+                "same-id",
+                BurstMode::Toggle,
+                duplicate_trigger,
+                duplicate_target,
+            ),
+        ]);
+        let rules = engine.get_rules();
+
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].trigger_key, trigger);
+        assert_eq!(rules[0].target_key, target);
+    }
+
+    #[test]
+    fn stopping_all_gate_blocks_new_rule_starts() {
+        let engine = BurstEngine::new();
+        let trigger = KeyId::Keyboard(0x51);
+        let target = KeyId::Keyboard(0x45);
+        engine.global_enabled.store(true, Ordering::SeqCst);
+        engine.set_rules(vec![rule("hold-q", BurstMode::Hold, trigger, target)]);
+        engine.stop_all_depth.store(1, Ordering::SeqCst);
+
+        assert!(!engine.on_key_press(trigger));
+        assert!(engine.get_active_ids().is_empty());
+    }
+
+    #[test]
+    fn scheduler_drops_start_from_previous_stop_generation() {
+        let target = KeyId::Keyboard(0x45);
+        let physical_keys = Arc::new(Mutex::new(HashSet::new()));
+        let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
+        let active_rules = Arc::new(Mutex::new(HashSet::new()));
+        let metrics = EngineMetrics::new();
+        let stop_all_generation = AtomicU64::new(1);
+        let context = SchedulerContext {
+            stop_all_generation: &stop_all_generation,
+            physical_keys: &physical_keys,
+            simulated_keys: &simulated_keys,
+            active_rules: &active_rules,
+            metrics: &metrics,
+        };
+        let mut scheduled_rules = HashMap::new();
+        let mut target_holds = HashMap::new();
+
+        let should_shutdown = handle_scheduler_command(
+            SchedulerCommand::Start(ScheduledRuleConfig {
+                id: "stale".to_string(),
+                target_key: target,
+                interval_ms: 10,
+                allow_while_physical_down: false,
+                stop_generation: 0,
+            }),
+            &mut scheduled_rules,
+            &mut target_holds,
+            &context,
+        );
+
+        assert!(!should_shutdown);
+        assert!(scheduled_rules.is_empty());
     }
 
     #[test]
@@ -1850,6 +2066,7 @@ mod tests {
                         target_key: target,
                         interval_ms: 10,
                         allow_while_physical_down: false,
+                        stop_generation: 0,
                     },
                     now,
                 ),
@@ -1862,6 +2079,7 @@ mod tests {
                         target_key: target,
                         interval_ms: 10,
                         allow_while_physical_down: false,
+                        stop_generation: 0,
                     },
                     now,
                 ),

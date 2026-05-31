@@ -2,7 +2,7 @@
  * 热键冲突检测。
  *
  * 规则：
- *  - ERROR  功能损坏：面板键遮蔽全局键；按压连发与切换连发共用同一触发/停止键
+ *  - ERROR  功能损坏：全局键遮蔽面板键；按压连发与切换连发共用同一触发/停止键
  *  - WARNING 行为意外：全局热键与规则触发键重叠（热键优先返回，该按键不触发连发）
  *
  * 不检测：
@@ -75,13 +75,13 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
   // 仅检查已启用的规则
   const enabled = rules.filter((r) => r.enabled);
 
-  // ── 1. 面板键遮蔽全局开启键 ────────────────────────────────────────────────
+  // ── 1. 全局开启键遮蔽面板键 ────────────────────────────────────────────────
   if (keyEq(hotkeys.panel_toggle, hotkeys.global_toggle)) {
     conflicts.push({
-      id: 'panel-shadows-toggle',
+      id: 'global-shadows-panel-toggle',
       severity: 'error',
       key: hotkeys.panel_toggle!,
-      message: '面板显隐键与全局开启键相同，面板热键优先处理，全局开启键将失效',
+      message: '面板显隐键与全局开启键相同，全局热键优先处理，面板显隐键将失效',
       participants: [
         { kind: 'global', field: 'panel_toggle', label: GLOBAL_LABELS.panel_toggle },
         { kind: 'global', field: 'global_toggle', label: GLOBAL_LABELS.global_toggle },
@@ -89,7 +89,7 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
     });
   }
 
-  // ── 2. 面板键遮蔽全局停止键（且两者不同，避免与上条重复）──────────────────
+  // ── 2. 全局停止键遮蔽面板键（且两者不同，避免与上条重复）──────────────────
   // global_stop 为 null 时有效值等同 global_toggle（切换模式），不需要单独检测
   if (
     hotkeys.global_stop &&
@@ -97,10 +97,10 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
     keyEq(hotkeys.panel_toggle, hotkeys.global_stop)
   ) {
     conflicts.push({
-      id: 'panel-shadows-stop',
+      id: 'global-shadows-panel-stop',
       severity: 'error',
       key: hotkeys.panel_toggle!,
-      message: '面板显隐键与全局停止键相同，面板热键优先处理，全局停止键将失效',
+      message: '面板显隐键与全局停止键相同，全局停止键优先处理，面板显隐键将失效',
       participants: [
         { kind: 'global', field: 'panel_toggle', label: GLOBAL_LABELS.panel_toggle },
         { kind: 'global', field: 'global_stop', label: GLOBAL_LABELS.global_stop },

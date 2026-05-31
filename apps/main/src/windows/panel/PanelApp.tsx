@@ -159,6 +159,10 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   );
 }
 
+function keyEquals(a: KeyId | null | undefined, b: KeyId | null | undefined): boolean {
+  return Boolean(a && b && a.kind === b.kind && a.code === b.code);
+}
+
 function buildProfileMenu(args: {
   profiles: ProfileEntry[];
   activeName: string;
@@ -260,6 +264,7 @@ export default function PanelApp() {
     panel_toggle: KeyId | null;
   }>({ global_toggle: null, global_stop: null, panel_toggle: null });
   const hotkeysRef = useRef(hotkeys);
+  const relayedKeyDownsRef = useRef<Map<string, KeyId>>(new Map());
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const conflicts = useMemo(() => detectConflicts(rules, hotkeys), [rules, hotkeys]);
   const confirm = useConfirm();
@@ -512,13 +517,19 @@ export default function PanelApp() {
   // （热键、Toggle 触发键、pressed_keys 维护）。
   // bubble 阶段注册：KeyCapture 在 capture 阶段 stopPropagation()，捕获模式下不干扰。
   useEffect(() => {
+    const shouldRelayFromEditable = (key: KeyId) => {
+      const hk = hotkeysRef.current;
+      return keyEquals(key, hk.global_toggle) || keyEquals(key, hk.global_stop);
+    };
     const downHandler = (e: KeyboardEvent) => {
       const allowDefault = isEditableKeyboardTarget(e.target);
       if (!allowDefault) e.preventDefault();
       const vk = BROWSER_VK[e.code];
       if (vk !== undefined) {
         const key = keyboardKey(vk);
-        if (!e.repeat) {
+        const shouldRelay = !allowDefault || shouldRelayFromEditable(key);
+        if (shouldRelay && !e.repeat) {
+          relayedKeyDownsRef.current.set(e.code, key);
           invoke('relay_key_event', { key, isUp: false }).catch(() => {});
         }
       }
@@ -526,17 +537,31 @@ export default function PanelApp() {
     const upHandler = (e: KeyboardEvent) => {
       if (!isEditableKeyboardTarget(e.target)) e.preventDefault();
       const vk = BROWSER_VK[e.code];
-      if (vk !== undefined) {
-        invoke('relay_key_event', { key: { kind: 'keyboard', code: vk }, isUp: true }).catch(
-          () => {},
-        );
+      if (vk !== undefined && relayedKeyDownsRef.current.has(e.code)) {
+        const key = relayedKeyDownsRef.current.get(e.code)!;
+        relayedKeyDownsRef.current.delete(e.code);
+        invoke('relay_key_event', { key, isUp: true }).catch(() => {});
       }
+    };
+    const releaseRelayedKeys = () => {
+      for (const key of relayedKeyDownsRef.current.values()) {
+        invoke('relay_key_event', { key, isUp: true }).catch(() => {});
+      }
+      relayedKeyDownsRef.current.clear();
+    };
+    const visibilityHandler = () => {
+      if (document.visibilityState !== 'visible') releaseRelayedKeys();
     };
     window.addEventListener('keydown', downHandler);
     window.addEventListener('keyup', upHandler);
+    window.addEventListener('blur', releaseRelayedKeys);
+    document.addEventListener('visibilitychange', visibilityHandler);
     return () => {
+      releaseRelayedKeys();
       window.removeEventListener('keydown', downHandler);
       window.removeEventListener('keyup', upHandler);
+      window.removeEventListener('blur', releaseRelayedKeys);
+      document.removeEventListener('visibilitychange', visibilityHandler);
     };
   }, []);
 
@@ -694,33 +719,37 @@ export default function PanelApp() {
     return utt;
   }
 
-  function speakGlobalChange(enabled: boolean) {
+  function speakLatest(text: string, s: SoundSettings) {
     if (!('speechSynthesis' in window)) return;
+    const speechSynthesis = window.speechSynthesis;
+    speechSynthesis.cancel();
+    if (text.trim().length === 0) return;
+    speechSynthesis.speak(buildUtterance(text, s));
+    if (speechSynthesis.paused) speechSynthesis.resume();
+  }
+
+  function speakGlobalChange(enabled: boolean) {
     const s = soundRef.current;
     if (!s.enabled) return;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(buildUtterance(enabled ? s.startText : s.endText, s));
+    speakLatest(enabled ? s.startText : s.endText, s);
   }
 
   function speakToggle(rule: BurstRule, isStart: boolean) {
-    if (!('speechSynthesis' in window)) return;
     const s = soundRef.current;
     if (!s.enabled) return;
     const template = (isStart ? s.toggleStartText : s.toggleEndText) ?? '';
     const text = template.split('${key}').join(keyLabel(rule.target_key));
-    window.speechSynthesis.speak(buildUtterance(text, s));
+    speakLatest(text, s);
   }
 
   function previewSound(type: 'start' | 'end' | 'toggleStart' | 'toggleEnd') {
-    if (!('speechSynthesis' in window)) return;
     const s = soundRef.current;
-    window.speechSynthesis.cancel();
     let text: string;
     if (type === 'start') text = s.startText;
     else if (type === 'end') text = s.endText;
     else if (type === 'toggleStart') text = s.toggleStartText.replace('${key}', 'Q');
     else text = s.toggleEndText.replace('${key}', 'Q');
-    window.speechSynthesis.speak(buildUtterance(text, s));
+    speakLatest(text, s);
   }
 
   function persistSound(patch: Partial<SoundSettings>) {
