@@ -45,8 +45,8 @@ const expected: ExpectedResource[] = [
   },
   {
     rel: 'disable-ddhid-driver.cmd',
-    size: 2_603,
-    sha256: 'A45E7494CBC1BEDE55EFAE009DC968144F52F48674D8C7FE36FDAA83A354D215',
+    size: 3_303,
+    sha256: '31DB30411BCDD6E594BDCB6A2F9652ABA800ED9B6912135A5FCEC42AFC226EC5',
   },
 ];
 

@@ -55,8 +55,13 @@ if errorlevel 1 (
   exit /b 1
 )
 
+rem In WinRE, keep this path independent of findstr/CurrentControlSet quirks.
+rem Write the known control sets directly, then also cover any extra sets.
+call :disable_offline_control_set "%HIVE%\ControlSet001"
+call :disable_offline_control_set "%HIVE%\ControlSet002"
+call :disable_offline_control_set "%HIVE%\ControlSet003"
 for /f "delims=" %%K in ('reg query "%HIVE%" 2^>nul ^| findstr /R "\\ControlSet[0-9][0-9][0-9]$"') do (
-  call :disable_key "%%K\Services\ddhid63340"
+  call :disable_offline_control_set "%%K"
 )
 
 reg unload "%HIVE%"
@@ -82,8 +87,29 @@ reg query "!KEY!" >nul 2>&1
 if errorlevel 1 exit /b 0
 echo Disabling !KEY!
 reg add "!KEY!" /v Start /t REG_DWORD /d 4 /f
-if errorlevel 1 set "FAILED=1"
-set "FOUND=1"
+if errorlevel 1 (
+  set "FAILED=1"
+) else (
+  set "FOUND=1"
+)
+exit /b 0
+
+:disable_offline_control_set
+set "CONTROLSET=%~1"
+reg query "!CONTROLSET!\Services" >nul 2>&1
+if errorlevel 1 exit /b 0
+call :force_disable_key "!CONTROLSET!\Services\ddhid63340"
+exit /b 0
+
+:force_disable_key
+set "KEY=%~1"
+echo Disabling !KEY!
+reg add "!KEY!" /v Start /t REG_DWORD /d 4 /f
+if errorlevel 1 (
+  set "FAILED=1"
+) else (
+  set "FOUND=1"
+)
 exit /b 0
 
 :finish
