@@ -81,7 +81,7 @@ packages/win-sysinfo/src/
   registry.rs                   # wide / RegRoot / read_reg_* / service_key_present / is_interception_service
   prereq.rs                     # detect_hvci / detect_sac / detect_pending_reboot / Defender 排除路径
 packages/win-input/src/
-  lib.rs                        # InputMode / init_backend / dispatch / SIM_MARKER / PENDING_INJECTIONS
+  lib.rs                        # InputMode / init_backend / dispatch / SIM_MARKER / PENDING_INJECTIONS / RELAY_INJECTIONS
   ddhid.rs / dd_common.rs       # DD-HID 后端
   interception.rs               # Interception 后端 + is_driver_installed()
 packages/burst-engine/src/
@@ -118,6 +118,12 @@ packages/win-driver/src/
 `win_input::dispatch(KeyId, is_up)` 是统一入口，`(mode, KeyId)` 模式匹配分发到对应 backend，X1/X2 在 DD 模式 / 鼠标设备缺失时按 once 旗标 warn 一次后自动回退 SendInput。`burst-engine` 负责线程编排：用 `catch_unwind` 包裹引擎线程，并发连发用 `AtomicBool cancel + thread::park_timeout`，`Drop` 时先 signal 再 join 确保按键不卡住。非 Windows 平台提供空实现（`cfg(windows)` 隔离）。
 
 全局热键不走 `tauri-plugin-global-shortcut` 注册，而是与连发规则共用 `burst-engine` 低级 hook：热键检测优先于规则处理，且不受 `global_enabled` 当前状态限制。引擎用 `pressed_keys: HashSet<KeyId>` 记录已经按下的物理键，只让首次 down 进入 `on_key_press`，up 时移除；不要再依赖 `KBDLLHOOKSTRUCT.flags` 的保留位判断 key-repeat。注入事件仍先在 hook 层过滤：SendInput / Interception 用 `SIM_MARKER`，DD-HID 用 `PENDING_INJECTIONS`。
+
+**relay 注入过滤**（`win-input` RELAY_INJECTIONS + `relay_key_event`）：WebView2 聚焦后 Chromium hook 优先截断 WH_KEYBOARD_LL，所有键盘事件——包括调度器通过驱动注入的模拟按键——都会产生 DOM `keydown/keyup` 并经前端 `relay_key_event` 中继到引擎。若不过滤，trigger == target 的 Toggle 规则每次注入脉冲都触发一次开关翻转，形成高频循环，用户任何停止操作均无效，只能卸载驱动；关闭全局开关也因命令积压 + StopAll 超时而失效。因此所有注入路径（`dispatch` / `dispatch_batch` SendInput 分支）必须调用 `record_relay_injection`，新增注入后端时同理。`relay_key_event` 开头调用 `try_consume_relay_injection` 消费记录，物理按键不受影响。
+
+**Toggle 以 `active_rules` 为唯一状态源**：Toggle 的"是否运行"检查与 `active_rules` 的插入/删除必须在同一把锁内原子完成（见 `on_key_press` Toggle 分支）。若单独维护另一个状态标志再分两步操作，两把锁之间存在 TOCTOU 窗口，并发调用会产生双重 Start 或 Start/Stop 乱序，导致 active_rules 与调度器实际状态撕裂。`cancel_all_loops` 在 StopAll ack 之后需二次 `active_rules.clear()` 清除等待期并发插入的残留项。
+
+**`plan_key_up` 不依赖账本**：`simulated_keys` 账本记录了"哪些键正在模拟按下"，但 `plan_key_up` 不得以账本有记录作为发送 key_up 的前提条件。原因：`cancel_all_loops` 超时 fallback 会 drain 账本后发 key_up；此后 scheduler 若继续处理 StopAll cleanup 且发现账本为空，若以账本为前提则静默跳过 key_up，驱动侧按键永久卡住。Windows Fast Startup（快速启动）下驱动状态随休眠文件恢复，执行「关机+开机」≠ 冷启动，卡住的按键不会被清除，只有执行「重启」或卸载驱动才能解除。`plan_key_up` 的正确实现：账本尽力更新，只要 `target_holds` 有 owner（保证键确实处于 down 状态）就直接发 key_up。
 
 **AppHandle 不进 packages**：`win-driver` / `win-input` / `win-sysinfo` / `burst-engine` 所有函数均不接受 `AppHandle` 参数。资源目录由 `commands/driver.rs` 从 `app.path().resource_dir()` 取得后传入，Tauri 状态管理留在 commands 层。
 

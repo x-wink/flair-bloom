@@ -159,8 +159,24 @@ pub fn get_engine_metrics(state: State<EngineState>) -> EngineMetricsDto {
 /// 面板聚焦时 WH_KEYBOARD_LL 不触发，前端将键盘事件中继到引擎统一处理。
 /// 注意：WebView 默认行为必须由前端在 DOM 事件内同步 preventDefault；
 /// 这里的返回值只表示引擎是否处理了按键，不能用于事后取消 F3 等浏览器快捷键。
+///
+/// # ⚠️ 致命陷阱：注入按键必须在此处过滤
+///
+/// WebView2 聚焦时 WH_KEYBOARD_LL 被 Chromium hook 优先截断，所有按键事件——
+/// 包括调度器通过驱动注入的**模拟**按键——都会产生 DOM keydown/keyup 并中继到此。
+///
+/// 后果：对于 trigger == target 的 Toggle 规则，每次注入脉冲都触发一次开关翻转，
+/// 形成高频循环（10ms 间隔），用户任何停止操作均无效，只能卸载驱动。
+/// 即使关闭全局开关，命令积压也会导致 StopAll 超时，驱动侧按键永久卡住。
+///
+/// 规则：**所有向驱动发送注入的代码路径必须调用 `record_relay_injection`**，
+/// 此处的 `try_consume_relay_injection` 才能正确过滤，物理按键不受影响。
 #[tauri::command]
 pub fn relay_key_event(state: State<EngineState>, key: KeyId, is_up: bool) -> bool {
+    #[cfg(windows)]
+    if win_input::try_consume_relay_injection(key, is_up) {
+        return false;
+    }
     if is_up {
         state.0.on_key_release(key);
         false

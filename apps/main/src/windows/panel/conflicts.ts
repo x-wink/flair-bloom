@@ -2,7 +2,7 @@
  * 热键冲突检测。
  *
  * 规则：
- *  - ERROR  功能损坏：面板键遮蔽全局键；多条已启用规则共用同一触发键
+ *  - ERROR  功能损坏：面板键遮蔽全局键；按压连发与切换连发共用同一触发/停止键
  *  - WARNING 行为意外：全局热键与规则触发键重叠（热键优先返回，该按键不触发连发）
  *
  * 不检测：
@@ -20,6 +20,7 @@ export interface BurstRule {
   trigger_key: KeyId;
   target_key: KeyId;
   mode: BurstMode;
+  stop_key: KeyId | null;
 }
 
 export interface Hotkeys {
@@ -188,6 +189,69 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
         })),
       ],
     });
+  }
+
+  // ── 5. 按压连发与切换连发共用同一触发/停止键（error）──────────────────────
+  // Hold 触发键物理按下时，同键的 Toggle 规则也会触发开关翻转，两种逻辑相互纠缠：
+  //   · 第一次按键：hold 启动 + toggle 开启
+  //   · 松开：hold 停止，toggle 持续
+  //   · 第二次按键：hold 再次启动 + toggle 关闭（因为它在运行）
+  // 用户无法独立控制两条规则，任何"按住连发"操作都会随机改变切换连发状态。
+  // toggle 的 stop_key 如果等于 hold 触发键，效果相同（按住也会停止 toggle）。
+  {
+    const holdRules = enabled.filter((r) => r.mode === 'hold');
+    const toggleRules = enabled.filter((r) => r.mode === 'toggle');
+    // 每个冲突按键只报告一次
+    const reportedKeys = new Set<string>();
+
+    for (const hold of holdRules) {
+      const holdKey = keyStr(hold.trigger_key);
+      if (reportedKeys.has(holdKey)) continue;
+
+      // toggle 触发键 == hold 触发键
+      const byTrigger = toggleRules.filter((t) => keyEq(hold.trigger_key, t.trigger_key));
+      // toggle 停止键（非 null 且与触发键不同）== hold 触发键
+      const byStop = toggleRules.filter(
+        (t) =>
+          t.stop_key &&
+          !keyEq(t.stop_key, t.trigger_key) &&
+          keyEq(hold.trigger_key, t.stop_key) &&
+          !byTrigger.some((bt) => bt.id === t.id),
+      );
+      const clashing = [...byTrigger, ...byStop];
+      if (clashing.length === 0) continue;
+
+      reportedKeys.add(holdKey);
+      conflicts.push({
+        id: `hold-toggle-key-${holdKey}`,
+        severity: 'error',
+        key: hold.trigger_key,
+        message: `按键 ${keyLabel(hold.trigger_key)} 同时控制按压连发和切换连发，两种模式相互纠缠，行为不可预测`,
+        participants: [
+          {
+            kind: 'rule',
+            ruleId: hold.id,
+            ruleMode: hold.mode,
+            field: 'trigger_key',
+            label: '按压连发触发键',
+          },
+          ...byTrigger.map((t) => ({
+            kind: 'rule' as const,
+            ruleId: t.id,
+            ruleMode: t.mode,
+            field: 'trigger_key' as const,
+            label: '切换连发触发键',
+          })),
+          ...byStop.map((t) => ({
+            kind: 'rule' as const,
+            ruleId: t.id,
+            ruleMode: t.mode,
+            field: 'trigger_key' as const,
+            label: '切换连发停止键',
+          })),
+        ],
+      });
+    }
   }
 
   return conflicts;

@@ -46,14 +46,28 @@ pub const SIM_MARKER: usize = 0x5148_5844;
 #[cfg(windows)]
 const SIM_TTL: Duration = Duration::from_millis(50);
 
+/// WebView2 聚焦时 WH_KEYBOARD_LL 不触发，前端通过 relay_key_event 中继键盘事件。
+/// 但模拟注入的按键同样会在 WebView2 产生 DOM 事件并被中继，用此 TTL 过滤。
+/// 设为 200ms 以覆盖 IPC 往返延迟，远大于正常 1-20ms。
+#[cfg(windows)]
+const RELAY_SIM_TTL: Duration = Duration::from_millis(200);
+
 #[cfg(windows)]
 type PendingMap = HashMap<(KeyId, bool), VecDeque<Instant>>;
 #[cfg(windows)]
 static PENDING_INJECTIONS: OnceLock<Mutex<PendingMap>> = OnceLock::new();
+/// relay_key_event 端过滤注入事件的独立队列。
+#[cfg(windows)]
+static RELAY_INJECTIONS: OnceLock<Mutex<PendingMap>> = OnceLock::new();
 
 #[cfg(windows)]
 fn pending_map() -> &'static Mutex<PendingMap> {
     PENDING_INJECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(windows)]
+fn relay_pending_map() -> &'static Mutex<PendingMap> {
+    RELAY_INJECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[cfg(windows)]
@@ -73,11 +87,33 @@ fn drop_expired(queue: &mut VecDeque<Instant>, now: Instant) {
 }
 
 #[cfg(windows)]
+fn drop_expired_relay(queue: &mut VecDeque<Instant>, now: Instant) {
+    while let Some(&front) = queue.front() {
+        if now.duration_since(front) > RELAY_SIM_TTL {
+            queue.pop_front();
+        } else {
+            break;
+        }
+    }
+}
+
+#[cfg(windows)]
 fn record_injection(key: KeyId, is_up: bool) {
     let mut map = revive(pending_map().lock());
     let queue = map.entry((key, is_up)).or_default();
     let now = Instant::now();
     drop_expired(queue, now);
+    queue.push_back(now);
+}
+
+/// 所有注入路径（SendInput / Interception / DD-HID）调用：在 RELAY_INJECTIONS 中记录，
+/// 供 relay_key_event 过滤，防止模拟按键被当作物理按键触发 toggle 切换。
+#[cfg(windows)]
+fn record_relay_injection(key: KeyId, is_up: bool) {
+    let mut map = revive(relay_pending_map().lock());
+    let queue = map.entry((key, is_up)).or_default();
+    let now = Instant::now();
+    drop_expired_relay(queue, now);
     queue.push_back(now);
 }
 
@@ -92,10 +128,30 @@ pub fn try_consume_injection(key: KeyId, is_up: bool) -> bool {
     queue.pop_front().is_some()
 }
 
+/// relay_key_event 端调用：若该事件是引擎注入的模拟按键（通过 RELAY_INJECTIONS 记录），
+/// pop 一条记录并返回 true，调用方应跳过处理以避免模拟按键被误当物理按键。
+#[cfg(windows)]
+pub fn try_consume_relay_injection(key: KeyId, is_up: bool) -> bool {
+    let mut map = revive(relay_pending_map().lock());
+    let Some(queue) = map.get_mut(&(key, is_up)) else {
+        return false;
+    };
+    drop_expired_relay(queue, Instant::now());
+    queue.pop_front().is_some()
+}
+
 /// 清空注入队列（引擎重置规则或关闭时调用）。
 #[cfg(windows)]
 pub fn clear_pending_injections() {
     if let Some(lock) = PENDING_INJECTIONS.get() {
+        revive(lock.lock()).clear();
+    }
+}
+
+/// 清空 relay 注入过滤队列（引擎停止或关闭时调用）。
+#[cfg(windows)]
+pub fn clear_relay_injections() {
+    if let Some(lock) = RELAY_INJECTIONS.get() {
         revive(lock.lock()).clear();
     }
 }
@@ -514,6 +570,10 @@ fn dispatch_batch(events: &[(KeyId, bool)]) {
         .map(|a| a.load(std::sync::atomic::Ordering::SeqCst))
         .unwrap_or(MODE_SENDINPUT);
     if mode == MODE_SENDINPUT {
+        // SendInput 批量路径不经过 dispatch()，必须在此单独记录（见 dispatch 注释说明）。
+        for &(key, is_up) in events {
+            record_relay_injection(key, is_up);
+        }
         send_batch_via_sendinput(events);
         return;
     }
@@ -524,6 +584,10 @@ fn dispatch_batch(events: &[(KeyId, bool)]) {
 
 #[cfg(windows)]
 fn dispatch(key: KeyId, is_up: bool) {
+    // ⚠️ 必须在实际注入前记录，供 relay_key_event 过滤。
+    // 新增注入后端时此处已覆盖；若绕过 dispatch 直接发送，
+    // 需在调用处自行调用 record_relay_injection，否则会触发「注入泄漏为物理按键」致命 bug。
+    record_relay_injection(key, is_up);
     let mode = CURRENT_MODE
         .get()
         .map(|a| a.load(std::sync::atomic::Ordering::SeqCst))

@@ -3,7 +3,7 @@ use qzh_profile::key_id::KeyId;
 use qzh_profile::key_id::MouseButton;
 use qzh_profile::profile::{BurstMode, BurstRule, Hotkeys};
 #[cfg(windows)]
-use std::sync::{atomic::AtomicU32, RwLock, Weak};
+use std::sync::{RwLock, Weak};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{
@@ -19,49 +19,27 @@ use tracing::error;
 use tracing::info;
 use win_input::key_events;
 #[cfg(windows)]
-use win_input::{clear_pending_injections, try_consume_injection, SIM_MARKER};
+use win_input::{clear_pending_injections, clear_relay_injections, try_consume_injection, SIM_MARKER};
 #[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{CloseHandle, HANDLE, LPARAM, WAIT_FAILED, WAIT_OBJECT_0, WPARAM},
     System::Threading::{
-        CreateEventW, CreateWaitableTimerExW, GetCurrentThreadId, SetEvent, SetWaitableTimer,
-        WaitForMultipleObjects, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, INFINITE,
-        SYNCHRONIZATION_SYNCHRONIZE, TIMER_MODIFY_STATE,
+        CreateEventW, CreateWaitableTimerExW, SetEvent, SetWaitableTimer, WaitForMultipleObjects,
+        CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, INFINITE, SYNCHRONIZATION_SYNCHRONIZE,
+        TIMER_MODIFY_STATE,
     },
     UI::WindowsAndMessaging::{
-        CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
-        TranslateMessage, UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT,
-        WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP,
-        WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
-        WM_SYSKEYUP, WM_USER, WM_XBUTTONDOWN, WM_XBUTTONUP, XBUTTON1, XBUTTON2,
+        CallNextHookEx, DispatchMessageW, GetMessageW, SetWindowsHookExW, TranslateMessage,
+        UnhookWindowsHookEx, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, WH_KEYBOARD_LL, WH_MOUSE_LL,
+        WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP,
+        WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN,
+        WM_XBUTTONUP, XBUTTON1, XBUTTON2,
     },
 };
-
-/// 重装键盘 hook 的自定义线程消息：面板获得焦点时，由主线程投递给 hook 线程，
-/// 触发 unhook + rehook 使我们的 hook 重新排到 Chromium hook 之后安装，即优先被调用。
-#[cfg(windows)]
-const WM_REHOOK_KEYBOARD: u32 = WM_USER + 1;
-
-/// hook 线程 ID，用于跨线程投递 WM_REHOOK_KEYBOARD 消息；0 表示线程尚未启动。
-#[cfg(windows)]
-static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
 /// hook 回调通过静态 Weak 引用访问引擎，避免 Arc 延长生命周期；RwLock 支持重复注册
 #[cfg(windows)]
 static ENGINE_HOOK: RwLock<Option<Weak<BurstEngine>>> = RwLock::new(None);
-
-/// 向 hook 线程投递重装键盘 hook 的信号。
-/// 在面板窗口获得焦点后调用，使我们的 hook 重新排到 Chromium 安装的 hook 之后（即优先执行）。
-#[cfg(windows)]
-pub fn rehook_keyboard() {
-    let tid = HOOK_THREAD_ID.load(Ordering::SeqCst);
-    if tid != 0 {
-        // SAFETY: tid 来自 hook 线程自身写入的有效线程 ID；消息参数均为 0，合法。
-        unsafe { PostThreadMessageW(tid, WM_REHOOK_KEYBOARD, 0, 0) };
-    }
-}
-#[cfg(not(windows))]
-pub fn rehook_keyboard() {}
 
 type GlobalChangedCb = Arc<Mutex<Option<Box<dyn Fn(bool) + Send + Sync>>>>;
 type PanelToggleCb = Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
@@ -160,11 +138,11 @@ impl SchedulerWaiter {
                 hp_degraded.store(true, Ordering::SeqCst);
                 info!("Windows 高精度 waitable timer 不可用，scheduler 降级标准等待路径");
             }
-            return Self {
+            Self {
                 high_precision,
                 on_degraded,
                 hp_degraded,
-            };
+            }
         }
         #[cfg(not(windows))]
         {
@@ -588,9 +566,17 @@ fn plan_key_up(
     simulated_keys: &SimulatedKeys,
     allow_while_physical_down: bool,
 ) -> Option<KeyEvent> {
-    if !record_simulated_up(simulated_keys, key) {
-        return None;
-    }
+    // ⚠️ 账本（simulated_keys）只做尽力更新，不得作为是否发 key_up 的前置条件。
+    //
+    // 陷阱：cancel_all_loops 的 timeout fallback 会 drain 账本后再发 key_up。
+    // 若此处仍以"账本有记录"为前提，scheduler 之后处理 StopAll cleanup 时账本已空，
+    // 会静默跳过 key_up，驱动侧按键永久卡住，重启应用甚至重启电脑都无法解除
+    // （Windows Fast Startup 下驱动状态随休眠文件恢复，仅「重启」而非「关机」才清）。
+    //
+    // 不变式：本函数仅通过 release_target_owner / release_all_target_holds 调用，
+    // 两者都只在 target_holds 有 owner 时调用，此时键一定处于 simulated-down 状态，
+    // 无需账本确认即可安全发 key_up。
+    record_simulated_up(simulated_keys, key);
     if allow_while_physical_down || !physical_key_down(physical_keys, key) {
         Some((key, true))
     } else {
@@ -678,6 +664,7 @@ impl ScheduledRule {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn spawn_scheduler(
     rx: Receiver<SchedulerCommand>,
     wake: SchedulerWake,
@@ -709,6 +696,7 @@ fn spawn_scheduler(
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_scheduler(
     rx: Receiver<SchedulerCommand>,
     wake: SchedulerWake,
@@ -1068,7 +1056,6 @@ pub struct BurstEngine {
     /// 调度器降级时调用（由 app 层注册，用于通知前端）。
     on_scheduler_degraded: PanelToggleCb,
     metrics: Metrics,
-    toggle_states: Arc<Mutex<HashMap<String, bool>>>,
     /// 当前物理按下的键；用于过滤 OS 生成的 key-repeat。
     pressed_keys: PhysicalKeys,
     /// 应用确认由自身模拟按下、尚未配对释放的键；异常停止时用于兜底释放。
@@ -1116,7 +1103,6 @@ impl BurstEngine {
             scheduler_hp_degraded,
             on_scheduler_degraded,
             metrics,
-            toggle_states: Arc::new(Mutex::new(HashMap::new())),
             pressed_keys,
             simulated_keys,
             hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
@@ -1129,9 +1115,10 @@ impl BurstEngine {
         *revive(self.hotkeys.lock()) = hotkeys;
     }
 
-    /// 取消所有正在运行的连发循环并清空 toggle 状态。
+    /// 取消所有正在运行的连发循环。
     /// 在全局开关关闭时调用，防止连发线程继续注入按键。
     pub fn cancel_all_loops(&self) {
+        // 第一次清空：立即让 UI 停止显示活跃状态，并阻止大多数并发 start 请求（insert 返回 false）。
         revive(self.active_rules.lock()).clear();
         self.metrics.set_active_rules(0);
         self.metrics.add_stop_command();
@@ -1141,13 +1128,20 @@ impl BurstEngine {
             ack: Some(ack_tx),
         });
         if sent.is_err() || ack_rx.recv_timeout(STOP_ALL_ACK_TIMEOUT).is_err() {
-            // The scheduler owns planned key-down/up ordering. This fallback is only for a dead
-            // or wedged scheduler so a stop/exit path still attempts to release held input.
+            // scheduler 已挂死或超时：fallback 兜底发 key_up，防止驱动侧按键卡住。
+            // 注意：release_simulated_keys 会 drain 账本。若 scheduler 之后仍恢复处理
+            // StopAll，plan_key_up 会发现账本为空，但不会跳过 key_up（已修复该逻辑）。
             release_simulated_keys(&self.pressed_keys, &self.simulated_keys);
         }
-        revive(self.toggle_states.lock()).clear();
+        // 第二次清空：消除 StopAll 等待期间并发 on_key_press 可能遗留的 active_rules 插入，
+        // 保证方法返回后 active_rules 与实际调度器状态一致（均为空）。
+        revive(self.active_rules.lock()).clear();
+        self.metrics.set_active_rules(0);
         #[cfg(windows)]
-        clear_pending_injections();
+        {
+            clear_pending_injections();
+            clear_relay_injections();
+        }
     }
 
     /// 注册全局开关热键触发时的回调（供 app 层同步托盘与前端事件）。
@@ -1266,18 +1260,62 @@ impl BurstEngine {
                 BurstMode::Toggle => {
                     let stop = rule.stop_key.unwrap_or(rule.trigger_key);
                     if rule.trigger_key == key || stop == key {
-                        let started = revive(self.toggle_states.lock())
-                            .get(&rule.id)
-                            .copied()
-                            .unwrap_or(false);
-                        if started {
-                            if stop == key {
-                                self.handle_toggle_press(rule);
+                        // ⚠️ Toggle 状态以 active_rules 为唯一来源，检查与变更必须在同一把锁内完成。
+                        //
+                        // 陷阱：若单独维护一个"toggle_states"标志再分别更新 active_rules，
+                        // 两把锁之间存在 TOCTOU 窗口：并发调用可能各自读到旧状态，
+                        // 一个认为"未运行→Start"，另一个认为"运行→Stop"，最终
+                        // active_rules 与调度器实际状态撕裂，用户需多按才能停止。
+                        enum ToggleAction { Start, Stop }
+                        let action: Option<ToggleAction> = {
+                            let mut active = revive(self.active_rules.lock());
+                            if active.contains(&rule.id) {
+                                if stop == key {
+                                    active.remove(&rule.id);
+                                    self.metrics.set_active_rules(active.len());
+                                    Some(ToggleAction::Stop)
+                                } else {
+                                    None
+                                }
+                            } else if rule.trigger_key == key {
+                                active.insert(rule.id.clone());
+                                self.metrics.set_active_rules(active.len());
+                                Some(ToggleAction::Start)
+                            } else {
+                                None
+                            }
+                        };
+                        match action {
+                            Some(ToggleAction::Stop) => {
+                                self.metrics.add_stop_command();
+                                let _ = self.scheduler_tx.send(SchedulerCommand::Stop(
+                                    rule.id.clone(),
+                                    Instant::now(),
+                                ));
                                 handled = true;
                             }
-                        } else if rule.trigger_key == key {
-                            self.handle_toggle_press(rule);
-                            handled = true;
+                            Some(ToggleAction::Start) => {
+                                let cmd =
+                                    SchedulerCommand::Start(ScheduledRuleConfig {
+                                        id: rule.id.clone(),
+                                        target_key: rule.target_key,
+                                        interval_ms: rule.interval_ms,
+                                        allow_while_physical_down: false,
+                                    });
+                                if self.scheduler_tx.send(cmd).is_err() {
+                                    let mut active = revive(self.active_rules.lock());
+                                    active.remove(&rule.id);
+                                    self.metrics.set_active_rules(active.len());
+                                    release_simulated_key(
+                                        rule.target_key,
+                                        &self.pressed_keys,
+                                        &self.simulated_keys,
+                                    );
+                                } else {
+                                    handled = true;
+                                }
+                            }
+                            None => {}
                         }
                     }
                 }
@@ -1301,24 +1339,6 @@ impl BurstEngine {
 
     fn start_hold_burst(&self, rule: &BurstRule) {
         self.start_scheduled_burst(rule, rule.trigger_key == rule.target_key);
-    }
-
-    fn handle_toggle_press(&self, rule: &BurstRule) {
-        let mut states = revive(self.toggle_states.lock());
-        let active = states.entry(rule.id.clone()).or_insert(false);
-        if *active {
-            *active = false;
-            drop(states);
-            self.stop_burst(&rule.id);
-        } else {
-            *active = true;
-            drop(states);
-            self.start_toggle_burst(rule);
-        }
-    }
-
-    fn start_toggle_burst(&self, rule: &BurstRule) {
-        self.start_scheduled_burst(rule, false);
     }
 
     fn start_scheduled_burst(&self, rule: &BurstRule, allow_while_physical_down: bool) {
@@ -1372,7 +1392,10 @@ impl Drop for BurstEngine {
         }
         release_simulated_keys(&self.pressed_keys, &self.simulated_keys);
         #[cfg(windows)]
-        clear_pending_injections();
+        {
+            clear_pending_injections();
+            clear_relay_injections();
+        }
     }
 }
 
@@ -1534,12 +1557,9 @@ pub fn start_listener(engine: Arc<BurstEngine>) {
         *guard = Some(Arc::downgrade(&engine));
     }
     thread::spawn(move || {
-        // SAFETY: 在安装 hook 前记录线程 ID，供 rehook_keyboard() 跨线程投递消息
-        HOOK_THREAD_ID.store(unsafe { GetCurrentThreadId() }, Ordering::SeqCst);
-
         // SAFETY: WH_KEYBOARD_LL 全局钩子允许 hmod=null + dwThreadId=0,Windows
         // 会自行加载本进程模块作为 hook owner;hook_proc 满足 # Safety 契约
-        let mut kbd_hook = unsafe {
+        let kbd_hook = unsafe {
             SetWindowsHookExW(
                 WH_KEYBOARD_LL,
                 Some(keyboard_hook_proc),
@@ -1574,34 +1594,12 @@ pub fn start_listener(engine: Arc<BurstEngine>) {
             if ret == 0 || ret == -1 {
                 break;
             }
-            // 面板获得焦点时触发：重装键盘 hook 使我们排在 Chromium hook 之后安装（LIFO 优先调用）
-            if msg.hwnd.is_null() && msg.message == WM_REHOOK_KEYBOARD {
-                if !kbd_hook.is_null() {
-                    // SAFETY: kbd_hook 是之前 SetWindowsHookExW 返回的有效句柄
-                    unsafe { UnhookWindowsHookEx(kbd_hook) };
-                }
-                kbd_hook = unsafe {
-                    SetWindowsHookExW(
-                        WH_KEYBOARD_LL,
-                        Some(keyboard_hook_proc),
-                        std::ptr::null_mut(),
-                        0,
-                    )
-                };
-                if kbd_hook.is_null() {
-                    error!("rehook: 键盘 hook 重新安装失败");
-                } else {
-                    info!("rehook: 键盘 hook 已重新安装");
-                }
-                continue;
-            }
             // SAFETY: msg 是上一步 GetMessageW 写入的合法消息
             unsafe {
                 TranslateMessage(&msg);
                 DispatchMessageW(&msg);
             }
         }
-        HOOK_THREAD_ID.store(0, Ordering::SeqCst);
         if !kbd_hook.is_null() {
             // SAFETY: kbd_hook 是上面 SetWindowsHookExW 返回的非空有效句柄
             unsafe { UnhookWindowsHookEx(kbd_hook) };
@@ -1651,7 +1649,6 @@ mod tests {
             scheduler_hp_degraded: Arc::new(AtomicBool::new(false)),
             on_scheduler_degraded: Arc::new(Mutex::new(None)),
             metrics: Arc::new(EngineMetrics::new()),
-            toggle_states: Arc::new(Mutex::new(HashMap::new())),
             pressed_keys: Arc::new(Mutex::new(HashSet::new())),
             simulated_keys,
             hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
