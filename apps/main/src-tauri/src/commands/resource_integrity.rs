@@ -58,8 +58,8 @@ pub const EXPECTED_RESOURCES: &[ExpectedResource] = &[
     ExpectedResource {
         rel: "disable-ddhid-driver.cmd",
         label: "disable-ddhid-driver.cmd",
-        size: 3_303,
-        sha256: "31DB30411BCDD6E594BDCB6A2F9652ABA800ED9B6912135A5FCEC42AFC226EC5",
+        size: 3_926,
+        sha256: "ED87578865134EB6E7D8B2A07EFDE505E7E29789490E173F647E0B2C485E9E25",
     },
 ];
 
@@ -136,10 +136,10 @@ mod tests {
             .iter()
             .find(|item| item.rel == "disable-ddhid-driver.cmd")
             .unwrap();
-        assert_eq!(script.size, 3_303);
+        assert_eq!(script.size, 3_926);
         assert_eq!(
             script.sha256,
-            "31DB30411BCDD6E594BDCB6A2F9652ABA800ED9B6912135A5FCEC42AFC226EC5"
+            "ED87578865134EB6E7D8B2A07EFDE505E7E29789490E173F647E0B2C485E9E25"
         );
     }
 }

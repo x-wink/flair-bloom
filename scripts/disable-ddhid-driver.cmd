@@ -55,14 +55,17 @@ if errorlevel 1 (
   exit /b 1
 )
 
-rem In WinRE, keep this path independent of findstr/CurrentControlSet quirks.
-rem Write the known control sets directly, then also cover any extra sets.
+rem In WinRE, keep this path independent of optional command-line helpers.
+rem Write the common control sets directly; missing sets are skipped.
 call :disable_offline_control_set "%HIVE%\ControlSet001"
 call :disable_offline_control_set "%HIVE%\ControlSet002"
 call :disable_offline_control_set "%HIVE%\ControlSet003"
-for /f "delims=" %%K in ('reg query "%HIVE%" 2^>nul ^| findstr /R "\\ControlSet[0-9][0-9][0-9]$"') do (
-  call :disable_offline_control_set "%%K"
-)
+call :disable_offline_control_set "%HIVE%\ControlSet004"
+call :disable_offline_control_set "%HIVE%\ControlSet005"
+call :disable_offline_control_set "%HIVE%\ControlSet006"
+call :disable_offline_control_set "%HIVE%\ControlSet007"
+call :disable_offline_control_set "%HIVE%\ControlSet008"
+call :disable_offline_control_set "%HIVE%\ControlSet009"
 
 reg unload "%HIVE%"
 if errorlevel 1 (
@@ -76,9 +79,15 @@ goto :finish
 echo Disabling online DD-HID driver service.
 sc.exe stop ddhid63340 >nul 2>&1
 call :disable_key "HKLM\SYSTEM\CurrentControlSet\Services\ddhid63340"
-for /f "delims=" %%K in ('reg query "HKLM\SYSTEM" 2^>nul ^| findstr /R "\\ControlSet[0-9][0-9][0-9]$"') do (
-  call :disable_key "%%K\Services\ddhid63340"
-)
+call :disable_key "HKLM\SYSTEM\ControlSet001\Services\ddhid63340"
+call :disable_key "HKLM\SYSTEM\ControlSet002\Services\ddhid63340"
+call :disable_key "HKLM\SYSTEM\ControlSet003\Services\ddhid63340"
+call :disable_key "HKLM\SYSTEM\ControlSet004\Services\ddhid63340"
+call :disable_key "HKLM\SYSTEM\ControlSet005\Services\ddhid63340"
+call :disable_key "HKLM\SYSTEM\ControlSet006\Services\ddhid63340"
+call :disable_key "HKLM\SYSTEM\ControlSet007\Services\ddhid63340"
+call :disable_key "HKLM\SYSTEM\ControlSet008\Services\ddhid63340"
+call :disable_key "HKLM\SYSTEM\ControlSet009\Services\ddhid63340"
 goto :finish
 
 :disable_key
