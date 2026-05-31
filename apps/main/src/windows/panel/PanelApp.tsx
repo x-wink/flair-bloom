@@ -40,6 +40,8 @@ const DEFAULT_SOUND: SoundSettings = {
   pitch: 0,
   startText: '我准备好库库按了',
   endText: '我累了歇会',
+  toggleStartText: '开始${key}',
+  toggleEndText: '${key}停止',
   voiceName: '',
   globalOnly: false,
 };
@@ -245,6 +247,7 @@ export default function PanelApp() {
   const modeBtnRef = useRef<HTMLButtonElement>(null);
   const [rules, setRules] = useState<BurstRule[]>([]);
   const [activeRuleIds, setActiveRuleIds] = useState<Set<string>>(new Set());
+  const prevActiveRuleIdsRef = useRef<Set<string>>(new Set());
   const [profileName, setProfileName] = useState('defults');
   const [profileList, setProfileList] = useState<ProfileEntry[]>([]);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -269,32 +272,35 @@ export default function PanelApp() {
   const profileNameRef = useRef(profileName);
   const isDefaultProfile = profileName === DEFAULT_PROFILE_NAME;
 
-  const applyAppStatus = useCallback((status: AppStatus) => {
-    setElevated(status.elevated);
-    setInterceptionInstalled(status.interception_installed);
-    setDdHidInstalled(status.dd_hid_installed);
-    setSysInfo({
-      platform: status.platform,
-      os_family: status.os_family,
-      os_version: status.os_version,
-      webview_version: status.webview_version,
-      arch: status.arch,
-      locale: status.locale,
-      install_path: status.install_path,
-      log_dir: status.log_dir,
-      app_data_dir: status.app_data_dir,
-      autostart_enabled: status.autostart_enabled,
-      resources_ok: status.resources_ok,
-      missing_resources: status.missing_resources,
-    });
-    if ((INPUT_MODE_LIST as string[]).includes(status.input_mode)) {
-      setInputMode(status.input_mode as InputMode);
-    }
-    if (status.scheduler_hp_degraded && !hpDegradedShownRef.current) {
-      hpDegradedShownRef.current = true;
-      toast.warning('调度精度降级：当前系统不支持高精度 timer，已回退标准计时');
-    }
-  }, [toast]);
+  const applyAppStatus = useCallback(
+    (status: AppStatus) => {
+      setElevated(status.elevated);
+      setInterceptionInstalled(status.interception_installed);
+      setDdHidInstalled(status.dd_hid_installed);
+      setSysInfo({
+        platform: status.platform,
+        os_family: status.os_family,
+        os_version: status.os_version,
+        webview_version: status.webview_version,
+        arch: status.arch,
+        locale: status.locale,
+        install_path: status.install_path,
+        log_dir: status.log_dir,
+        app_data_dir: status.app_data_dir,
+        autostart_enabled: status.autostart_enabled,
+        resources_ok: status.resources_ok,
+        missing_resources: status.missing_resources,
+      });
+      if ((INPUT_MODE_LIST as string[]).includes(status.input_mode)) {
+        setInputMode(status.input_mode as InputMode);
+      }
+      if (status.scheduler_hp_degraded && !hpDegradedShownRef.current) {
+        hpDegradedShownRef.current = true;
+        toast.warning('调度精度降级：当前系统不支持高精度 timer，已回退标准计时');
+      }
+    },
+    [toast],
+  );
 
   useEffect(() => {
     return () => {
@@ -649,6 +655,32 @@ export default function PanelApp() {
     speakGlobalChange(globalEnabled);
   }, [globalEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Toggle 规则启动/停止时播报语音，通过 activeRuleIds 变化检测状态翻转。
+  // 依赖 rules state 而非 ref，避免 queueMicrotask(initialLoadDone) 比 React re-render
+  // 先触发时 rulesRef 为空导致 find 失败、speakToggle 永远不调用的竞态。
+  useEffect(() => {
+    if (!initialLoadDone.current) return;
+    if (!globalEnabled) {
+      prevActiveRuleIdsRef.current = new Set();
+      return;
+    }
+    const prev = prevActiveRuleIdsRef.current;
+    const curr = activeRuleIds;
+    prevActiveRuleIdsRef.current = curr;
+    for (const id of curr) {
+      if (!prev.has(id)) {
+        const rule = rules.find((r) => r.id === id);
+        if (rule?.mode === 'toggle') speakToggle(rule, true);
+      }
+    }
+    for (const id of prev) {
+      if (!curr.has(id)) {
+        const rule = rules.find((r) => r.id === id);
+        if (rule?.mode === 'toggle') speakToggle(rule, false);
+      }
+    }
+  }, [activeRuleIds, globalEnabled, rules]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function buildUtterance(text: string, s: SoundSettings): SpeechSynthesisUtterance {
     const utt = new SpeechSynthesisUtterance(text);
     utt.lang = 'zh-CN';
@@ -670,11 +702,25 @@ export default function PanelApp() {
     window.speechSynthesis.speak(buildUtterance(enabled ? s.startText : s.endText, s));
   }
 
-  function previewSound(type: 'start' | 'end') {
+  function speakToggle(rule: BurstRule, isStart: boolean) {
+    if (!('speechSynthesis' in window)) return;
+    const s = soundRef.current;
+    if (!s.enabled) return;
+    const template = (isStart ? s.toggleStartText : s.toggleEndText) ?? '';
+    const text = template.split('${key}').join(keyLabel(rule.target_key));
+    window.speechSynthesis.speak(buildUtterance(text, s));
+  }
+
+  function previewSound(type: 'start' | 'end' | 'toggleStart' | 'toggleEnd') {
     if (!('speechSynthesis' in window)) return;
     const s = soundRef.current;
     window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(buildUtterance(type === 'start' ? s.startText : s.endText, s));
+    let text: string;
+    if (type === 'start') text = s.startText;
+    else if (type === 'end') text = s.endText;
+    else if (type === 'toggleStart') text = s.toggleStartText.replace('${key}', 'Q');
+    else text = s.toggleEndText.replace('${key}', 'Q');
+    window.speechSynthesis.speak(buildUtterance(text, s));
   }
 
   function persistSound(patch: Partial<SoundSettings>) {
@@ -1466,7 +1512,6 @@ export default function PanelApp() {
             </Button>
           </div>
           <div className="footer-control">
-            <span className="footer-label">全局开关</span>
             <Button
               variant="solid"
               tone={globalEnabled ? 'primary' : 'neutral'}
@@ -1480,7 +1525,7 @@ export default function PanelApp() {
               })()}
               onClick={toggleGlobal}
             >
-              {globalEnabled ? '已启用' : '已禁用'}
+              {globalEnabled ? '全局已启用' : '全局已禁用'}
             </Button>
           </div>
         </div>
