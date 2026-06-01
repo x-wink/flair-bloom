@@ -538,6 +538,21 @@ fn toggle_rule_with_distinct_stop_is_indexed_by_stop_key() {
 }
 
 #[test]
+fn plan_key_up_releases_even_when_physically_held() {
+    // 回归测试：Toggle 连发激活时物理按压 target 键导致驱动侧按键卡死。
+    // plan_key_up 不得以"非物理按下"为条件跳过 key_up。
+    use crate::safety::plan_key_up;
+    let key = KeyId::Keyboard(0x57);
+    let physical_keys = Arc::new(Mutex::new(HashSet::from([key])));
+    let simulated_keys = Arc::new(Mutex::new(HashMap::from([(key, 1usize)])));
+
+    let event = plan_key_up(key, &physical_keys, &simulated_keys, false);
+
+    assert_eq!(event, Some((key, true)));
+    assert!(revive(simulated_keys.lock()).is_empty());
+}
+
+#[test]
 fn repeated_mouse_down_is_filtered_until_release() {
     let engine = BurstEngine::new();
     let key = KeyId::Mouse(MouseButton::Left);
