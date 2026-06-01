@@ -50,9 +50,12 @@ pub fn is_driver_installed() -> bool {
 }
 
 #[tauri::command]
-pub async fn install_driver(app: AppHandle) -> Result<(), String> {
+pub async fn install_driver(app: AppHandle, state: State<'_, EngineState>) -> Result<(), String> {
+    let engine = state.0.clone();
+
     #[cfg(windows)]
     {
+        engine.pause_runtime();
         let res_dir = resource_dir(&app)?;
         let health = crate::commands::resource_integrity::check_resources(&res_dir);
         if !health.issues.is_empty() {
@@ -75,17 +78,21 @@ pub async fn install_driver(app: AppHandle) -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        let _ = app;
+        let _ = (app, state, engine);
         Err("仅 Windows 平台支持安装驱动".to_string())
     }
 }
 
 #[tauri::command]
-pub async fn uninstall_driver(app: AppHandle) -> Result<(), String> {
+pub async fn uninstall_driver(app: AppHandle, state: State<'_, EngineState>) -> Result<(), String> {
+    let engine = state.0.clone();
+
     #[cfg(windows)]
     {
         use tauri_plugin_store::StoreExt;
         use win_input::{init_backend, InputMode};
+
+        engine.pause_runtime();
         init_backend(InputMode::SendInput);
         if let Ok(store) = app.store(crate::STORE_PATH) {
             store.set("input_mode", serde_json::json!("sendinput"));
@@ -101,7 +108,7 @@ pub async fn uninstall_driver(app: AppHandle) -> Result<(), String> {
     }
     #[cfg(not(windows))]
     {
-        let _ = app;
+        let _ = (app, state, engine);
         Err("仅 Windows 平台支持卸载驱动".to_string())
     }
 }
@@ -112,9 +119,15 @@ pub fn is_dd_hid_driver_installed() -> bool {
 }
 
 #[tauri::command]
-pub async fn install_dd_hid_driver(app: AppHandle) -> Result<DdHidInstallOutcome, String> {
+pub async fn install_dd_hid_driver(
+    app: AppHandle,
+    state: State<'_, EngineState>,
+) -> Result<DdHidInstallOutcome, String> {
+    let engine = state.0.clone();
+
     #[cfg(windows)]
     {
+        engine.pause_runtime();
         let res_dir = resource_dir(&app)?;
         let health = crate::commands::resource_integrity::check_resources(&res_dir);
         if !health.issues.is_empty() {
@@ -154,17 +167,24 @@ pub async fn install_dd_hid_driver(app: AppHandle) -> Result<DdHidInstallOutcome
     }
     #[cfg(not(windows))]
     {
-        let _ = app;
+        let _ = (app, state, engine);
         Err("仅 Windows 平台支持安装 DD-HID 驱动".to_string())
     }
 }
 
 #[tauri::command]
-pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<UninstallOutcome, String> {
+pub async fn uninstall_dd_hid_driver(
+    app: AppHandle,
+    state: State<'_, EngineState>,
+) -> Result<UninstallOutcome, String> {
+    let engine = state.0.clone();
+
     #[cfg(windows)]
     {
         use tauri_plugin_store::StoreExt;
         use win_input::{init_backend, InputMode};
+
+        engine.pause_runtime();
         init_backend(InputMode::SendInput);
         if let Ok(store) = app.store(crate::STORE_PATH) {
             store.set("input_mode", serde_json::json!("sendinput"));
@@ -202,7 +222,7 @@ pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<UninstallOutcome,
     }
     #[cfg(not(windows))]
     {
-        let _ = app;
+        let _ = (app, state, engine);
         Err("仅 Windows 平台支持卸载 DD-HID 驱动".to_string())
     }
 }
@@ -216,12 +236,10 @@ pub async fn disable_dd_hid_driver_service(
 
     #[cfg(windows)]
     {
-        use std::sync::atomic::Ordering;
         use tauri_plugin_store::StoreExt;
         use win_input::{init_backend, InputMode};
 
-        engine.global_enabled.store(false, Ordering::SeqCst);
-        engine.cancel_all_loops();
+        engine.pause_runtime();
         init_backend(InputMode::SendInput);
         if let Ok(store) = app.store(crate::STORE_PATH) {
             store.set("input_mode", serde_json::json!("sendinput"));
@@ -289,7 +307,6 @@ pub async fn relaunch_as_admin(
     #[cfg(windows)]
     {
         use std::os::windows::ffi::OsStrExt;
-        use std::sync::atomic::Ordering;
         use windows_sys::Win32::Foundation::ERROR_CANCELLED;
         use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW};
 
@@ -333,8 +350,8 @@ pub async fn relaunch_as_admin(
 
         result.as_ref().map_err(|e| e.clone())?;
 
-        engine.global_enabled.store(false, Ordering::SeqCst);
-        engine.cancel_all_loops();
+        engine.shutdown();
+        win_input::shutdown_backend();
 
         let app_clone = app.clone();
         tauri::async_runtime::spawn_blocking(move || {

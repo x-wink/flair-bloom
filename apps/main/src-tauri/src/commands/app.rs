@@ -1,6 +1,5 @@
 //! 协议同意 / 检查更新 / 退出。
 
-use std::sync::atomic::Ordering;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tracing::{info, warn};
@@ -46,8 +45,9 @@ pub fn agree_license(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn exit_app(app: AppHandle, state: State<EngineState>) {
-    state.0.global_enabled.store(false, Ordering::SeqCst);
-    state.0.cancel_all_loops();
+    state.0.shutdown();
+    #[cfg(windows)]
+    win_input::shutdown_backend();
     app.exit(0);
 }
 

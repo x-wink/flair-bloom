@@ -276,6 +276,20 @@ fn resolve_route(mode: u8, key: KeyId, is_up: bool) -> DispatchRoute {
     }
 }
 
+#[cfg(windows)]
+fn release_driver_backends() {
+    if let Some(lock) = DD_HID_BACKEND.get() {
+        if revive(lock.lock()).take().is_some() {
+            info!("DD-HID 后端已释放");
+        }
+    }
+    if let Some(lock) = INTERCEPTION_BACKEND.get() {
+        if revive(lock.lock()).take().is_some() {
+            info!("Interception 后端已释放");
+        }
+    }
+}
+
 /// 注册资源目录（供 DD DLL 定位）。
 #[cfg(windows)]
 pub fn set_resources_dir(dir: PathBuf) {
@@ -326,19 +340,22 @@ pub fn init_backend(mode: InputMode) {
             }
         }
         InputMode::SendInput => {
-            if let Some(lock) = DD_HID_BACKEND.get() {
-                if revive(lock.lock()).take().is_some() {
-                    info!("DD-HID 后端已释放");
-                }
-            }
-            if let Some(lock) = INTERCEPTION_BACKEND.get() {
-                if revive(lock.lock()).take().is_some() {
-                    info!("Interception 后端已释放");
-                }
-            }
+            release_driver_backends();
             current.store(MODE_SENDINPUT, std::sync::atomic::Ordering::SeqCst);
             info!("输入后端已切换为 SendInput 模式");
         }
+    }
+}
+
+pub fn shutdown_backend() {
+    #[cfg(windows)]
+    {
+        release_driver_backends();
+        clear_pending_injections();
+        clear_relay_injections();
+        let current = CURRENT_MODE.get_or_init(|| std::sync::atomic::AtomicU8::new(MODE_SENDINPUT));
+        current.store(MODE_SENDINPUT, std::sync::atomic::Ordering::SeqCst);
+        info!("输入后端已关闭");
     }
 }
 

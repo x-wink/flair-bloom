@@ -714,14 +714,20 @@ fn is_profile_readable(path: &std::path::Path) -> bool {
 // ===== 修复：DD-HID 深度清理（find_dd_hid_oem_inf / list_dd_hid_driverstore 已迁至 win-driver）=====
 
 #[tauri::command]
-pub async fn repair_dd_hid_residue(app: AppHandle) -> Result<RepairOutcome, String> {
+pub async fn repair_dd_hid_residue(
+    app: AppHandle,
+    state: tauri::State<'_, crate::commands::engine::EngineState>,
+) -> Result<RepairOutcome, String> {
+    let engine = state.0.clone();
+
     #[cfg(windows)]
     {
+        engine.pause_runtime();
         run_dd_hid_repair(app).await
     }
     #[cfg(not(windows))]
     {
-        let _ = app;
+        let _ = (app, state, engine);
         Err("仅 Windows 平台支持驱动修复".to_string())
     }
 }

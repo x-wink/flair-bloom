@@ -65,9 +65,12 @@ impl From<burst_engine::EngineMetricsSnapshot> for EngineMetricsDto {
 
 #[tauri::command]
 pub fn set_global_enabled(app: AppHandle, state: State<EngineState>, enabled: bool) {
-    state.0.global_enabled.store(enabled, Ordering::SeqCst);
-    if !enabled {
-        state.0.cancel_all_loops();
+    if enabled {
+        if !state.0.enable_runtime() {
+            return;
+        }
+    } else {
+        state.0.pause_runtime();
     }
     if let Some(tray) = app.tray_by_id("main") {
         if let Ok(menu) = crate::tray::build_menu(&app, enabled) {
@@ -247,7 +250,10 @@ pub fn set_input_mode(
             }
         }
 
-        init_backend(input_mode);
+        if win_input::current_mode() != input_mode {
+            state.0.cancel_all_loops();
+            init_backend(input_mode);
+        }
 
         if let Ok(store) = app.store(crate::STORE_PATH) {
             store.set("input_mode", serde_json::json!(input_mode.as_str()));
