@@ -63,6 +63,25 @@ pub fn log_dir() -> std::path::PathBuf {
     logging::log_dir()
 }
 
+#[cfg(all(test, windows))]
+mod tests {
+    /// 确保 win-input 与 win-driver 中的 DD-HID 版本常量始终一致。
+    /// 驱动升级时两处必须同步修改；此测试在两者不一致时编译期即失败。
+    #[test]
+    fn dd_hid_version_constants_consistent_across_crates() {
+        assert_eq!(
+            win_input::ddhid::DD_HID_VERSION,
+            win_driver::dd_hid::DD_HID_VERSION,
+            "win-input 与 win-driver 的 DD_HID_VERSION 不一致，升级驱动时须同步修改"
+        );
+        assert_eq!(
+            win_input::ddhid::DD_HID_SERVICE_NAME,
+            win_driver::dd_hid::DD_HID_SERVICE_NAME,
+            "win-input 与 win-driver 的 DD_HID_SERVICE_NAME 不一致，升级驱动时须同步修改"
+        );
+    }
+}
+
 pub fn run() {
     let dir = logging::log_dir();
     std::fs::create_dir_all(&dir).ok();
@@ -204,6 +223,15 @@ pub fn run() {
             info!("{} started", APP_NAME);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running FlairBloom");
+        .build(tauri::generate_context!())
+        .expect("error while running FlairBloom")
+        .run(|_app, event| {
+            // 兜底：捕获未经 exit_app / tray quit 的正常退出路径（例如窗口关闭按钮）。
+            // 此处 shutdown_backend 是幂等的——若 exit_app 已调用过，重复调用无害。
+            // 注意：进程被强制终止（任务管理器 kill）时此处不会执行，属已知限制。
+            if let tauri::RunEvent::Exit = event {
+                #[cfg(windows)]
+                win_input::shutdown_backend();
+            }
+        });
 }

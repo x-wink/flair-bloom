@@ -202,9 +202,9 @@ pub fn get_input_mode() -> String {
 }
 
 #[tauri::command]
-pub fn set_input_mode(
+pub async fn set_input_mode(
     app: AppHandle,
-    state: State<EngineState>,
+    state: State<'_, EngineState>,
     mode: String,
 ) -> Result<(), String> {
     #[cfg(windows)]
@@ -251,8 +251,15 @@ pub fn set_input_mode(
         }
 
         if win_input::current_mode() != input_mode {
-            state.0.cancel_all_loops();
-            init_backend(input_mode);
+            // cancel_all_loops + init_backend（含 SCM StartServiceW / ControlService）
+            // 可能阻塞数百毫秒，放入 spawn_blocking 避免冻结 IPC 处理线程。
+            let engine = state.0.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                engine.cancel_all_loops();
+                init_backend(input_mode);
+            })
+            .await
+            .map_err(|e| format!("模式切换任务异常: {e}"))?;
         }
 
         if let Ok(store) = app.store(crate::STORE_PATH) {

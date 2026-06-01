@@ -63,6 +63,80 @@ fn repeated_keydown_does_not_retrigger_global_toggle_before_release() {
 }
 
 #[test]
+fn shutdown_is_idempotent() {
+    let engine = BurstEngine::new();
+    assert!(engine.enable_runtime());
+
+    engine.shutdown();
+    assert_eq!(engine.lifecycle(), EngineLifecycle::Shutdown);
+
+    engine.shutdown();
+    assert_eq!(engine.lifecycle(), EngineLifecycle::Shutdown);
+}
+
+#[test]
+fn on_key_press_returns_false_after_shutdown() {
+    let engine = BurstEngine::new();
+    let trigger = KeyId::Keyboard(0x51);
+    let target = KeyId::Keyboard(0x45);
+    engine.global_enabled.store(true, Ordering::SeqCst);
+    engine.set_rules(vec![rule("hold-q", BurstMode::Hold, trigger, target)]);
+    engine.shutdown();
+
+    assert!(!engine.on_key_press(trigger));
+    assert!(engine.get_active_ids().is_empty());
+}
+
+#[test]
+fn cancel_all_loops_is_noop_after_shutdown() {
+    let engine = BurstEngine::new();
+    assert!(engine.enable_runtime());
+    engine.shutdown();
+
+    engine.cancel_all_loops();
+    assert_eq!(engine.lifecycle(), EngineLifecycle::Shutdown);
+}
+
+#[test]
+fn pause_runtime_is_noop_after_shutdown() {
+    let engine = BurstEngine::new();
+    assert!(engine.enable_runtime());
+    engine.shutdown();
+
+    engine.pause_runtime();
+    assert_eq!(engine.lifecycle(), EngineLifecycle::Shutdown);
+    assert!(!engine.global_enabled.load(Ordering::SeqCst));
+}
+
+#[test]
+fn toggle_rule_blocked_by_stop_all_depth() {
+    let engine = BurstEngine::new();
+    let trigger = KeyId::Keyboard(0x51);
+    let target = KeyId::Keyboard(0x45);
+    engine.global_enabled.store(true, Ordering::SeqCst);
+    engine.set_rules(vec![rule("toggle-q", BurstMode::Toggle, trigger, target)]);
+    engine.stop_all_depth.store(1, Ordering::SeqCst);
+
+    assert!(!engine.on_key_press(trigger));
+    assert!(engine.get_active_ids().is_empty());
+}
+
+#[test]
+fn global_stop_hotkey_ignored_when_already_disabled() {
+    let engine = BurstEngine::new();
+    let start_key = KeyId::Keyboard(0x70);
+    let stop_key = KeyId::Keyboard(0x71);
+    engine.set_hotkeys(Hotkeys {
+        global_toggle: Some(start_key),
+        global_stop: Some(stop_key),
+        ..Default::default()
+    });
+    // global_enabled=false 时停止热键不应生效
+    assert!(!engine.on_key_press(stop_key));
+    assert!(!engine.global_enabled.load(Ordering::SeqCst));
+}
+
+#[test]
 fn repeated_keydown_calls_panel_toggle_once_until_release() {
     let engine = BurstEngine::new();
     let key = KeyId::Keyboard(0x51);

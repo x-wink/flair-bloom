@@ -103,7 +103,14 @@ impl BurstEngine {
         let previous = self
             .lifecycle_state
             .swap(LIFECYCLE_SHUTTING_DOWN, Ordering::SeqCst);
-        if matches!(previous, LIFECYCLE_SHUTTING_DOWN | LIFECYCLE_SHUTDOWN) {
+        if previous == LIFECYCLE_SHUTDOWN {
+            // 已经完整关机：还原为 Shutdown，防止重复调用时状态退化为 ShuttingDown。
+            self.lifecycle_state
+                .store(LIFECYCLE_SHUTDOWN, Ordering::SeqCst);
+            return;
+        }
+        if previous == LIFECYCLE_SHUTTING_DOWN {
+            // 另一线程正在执行关机流程，放行即可。
             return;
         }
 

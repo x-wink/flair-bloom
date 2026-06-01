@@ -334,8 +334,16 @@ pub fn init_backend(mode: InputMode) {
                 current.store(MODE_SENDINPUT, std::sync::atomic::Ordering::SeqCst);
                 return;
             };
-            // 启动驱动服务（上次退出时已设为 disabled，需先 re-enable 再 start）
-            ddhid::start_service();
+            // 启动驱动服务（上次退出时已设为 disabled，需先 re-enable 再 start）。
+            // 服务启动失败时直接回退 SendInput，不再加载 DLL：
+            // 若跳过此检查，DLL 可能加载成功（文件在磁盘）但服务未运行，
+            // 导致所有注入静默失效且 CURRENT_MODE 错误地指向 DD-HID。
+            if !ddhid::start_service() {
+                ddhid::stop_and_disable_service();
+                current.store(MODE_SENDINPUT, std::sync::atomic::Ordering::SeqCst);
+                warn!("DD-HID 服务启动失败，降级为 SendInput 模式");
+                return;
+            }
             let cell = DD_HID_BACKEND.get_or_init(|| Mutex::new(DdHidBackend::new(dir)));
             let mut guard = revive(cell.lock());
             if guard.is_none() {
@@ -366,15 +374,14 @@ pub fn init_backend(mode: InputMode) {
 pub fn shutdown_backend() {
     #[cfg(windows)]
     {
-        let prev_mode = CURRENT_MODE
-            .get()
-            .map(|a| a.load(std::sync::atomic::Ordering::SeqCst))
-            .unwrap_or(MODE_SENDINPUT);
-        // 先卸载 DLL，再停止服务（顺序不可颠倒）
+        // 先卸载 DLL，再停止服务（顺序不可颠倒）。
+        // 无条件调用 stop_and_disable_service：
+        //   1. 消除竞态——init_backend(DdHid) 可能在读取 prev_mode 之后并发
+        //      将 CURRENT_MODE 改为 DD_HID，条件判断会漏掉这次切换；
+        //   2. 兜底 RunEvent::Exit 路径——此时 prev_mode 不一定反映最终状态。
+        // stop_and_disable_service 内部对服务不存在 / 未运行均静默处理。
         release_driver_backends();
-        if prev_mode == MODE_DD_HID {
-            ddhid::stop_and_disable_service();
-        }
+        ddhid::stop_and_disable_service();
         clear_pending_injections();
         clear_relay_injections();
         let current = CURRENT_MODE.get_or_init(|| std::sync::atomic::AtomicU8::new(MODE_SENDINPUT));
@@ -827,5 +834,74 @@ mod tests {
             resolve_route(MODE_SENDINPUT, mouse(MouseButton::WheelDown), false),
             DispatchRoute::SendInput
         );
+    }
+
+    #[test]
+    fn dd_hid_keyboard_routes_to_dd_keyboard() {
+        assert_eq!(
+            resolve_route(MODE_DD_HID, KeyId::Keyboard(0x51), false),
+            DispatchRoute::DdKeyboard(0x51)
+        );
+        assert_eq!(
+            resolve_route(MODE_DD_HID, KeyId::Keyboard(0x51), true),
+            DispatchRoute::DdKeyboard(0x51)
+        );
+    }
+
+    #[test]
+    fn dd_hid_regular_mouse_routes_to_dd_mouse() {
+        for btn in [
+            MouseButton::Left,
+            MouseButton::Right,
+            MouseButton::Middle,
+            MouseButton::X1,
+            MouseButton::X2,
+        ] {
+            assert_eq!(
+                resolve_route(MODE_DD_HID, mouse(btn), false),
+                DispatchRoute::DdMouse(btn),
+                "DD-HID down: {btn:?}"
+            );
+            assert_eq!(
+                resolve_route(MODE_DD_HID, mouse(btn), true),
+                DispatchRoute::DdMouse(btn),
+                "DD-HID up: {btn:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn interception_keyboard_routes_to_interception_keyboard() {
+        assert_eq!(
+            resolve_route(MODE_INTERCEPTION, KeyId::Keyboard(0x41), false),
+            DispatchRoute::InterceptionKeyboard(0x41)
+        );
+        assert_eq!(
+            resolve_route(MODE_INTERCEPTION, KeyId::Keyboard(0x41), true),
+            DispatchRoute::InterceptionKeyboard(0x41)
+        );
+    }
+
+    #[test]
+    fn sendinput_mode_all_mouse_buttons_route_to_sendinput() {
+        for btn in [
+            MouseButton::Left,
+            MouseButton::Right,
+            MouseButton::Middle,
+            MouseButton::X1,
+            MouseButton::X2,
+        ] {
+            assert_eq!(
+                resolve_route(MODE_SENDINPUT, mouse(btn), false),
+                DispatchRoute::SendInput,
+                "SendInput down: {btn:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn dd_hid_service_name_matches_version_prefix() {
+        let expected = format!("ddhid{}", super::ddhid::DD_HID_VERSION);
+        assert_eq!(super::ddhid::DD_HID_SERVICE_NAME, expected);
     }
 }

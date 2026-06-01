@@ -10,7 +10,7 @@ use tracing::{info, warn};
 /// DD-HID 驱动版本号，与 [`win_driver::dd_hid::DD_HID_VERSION`] 保持同步。
 pub const DD_HID_VERSION: &str = "63340";
 pub const DLL_NAME: &str = "ddhid.63340.dll";
-pub(crate) const DD_HID_SERVICE_NAME: &str = "ddhid63340";
+pub const DD_HID_SERVICE_NAME: &str = "ddhid63340";
 
 // sc.exe 服务相关错误码
 const ERROR_SERVICE_ALREADY_RUNNING: u32 = 1056;
@@ -46,7 +46,10 @@ impl DdHidBackend {
 ///
 /// 每次切入 DD-HID 模式时调用：上次退出已将服务设为 disabled，此处先恢复
 /// 为 demand-start 再 start，`ERROR_SERVICE_ALREADY_RUNNING` 时静默忽略。
-pub(crate) fn start_service() {
+///
+/// 返回 `true` 表示服务确认运行中（或已在运行），`false` 表示启动失败，
+/// 调用方应拒绝切换到 DD-HID 模式。
+pub(crate) fn start_service() -> bool {
     use core::ptr::{null, null_mut};
     use windows_sys::Win32::Foundation::GetLastError;
     use windows_sys::Win32::System::Services::{
@@ -65,7 +68,7 @@ pub(crate) fn start_service() {
         let scm = OpenSCManagerW(null(), null(), SC_MANAGER_CONNECT);
         if scm.is_null() {
             warn!("DD-HID 服务启动：无法打开 SCM (Win32 错误 {})", GetLastError());
-            return;
+            return false;
         }
 
         let svc = OpenServiceW(scm, svc_name.as_ptr(), SERVICE_START | SERVICE_CHANGE_CONFIG);
@@ -76,10 +79,13 @@ pub(crate) fn start_service() {
                 "DD-HID 服务启动：无法打开服务 {} (Win32 错误 {})",
                 DD_HID_SERVICE_NAME, err
             );
-            return;
+            return false;
         }
 
-        // 将 disabled 改回 demand-start，以便 StartServiceW 能够执行
+        // 将 disabled 改回 demand-start，以便 StartServiceW 能够执行。
+        // 若此步失败（服务仍为 disabled），StartServiceW 必然返回
+        // ERROR_SERVICE_DISABLED(1058)，提前关闭句柄并报告失败，
+        // 避免 DLL 加载后以为服务在运行但实际注入全部静默失效。
         if ChangeServiceConfigW(
             svc,
             SERVICE_NO_CHANGE,
@@ -94,24 +100,33 @@ pub(crate) fn start_service() {
             null(),
         ) == 0
         {
+            let err = GetLastError();
             warn!(
-                "DD-HID 服务启动：设置启动类型失败 (Win32 错误 {})",
-                GetLastError()
+                "DD-HID 服务启动：设置启动类型失败 (Win32 错误 {})，中止启动",
+                err
             );
+            CloseServiceHandle(svc);
+            CloseServiceHandle(scm);
+            return false;
         }
 
         let r = StartServiceW(svc, 0, null());
-        if r == 0 {
+        let ok = if r == 0 {
             let err = GetLastError();
-            if err != ERROR_SERVICE_ALREADY_RUNNING {
+            if err == ERROR_SERVICE_ALREADY_RUNNING {
+                true
+            } else {
                 warn!("DD-HID 服务启动：StartServiceW 失败 (Win32 错误 {})", err);
+                false
             }
         } else {
             info!("DD-HID 驱动服务已启动");
-        }
+            true
+        };
 
         CloseServiceHandle(svc);
         CloseServiceHandle(scm);
+        ok
     }
 }
 
