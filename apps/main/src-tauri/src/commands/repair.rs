@@ -400,7 +400,7 @@ fn collect_install_resources(
 fn diagnose_dd_hid(_app: &AppHandle) -> Vec<DiagnosticItem> {
     let mut out = Vec::new();
     let sys_present = win_driver::dd_hid::dd_hid_sys_installed();
-    let service_present = registry::service_key_present("ddhid63340");
+    let service_present = registry::service_key_present(win_driver::dd_hid::DD_HID_SERVICE_NAME);
     let oem_inf = win_driver::dd_hid::find_dd_hid_oem_inf();
     let driverstore = win_driver::dd_hid::list_dd_hid_driverstore();
 
@@ -747,7 +747,7 @@ async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
     let backup = ensure_backup_dir(&app)?;
     let oem_inf = win_driver::dd_hid::find_dd_hid_oem_inf();
     let driverstore = win_driver::dd_hid::list_dd_hid_driverstore();
-    let service_present_before = registry::service_key_present("ddhid63340");
+    let service_present_before = registry::service_key_present(win_driver::dd_hid::DD_HID_SERVICE_NAME);
     let sys_present_before = win_driver::dd_hid::dd_hid_sys_installed();
 
     let backup_lit = win_driver::powershell::ps_single_quoted(&backup.display().to_string());
@@ -804,7 +804,7 @@ async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
     crate::commands::status::emit_status_changed(&app);
 
     let sys_present_after = win_driver::dd_hid::dd_hid_sys_installed();
-    let service_present_after = registry::service_key_present("ddhid63340");
+    let service_present_after = registry::service_key_present(win_driver::dd_hid::DD_HID_SERVICE_NAME);
     let oem_inf_after = win_driver::dd_hid::find_dd_hid_oem_inf();
     let driverstore_after = win_driver::dd_hid::list_dd_hid_driverstore();
 

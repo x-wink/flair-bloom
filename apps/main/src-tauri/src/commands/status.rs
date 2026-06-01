@@ -123,7 +123,7 @@ fn collect_interception_installed() -> DriverStatus {
 #[cfg(windows)]
 fn collect_dd_hid_installed() -> DriverStatus {
     let sys = win_driver::dd_hid::dd_hid_sys_installed();
-    let service = win_sysinfo::registry::service_key_present("ddhid63340");
+    let service = win_sysinfo::registry::service_key_present(win_driver::dd_hid::DD_HID_SERVICE_NAME);
     match (sys, service) {
         (true, true) => DriverStatus::Installed,
         (false, false) => DriverStatus::NotInstalled,

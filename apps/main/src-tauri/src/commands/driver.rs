@@ -146,7 +146,7 @@ pub async fn install_dd_hid_driver(
         let pending_reboot = matches!(install_result, Ok(true));
         let exe_result: Result<(), String> = install_result.map(|_| ());
         let sys_installed = win_driver::dd_hid::dd_hid_sys_installed();
-        let service_present = win_sysinfo::registry::service_key_present("ddhid63340");
+        let service_present = win_sysinfo::registry::service_key_present(win_driver::dd_hid::DD_HID_SERVICE_NAME);
         let judge = win_driver::judge::judge_install_result(
             sys_installed,
             service_present,

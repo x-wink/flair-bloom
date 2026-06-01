@@ -299,6 +299,7 @@ pub fn set_resources_dir(dir: PathBuf) {
 #[cfg(windows)]
 pub fn init_backend(mode: InputMode) {
     let current = CURRENT_MODE.get_or_init(|| std::sync::atomic::AtomicU8::new(MODE_SENDINPUT));
+    let prev_mode = current.load(std::sync::atomic::Ordering::SeqCst);
     DD_KEY_DOWN_LOGGED.store(false, std::sync::atomic::Ordering::SeqCst);
     DD_KEY_UP_LOGGED.store(false, std::sync::atomic::Ordering::SeqCst);
     DD_FALLBACK_LOGGED.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -306,6 +307,13 @@ pub fn init_backend(mode: InputMode) {
 
     match mode {
         InputMode::Interception => {
+            // 从 DD-HID 切走：先释放 DD-HID 后端（卸载 DLL），再停止并禁用服务
+            if prev_mode == MODE_DD_HID {
+                if let Some(lock) = DD_HID_BACKEND.get() {
+                    revive(lock.lock()).take();
+                }
+                ddhid::stop_and_disable_service();
+            }
             let backend_cell =
                 INTERCEPTION_BACKEND.get_or_init(|| Mutex::new(InterceptionBackend::new()));
             let mut guard = revive(backend_cell.lock());
@@ -326,6 +334,8 @@ pub fn init_backend(mode: InputMode) {
                 current.store(MODE_SENDINPUT, std::sync::atomic::Ordering::SeqCst);
                 return;
             };
+            // 启动驱动服务（上次退出时已设为 disabled，需先 re-enable 再 start）
+            ddhid::start_service();
             let cell = DD_HID_BACKEND.get_or_init(|| Mutex::new(DdHidBackend::new(dir)));
             let mut guard = revive(cell.lock());
             if guard.is_none() {
@@ -335,12 +345,18 @@ pub fn init_backend(mode: InputMode) {
                 current.store(MODE_DD_HID, std::sync::atomic::Ordering::SeqCst);
                 info!("输入后端已切换为 DD-HID 模式");
             } else {
+                // DLL 加载失败，回退 SendInput 并停用服务
+                ddhid::stop_and_disable_service();
                 current.store(MODE_SENDINPUT, std::sync::atomic::Ordering::SeqCst);
                 warn!("DD-HID 加载失败，降级为 SendInput 模式");
             }
         }
         InputMode::SendInput => {
+            // release_driver_backends 会先卸载 DD-HID DLL，卸载后再停服务
             release_driver_backends();
+            if prev_mode == MODE_DD_HID {
+                ddhid::stop_and_disable_service();
+            }
             current.store(MODE_SENDINPUT, std::sync::atomic::Ordering::SeqCst);
             info!("输入后端已切换为 SendInput 模式");
         }
@@ -350,7 +366,15 @@ pub fn init_backend(mode: InputMode) {
 pub fn shutdown_backend() {
     #[cfg(windows)]
     {
+        let prev_mode = CURRENT_MODE
+            .get()
+            .map(|a| a.load(std::sync::atomic::Ordering::SeqCst))
+            .unwrap_or(MODE_SENDINPUT);
+        // 先卸载 DLL，再停止服务（顺序不可颠倒）
         release_driver_backends();
+        if prev_mode == MODE_DD_HID {
+            ddhid::stop_and_disable_service();
+        }
         clear_pending_injections();
         clear_relay_injections();
         let current = CURRENT_MODE.get_or_init(|| std::sync::atomic::AtomicU8::new(MODE_SENDINPUT));

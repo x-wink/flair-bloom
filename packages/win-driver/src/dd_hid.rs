@@ -10,6 +10,12 @@ use std::path::Path;
 #[cfg(windows)]
 use tracing::warn;
 
+/// DD-HID 驱动版本号，驱动相关文件名均以此为后缀。
+pub const DD_HID_VERSION: &str = "63340";
+/// Windows 服务名及内核驱动名前缀（不含 `.sys`）。
+pub const DD_HID_SERVICE_NAME: &str = "ddhid63340";
+const DD_HID_SYS_NAME: &str = "ddhid63340.sys";
+
 /// `ddhid63340.sys` 的绝对路径（基于 `%SystemRoot%`）。
 #[cfg(windows)]
 pub fn dd_hid_sys_path() -> std::path::PathBuf {
@@ -17,7 +23,7 @@ pub fn dd_hid_sys_path() -> std::path::PathBuf {
     std::path::Path::new(&sysroot)
         .join("System32")
         .join("drivers")
-        .join("ddhid63340.sys")
+        .join(DD_HID_SYS_NAME)
 }
 
 /// `ddhid63340.sys` 是否已落盘。
@@ -120,7 +126,7 @@ pub fn find_dd_hid_oem_inf() -> Vec<String> {
         } else {
             String::new()
         };
-        if utf8.contains("ddhid63340") || utf16.contains("ddhid63340") {
+        if utf8.contains(DD_HID_SERVICE_NAME) || utf16.contains(DD_HID_SERVICE_NAME) {
             out.push(name_str);
         }
     }
