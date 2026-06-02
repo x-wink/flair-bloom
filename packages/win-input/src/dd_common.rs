@@ -3,8 +3,10 @@
 //! 设计要点：
 //! - DLL 在运行时通过 `LoadLibraryW` 加载，避免编译期链接到不存在的导入库；
 //! - DD 协议要求首次调用 `DD_btn(0)`，返回 `1` 才表示内核驱动已就绪；
-//! - 暴露键盘 `DD_key` / `DD_todc` 与鼠标 `DD_btn`。X1/X2 不在 DD_btn 值域，调用方
-//!   按返回值决定是否回退到 SendInput。
+//! - X1/X2 侧键：63340 DLL 的 `DD_btn` switch 只处理 1–32，对 >32 的参数走
+//!   out-of-range 路径——该路径读取内部状态字节后直接发送 HID report，不改状态位。
+//!   因此侧键注入需先手写状态字节（X1=0x08, X2=0x10），再以 `DD_btn(64)` 触发发送。
+//!   状态字节 RVA 通过静态拆解 SHA256=01E8DB… 版本确认为 [`DD_HID_63340_BTN_STATE_RVA`]。
 
 #![cfg(windows)]
 
@@ -24,6 +26,13 @@ type DdKeyFn = unsafe extern "C" fn(c_int, c_int) -> c_int;
 type DdTodcFn = unsafe extern "C" fn(c_int) -> c_int;
 type DdWhlFn = unsafe extern "C" fn(c_int) -> c_int;
 
+/// 按钮状态字节在 ddhid.63340.dll 镜像中的 RVA（.data BSS 段）。
+///
+/// 通过静态拆解确认：所有 L/R/M case handler 的 OR/XOR 指令及报告写入前
+/// 的 MOVZX 读取均以 RIP-relative 方式指向同一地址。
+/// 对应 DLL SHA256: 01E8DB6893CF79E9E7AA3AFBEE76BEA6C4220C4D1A2C63BC2E5B7C109FDB831E
+const DD_HID_63340_BTN_STATE_RVA: usize = 0x204240;
+
 pub struct DdFfi {
     handle: HMODULE,
     dd_btn: DdBtnFn,
@@ -32,7 +41,7 @@ pub struct DdFfi {
     dd_whl: Option<DdWhlFn>,
     diag_logged: AtomicBool,
     mouse_diag_logged: AtomicBool,
-    mouse_x1x2_warned: AtomicBool,
+    side_btn_diag_logged: AtomicBool,
     wheel_diag_logged: AtomicBool,
 }
 
@@ -103,7 +112,7 @@ impl DdFfi {
             dd_whl,
             diag_logged: AtomicBool::new(false),
             mouse_diag_logged: AtomicBool::new(false),
-            mouse_x1x2_warned: AtomicBool::new(false),
+            side_btn_diag_logged: AtomicBool::new(false),
             wheel_diag_logged: AtomicBool::new(false),
         })
     }
@@ -129,48 +138,71 @@ impl DdFfi {
         }
     }
 
-    /// 注入滚轮事件。`up=true` 时向上（正 delta），`up=false` 时向下。
+    /// 注入滚轮事件。`up=true` 时向上，`up=false` 时向下。
     /// 返回 `true` 表示 DD 通道已处理，`false` 表示需回退 SendInput。
     pub fn send_wheel(&self, up: bool) -> bool {
         let Some(dd_whl) = self.dd_whl else {
             return false;
         };
-        // DD_whl 接收有符号字节：正值向上，负值向下；按 HID 每格 1 单位
+        // DD_whl：正值向上，负值向下；按 HID 每格 1 单位
         let delta: c_int = if up { 1 } else { -1 };
         // SAFETY: dd_whl 已解析
         let ret = unsafe { dd_whl(delta) };
         if !self.wheel_diag_logged.swap(true, Ordering::SeqCst) {
-            info!("DD 首次滚轮注入：up={} delta={} ret={}", up, delta, ret);
+            info!("DD 首次滚轮注入：up={} ret={}", up, ret);
         }
         true
     }
 
     pub fn send_mouse(&self, button: MouseButton, is_up: bool) -> bool {
-        let flag: c_int = match (button, is_up) {
-            (MouseButton::Left, false) => 1,
-            (MouseButton::Left, true) => 2,
-            (MouseButton::Right, false) => 4,
-            (MouseButton::Right, true) => 8,
-            (MouseButton::Middle, false) => 16,
-            (MouseButton::Middle, true) => 32,
-            (MouseButton::X1 | MouseButton::X2, _) => {
-                if !self.mouse_x1x2_warned.swap(true, Ordering::SeqCst) {
-                    warn!("DD-HID 不支持 X1/X2 鼠标按钮，回退到 SendInput");
+        match button {
+            MouseButton::X1 | MouseButton::X2 => {
+                // 63340 DLL 的 DD_btn switch 不处理侧键；直接补写内部状态位，
+                // 再以 DD_btn(64) 触发 out-of-range 路径发送 HID report。
+                let bit: u8 = if matches!(button, MouseButton::X1) { 0x08 } else { 0x10 };
+                // SAFETY: handle 是已加载的 63340 DLL 基址；RVA 经静态拆解验证。
+                // .data BSS 段可读写，写入单字节无竞态（引擎单线程顺序发送）。
+                unsafe {
+                    let state = (self.handle as usize + DD_HID_63340_BTN_STATE_RVA) as *mut u8;
+                    if is_up {
+                        *state &= !bit;
+                    } else {
+                        *state |= bit;
+                    }
+                    // >32 参数走 out-of-range 路径：读当前状态字节 → 写 HID report → 发送
+                    (self.dd_btn)(64);
                 }
-                return false;
+                if !self.side_btn_diag_logged.swap(true, Ordering::SeqCst) {
+                    info!(
+                        "DD 首次侧键注入（状态位补写）：button={:?} is_up={} bit=0x{:02x}",
+                        button, is_up, bit
+                    );
+                }
+                true
             }
-            // WheelUp/WheelDown 由 dispatch 提前路由到 send_wheel，不应到达此处
-            (MouseButton::WheelUp | MouseButton::WheelDown, _) => unreachable!(),
-        };
-        // SAFETY: dd_btn 已解析
-        let ret = unsafe { (self.dd_btn)(flag) };
-        if !self.mouse_diag_logged.swap(true, Ordering::SeqCst) {
-            info!(
-                "DD 首次鼠标注入：button={:?} is_up={} flag={} ret={}",
-                button, is_up, flag, ret
-            );
+            _ => {
+                let flag: c_int = match (button, is_up) {
+                    (MouseButton::Left, false) => 1,
+                    (MouseButton::Left, true) => 2,
+                    (MouseButton::Right, false) => 4,
+                    (MouseButton::Right, true) => 8,
+                    (MouseButton::Middle, false) => 16,
+                    (MouseButton::Middle, true) => 32,
+                    // WheelUp/WheelDown 由 dispatch 提前路由到 send_wheel，不应到达此处
+                    (MouseButton::WheelUp | MouseButton::WheelDown, _) => unreachable!(),
+                    (MouseButton::X1 | MouseButton::X2, _) => unreachable!(),
+                };
+                // SAFETY: dd_btn 已解析
+                let ret = unsafe { (self.dd_btn)(flag) };
+                if !self.mouse_diag_logged.swap(true, Ordering::SeqCst) {
+                    info!(
+                        "DD 首次鼠标注入：button={:?} is_up={} flag={} ret={}",
+                        button, is_up, flag, ret
+                    );
+                }
+                true
+            }
         }
-        true
     }
 }
 

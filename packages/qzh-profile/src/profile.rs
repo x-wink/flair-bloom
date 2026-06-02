@@ -6,7 +6,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::key_id::{KeyId, MouseButton};
+use crate::key_id::KeyId;
 
 /// 当前 [`Profile`] 的 schema 版本号。
 ///
@@ -123,9 +123,6 @@ pub enum ProfileError {
     /// DD-HID 模式下 Toggle 规则的 `target_key == stop_key`，会导致按下停止键即又触发。
     #[error("rule {0}: target_key must differ from stop_key in DD mode")]
     DdTargetEqualsStop(String),
-    /// DD-HID 模式不支持把鼠标 X1/X2 作为 target（DD SDK `DD_btn` 值域只到 32）。
-    #[error("rule {0}: DD-HID mode does not support mouse X1/X2 as target")]
-    DdMouseSideButtonUnsupported(String),
     /// 解析或序列化 JSON 时出错。
     #[error(transparent)]
     Json(#[from] serde_json::Error),
@@ -153,14 +150,10 @@ impl Profile {
     }
 
     /// `distinct_target = true` 时启用 DD-HID 模式专属约束：
-    /// DD 后端无法在 dwExtraInfo 中写入过滤标记，但 Hold 模式靠应用层注入事件队列识别
-    /// 自身注入，已允许「触发键 == 目标键」（连发 CD 类典型用法）。Toggle 模式因 sim
-    /// KEYDOWN 必须被 hook 处理（toggle 的本意），无法过滤自身，故仍要求：
+    /// DD 后端无法在 dwExtraInfo 中写入过滤标记，Toggle 模式的 sim KEYDOWN 会被 hook
+    /// 处理，无法过滤自身，故要求：
     /// - `target_key != trigger_key`
     /// - `target_key != stop_key`（默认 `stop_key = trigger_key`）
-    ///
-    /// 另外 DD SDK `DD_btn` 不支持 X1/X2，故启用规则的 `target_key` 不允许是
-    /// `Mouse(X1|X2)`（trigger / stop 端只走 hook，不受限）。
     pub fn validate_for_mode(&self, distinct_target: bool) -> Result<(), ProfileError> {
         if self.rules.len() > MAX_RULES {
             return Err(ProfileError::TooManyRules);
@@ -172,13 +165,6 @@ impl Profile {
             }
             if !distinct_target || !rule.enabled {
                 continue;
-            }
-            // X1/X2 不在 DD_btn 值域；WheelUp/WheelDown 走 DD_whl，受支持
-            if matches!(
-                rule.target_key,
-                KeyId::Mouse(MouseButton::X1) | KeyId::Mouse(MouseButton::X2)
-            ) {
-                return Err(ProfileError::DdMouseSideButtonUnsupported(rule.id.clone()));
             }
             if rule.mode == BurstMode::Toggle {
                 if rule.target_key == rule.trigger_key {

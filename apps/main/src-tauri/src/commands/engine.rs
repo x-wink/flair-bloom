@@ -49,20 +49,9 @@ pub fn set_rules(state: State<EngineState>, rules: Vec<BurstRule>) -> Result<(),
 
     #[cfg(windows)]
     {
-        use qzh_profile::key_id::{KeyId, MouseButton};
-
         let mode = win_input::current_mode();
         if mode.requires_distinct_target_for_toggle() {
             for rule in rules.iter().filter(|r| r.enabled) {
-                if matches!(
-                    rule.target_key,
-                    KeyId::Mouse(MouseButton::X1) | KeyId::Mouse(MouseButton::X2)
-                ) {
-                    return Err(format!(
-                        "究极HID 模式不支持鼠标侧键作为目标键，请把规则「{}」的目标键换成左/右/中键或键盘键",
-                        rule.id
-                    ));
-                }
                 if !matches!(rule.mode, qzh_profile::profile::BurstMode::Toggle) {
                     continue;
                 }

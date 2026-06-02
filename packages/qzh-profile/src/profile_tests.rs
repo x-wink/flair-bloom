@@ -138,7 +138,7 @@ fn validate_default_mode_allows_toggle_target_equals_trigger() {
 }
 
 #[test]
-fn validate_for_mode_dd_rejects_mouse_x1_target() {
+fn validate_for_mode_dd_allows_mouse_x1_target() {
     let p = make_profile(vec![rule(
         "m",
         BurstMode::Hold,
@@ -146,21 +146,19 @@ fn validate_for_mode_dd_rejects_mouse_x1_target() {
         KeyId::Mouse(MouseButton::X1),
         10,
     )]);
-    let err = p.validate_for_mode(true).unwrap_err();
-    assert!(matches!(err, ProfileError::DdMouseSideButtonUnsupported(ref id) if id == "m"));
+    assert!(p.validate_for_mode(true).is_ok());
 }
 
 #[test]
-fn validate_for_mode_dd_rejects_mouse_x2_target() {
+fn validate_for_mode_dd_allows_mouse_x2_target() {
     let p = make_profile(vec![rule(
         "m",
-        BurstMode::Toggle,
+        BurstMode::Hold,
         kbd(0x51),
         KeyId::Mouse(MouseButton::X2),
         10,
     )]);
-    let err = p.validate_for_mode(true).unwrap_err();
-    assert!(matches!(err, ProfileError::DdMouseSideButtonUnsupported(ref id) if id == "m"));
+    assert!(p.validate_for_mode(true).is_ok());
 }
 
 #[test]

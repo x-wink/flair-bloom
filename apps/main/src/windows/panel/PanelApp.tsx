@@ -132,13 +132,13 @@ interface ForkResult {
 
 function newRule(mode: BurstMode = 'hold'): BurstRule {
   const isHold = mode === 'hold';
-  const vk = isHold ? 0x51 : 0x46;
-  const key = keyboardKey(vk);
+  const triggerVk = isHold ? 0x51 : 0x46; // Hold: Q, Toggle: F
+  const targetVk = isHold ? 0x51 : 0x51;  // Hold: Q, Toggle: Q（与 F 不同，避免 DD-HID 同键限制）
   return {
     id: crypto.randomUUID(),
     enabled: !isHold,
-    trigger_key: key,
-    target_key: key,
+    trigger_key: keyboardKey(triggerVk),
+    target_key: keyboardKey(targetVk),
     mode,
     stop_key: null,
     interval_ms: 10,
