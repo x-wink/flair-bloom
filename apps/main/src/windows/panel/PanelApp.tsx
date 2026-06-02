@@ -40,6 +40,8 @@ const DEFAULT_SOUND: SoundSettings = {
   pitch: 0,
   startText: '我准备好库库按了',
   endText: '我累了歇会',
+  toggleStartText: '${key}开始',
+  toggleEndText: '停止${key}',
   voiceName: '',
   globalOnly: false,
 };
@@ -711,8 +713,8 @@ export default function PanelApp() {
     let text: string;
     if (type === 'start') text = s.startText;
     else if (type === 'end') text = s.endText;
-    else if (type === 'toggleStart') text = s.toggleStartText.replace('${key}', 'Q');
-    else text = s.toggleEndText.replace('${key}', 'Q');
+    else if (type === 'toggleStart') text = s.toggleStartText.replace('${key}', 'F');
+    else text = s.toggleEndText.replace('${key}', 'F');
     speakLatest(text, s);
   }
 
