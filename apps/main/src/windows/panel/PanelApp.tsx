@@ -244,6 +244,7 @@ export default function PanelApp() {
   const modeBtnRef = useRef<HTMLButtonElement>(null);
   const [rules, setRules] = useState<BurstRule[]>([]);
   const [activeRuleIds, setActiveRuleIds] = useState<Set<string>>(new Set());
+  const prevActiveRuleIdsRef = useRef<Set<string>>(new Set());
   const [profileName, setProfileName] = useState('defults');
   const [profileList, setProfileList] = useState<ProfileEntry[]>([]);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
@@ -643,6 +644,32 @@ export default function PanelApp() {
     speakGlobalChange(globalEnabled);
   }, [globalEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Toggle 规则启动/停止时播报语音，通过 activeRuleIds 变化检测状态翻转。
+  // 依赖 rules state 而非 ref，避免 queueMicrotask(initialLoadDone) 比 React re-render
+  // 先触发时 rulesRef 为空导致 find 失败、speakToggle 永远不调用的竞态。
+  useEffect(() => {
+    if (!initialLoadDone.current) return;
+    if (!globalEnabled) {
+      prevActiveRuleIdsRef.current = new Set();
+      return;
+    }
+    const prev = prevActiveRuleIdsRef.current;
+    const curr = activeRuleIds;
+    prevActiveRuleIdsRef.current = curr;
+    for (const id of curr) {
+      if (!prev.has(id)) {
+        const rule = rules.find((r) => r.id === id);
+        if (rule?.mode === 'toggle') speakToggle(rule, true);
+      }
+    }
+    for (const id of prev) {
+      if (!curr.has(id)) {
+        const rule = rules.find((r) => r.id === id);
+        if (rule?.mode === 'toggle') speakToggle(rule, false);
+      }
+    }
+  }, [activeRuleIds, globalEnabled, rules]); // eslint-disable-line react-hooks/exhaustive-deps
+
   function buildUtterance(text: string, s: SoundSettings): SpeechSynthesisUtterance {
     const utt = new SpeechSynthesisUtterance(text);
     utt.lang = 'zh-CN';
@@ -656,19 +683,37 @@ export default function PanelApp() {
     return utt;
   }
 
-  function speakGlobalChange(enabled: boolean) {
+  function speakLatest(text: string, s: SoundSettings) {
     if (!('speechSynthesis' in window)) return;
-    const s = soundRef.current;
-    if (!s.enabled) return;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(buildUtterance(enabled ? s.startText : s.endText, s));
+    const synth = window.speechSynthesis;
+    synth.cancel();
+    if (text.trim().length === 0) return;
+    synth.speak(buildUtterance(text, s));
+    if (synth.paused) synth.resume();
   }
 
-  function previewSound(type: 'start' | 'end') {
-    if (!('speechSynthesis' in window)) return;
+  function speakGlobalChange(enabled: boolean) {
     const s = soundRef.current;
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(buildUtterance(type === 'start' ? s.startText : s.endText, s));
+    if (!s.enabled) return;
+    speakLatest(enabled ? s.startText : s.endText, s);
+  }
+
+  function speakToggle(rule: BurstRule, isStart: boolean) {
+    const s = soundRef.current;
+    if (!s.enabled) return;
+    const template = (isStart ? s.toggleStartText : s.toggleEndText) ?? '';
+    const text = template.split('${key}').join(keyLabel(rule.target_key));
+    speakLatest(text, s);
+  }
+
+  function previewSound(type: 'start' | 'end' | 'toggleStart' | 'toggleEnd') {
+    const s = soundRef.current;
+    let text: string;
+    if (type === 'start') text = s.startText;
+    else if (type === 'end') text = s.endText;
+    else if (type === 'toggleStart') text = s.toggleStartText.replace('${key}', 'Q');
+    else text = s.toggleEndText.replace('${key}', 'Q');
+    speakLatest(text, s);
   }
 
   function persistSound(patch: Partial<SoundSettings>) {

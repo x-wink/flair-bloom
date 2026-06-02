@@ -20,6 +20,8 @@ export interface SoundSettings {
   pitch: number;
   startText: string;
   endText: string;
+  toggleStartText: string;
+  toggleEndText: string;
   voiceName: string;
   globalOnly: boolean; // reserved, not yet wired
 }
@@ -60,7 +62,7 @@ interface Props {
   }) => void;
   onToggleAutostart: () => void;
   onSoundChange: (patch: Partial<SoundSettings>) => void;
-  onPreviewSound: (type: 'start' | 'end') => void;
+  onPreviewSound: (type: 'start' | 'end' | 'toggleStart' | 'toggleEnd') => void;
   onCreateProfile: () => void;
   onImportProfile: () => void;
   onSwitchProfile: (path: string) => void;
@@ -329,7 +331,7 @@ export default function SettingsDialog(props: Props) {
               >
                 <div className="settings-row">
                   <div className="settings-row-main">
-                    <span className="settings-row-title">开始语句</span>
+                    <span className="settings-row-title">全局启用</span>
                     <span className="settings-row-desc">全局开关启用时朗读</span>
                   </div>
                   <div className="settings-text-group">
@@ -354,7 +356,7 @@ export default function SettingsDialog(props: Props) {
                 </div>
                 <div className="settings-row">
                   <div className="settings-row-main">
-                    <span className="settings-row-title">结束语句</span>
+                    <span className="settings-row-title">全局停用</span>
                     <span className="settings-row-desc">全局开关停用时朗读</span>
                   </div>
                   <div className="settings-text-group">
@@ -372,6 +374,56 @@ export default function SettingsDialog(props: Props) {
                       tone="neutral"
                       disabled={!sound.enabled}
                       onClick={() => props.onPreviewSound('end')}
+                    >
+                      试听
+                    </Button>
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-main">
+                    <span className="settings-row-title">Toggle 开始</span>
+                    <span className="settings-row-desc">启动时朗读，{'${key}'} 替换为目标键名</span>
+                  </div>
+                  <div className="settings-text-group">
+                    <input
+                      type="text"
+                      className="settings-text-input"
+                      value={sound.toggleStartText}
+                      maxLength={30}
+                      disabled={!sound.enabled}
+                      onChange={(e) => props.onSoundChange({ toggleStartText: e.target.value })}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      tone="neutral"
+                      disabled={!sound.enabled}
+                      onClick={() => props.onPreviewSound('toggleStart')}
+                    >
+                      试听
+                    </Button>
+                  </div>
+                </div>
+                <div className="settings-row">
+                  <div className="settings-row-main">
+                    <span className="settings-row-title">Toggle 结束</span>
+                    <span className="settings-row-desc">停止时朗读，{'${key}'} 替换为目标键名</span>
+                  </div>
+                  <div className="settings-text-group">
+                    <input
+                      type="text"
+                      className="settings-text-input"
+                      value={sound.toggleEndText}
+                      maxLength={30}
+                      disabled={!sound.enabled}
+                      onChange={(e) => props.onSoundChange({ toggleEndText: e.target.value })}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      tone="neutral"
+                      disabled={!sound.enabled}
+                      onClick={() => props.onPreviewSound('toggleEnd')}
                     >
                       试听
                     </Button>
