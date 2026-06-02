@@ -1505,7 +1505,6 @@ export default function PanelApp() {
             </Button>
           </div>
           <div className="footer-control">
-            <span className="footer-label">全局开关</span>
             <Button
               variant="solid"
               tone={globalEnabled ? 'primary' : 'neutral'}
@@ -1519,7 +1518,7 @@ export default function PanelApp() {
               })()}
               onClick={toggleGlobal}
             >
-              {globalEnabled ? '已启用' : '已禁用'}
+              {globalEnabled ? '全局已启用' : '全局已禁用'}
             </Button>
           </div>
         </div>
