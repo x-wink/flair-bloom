@@ -99,6 +99,11 @@
   line-height: var(--fb-lh-tight);
 }
 
+.repair-status-hint {
+  color: var(--fb-text-faint);
+  font-size: var(--fb-fs-xs);
+}
+
 .repair-flag--ok {
   background: var(--fb-color-success-soft);
   color: var(--fb-color-success-active);

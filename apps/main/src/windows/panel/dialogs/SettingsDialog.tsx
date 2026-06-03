@@ -34,7 +34,6 @@ interface Props {
   globalEnabled: boolean;
   togglingGlobal: boolean;
   closeBehavior: CloseBehavior | null;
-  elevated: boolean;
   interceptionInstalled: DriverStatus;
   ddHidInstalled: DriverStatus;
   autostartEnabled: boolean;
@@ -123,8 +122,9 @@ function modeDetail(mode: SettingsInputMode, props: Props): string {
       : driverStatusLabel(props.interceptionInstalled);
   }
   if (mode === 'dd_hid') {
-    if (props.ddHidInstalled !== 'installed') return driverStatusLabel(props.ddHidInstalled);
-    return props.elevated ? '管理员已就绪' : '需要管理员';
+    if (props.ddHidInstalled === 'installed') return '已屏蔽，建议卸载';
+    if (props.ddHidInstalled === 'pending_reboot') return '驱动待重启清理';
+    return '已屏蔽';
   }
   return '无需驱动';
 }

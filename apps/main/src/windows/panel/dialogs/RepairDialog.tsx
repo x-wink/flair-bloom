@@ -63,7 +63,6 @@ interface Props {
   onToast: (kind: 'success' | 'warn' | 'error', message: string) => void;
   onInstallDriver: () => void;
   onUninstallDriver: () => void;
-  onInstallDdHid: () => void;
   onUninstallDdHid: () => void;
 }
 
@@ -120,7 +119,6 @@ export default function RepairDialog({
   onToast,
   onInstallDriver,
   onUninstallDriver,
-  onInstallDdHid,
   onUninstallDdHid,
 }: Props) {
   const confirm = useConfirm();
@@ -289,9 +287,7 @@ export default function RepairDialog({
               <div className="repair-status-actions">
                 <DriverFlag status={ddHidInstalled} />
                 {ddHidInstalled === 'not_installed' && (
-                  <Button size="sm" variant="outline" tone="primary" onClick={onInstallDdHid}>
-                    安装
-                  </Button>
+                  <span className="repair-status-hint">已屏蔽</span>
                 )}
                 {ddHidInstalled === 'installed' && (
                   <Button size="sm" variant="outline" tone="danger" onClick={onUninstallDdHid}>

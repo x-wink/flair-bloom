@@ -85,6 +85,14 @@ const INPUT_MODE_LABELS: Record<InputMode, string> = {
   dd_hid: '究极HID',
 };
 const INPUT_MODE_LIST: InputMode[] = ['sendinput', 'interception', 'dd_hid'];
+const DD_HID_BLOCKED_NOTICE = (
+  <>
+    经测试DDHID驱动不稳定，可能导致电脑蓝屏死机问题，建议以管理员模式运行APP使用游戏模式。
+    <br />
+    <br />
+    驱动问题正在拼命修复中，建议在诊断修复中卸载DDHID驱动避免造成不良影响。
+  </>
+);
 
 interface BurstRule {
   id: string;
@@ -267,8 +275,25 @@ export default function PanelApp() {
   const updateProgressDoneTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const updateDownloadFailedRef = useRef(false);
   const initialLoadDone = useRef(false);
+  const ddHidFallbackInFlightRef = useRef(false);
+  const ddHidNoticeOpenRef = useRef(false);
   const profileNameRef = useRef(profileName);
   const isDefaultProfile = profileName === DEFAULT_PROFILE_NAME;
+
+  const showDdHidBlockedNotice = useCallback(async () => {
+    if (ddHidNoticeOpenRef.current) return;
+    ddHidNoticeOpenRef.current = true;
+    try {
+      await confirm({
+        title: '究极HID 已暂停使用',
+        description: DD_HID_BLOCKED_NOTICE,
+        confirmText: '我已知晓',
+        cancelText: '关闭',
+      });
+    } finally {
+      ddHidNoticeOpenRef.current = false;
+    }
+  }, [confirm]);
 
   const applyAppStatus = useCallback((status: AppStatus) => {
     setElevated(status.elevated);
@@ -289,9 +314,33 @@ export default function PanelApp() {
       missing_resources: status.missing_resources,
     });
     if ((INPUT_MODE_LIST as string[]).includes(status.input_mode)) {
+      if (status.input_mode === 'dd_hid') {
+        setInputMode('sendinput');
+        void showDdHidBlockedNotice();
+        if (!ddHidFallbackInFlightRef.current) {
+          ddHidFallbackInFlightRef.current = true;
+          invoke('set_input_mode', { mode: 'sendinput' })
+            .then(() => invoke<AppStatus>('get_app_status'))
+            .then((nextStatus) => {
+              if (
+                nextStatus.input_mode !== 'dd_hid' &&
+                (INPUT_MODE_LIST as string[]).includes(nextStatus.input_mode)
+              ) {
+                setInputMode(nextStatus.input_mode as InputMode);
+              }
+            })
+            .catch((e) => {
+              toast.warning(`已屏蔽究极HID，但回退通用模式失败：${e}`);
+            })
+            .finally(() => {
+              ddHidFallbackInFlightRef.current = false;
+            });
+        }
+        return;
+      }
       setInputMode(status.input_mode as InputMode);
     }
-  }, []);
+  }, [showDdHidBlockedNotice, toast]);
 
   useEffect(() => {
     return () => {
@@ -822,60 +871,12 @@ export default function PanelApp() {
     });
   }
 
-  async function handleInstallDdHid() {
-    if (ddHidInstalled === 'pending_reboot') {
-      await confirm({
-        title: '请重启电脑',
-        description: (
-          <>
-            检测到究极HID 驱动处于「待重启」状态——上次卸载尚未由 PnP 完成清理。
-            请重启电脑后再尝试安装此驱动。
-          </>
-        ),
-        confirmText: '我已知晓',
-        cancelText: '稍后处理',
-      });
+  async function selectInputMode(target: InputMode) {
+    if (target === 'dd_hid') {
+      setModePickerOpen(false);
+      await showDdHidBlockedNotice();
       return;
     }
-    const ok = await confirm({
-      title: '安装究极HID 驱动',
-      description: (
-        <>
-          究极HID 模式需要安装 ddxoft 提供的 WHQL 签名 HID 虚拟驱动。点击「安装」后将弹出 UAC
-          授权窗口，授权后会出现一个一闪而过的命令行窗口即为安装完成。
-          <br />
-          <br />
-          <strong>通常不需要重启即可生效。</strong>
-        </>
-      ),
-      confirmText: '安装',
-    });
-    if (!ok) return;
-    try {
-      const installResult = await invoke<{ pending_reboot: boolean }>('install_dd_hid_driver');
-      if (installResult.pending_reboot) {
-        await confirm({
-          title: '安装完成，建议重启电脑',
-          description: (
-            <>
-              究极HID 驱动已安装，但 Windows PnP 报告驱动文件已更新，建议重启电脑以确保完全生效。
-              <br />
-              <br />
-              驱动在重启前通常已可正常工作，可尝试直接切换；若遇到异常请重启后再试。
-            </>
-          ),
-          confirmText: '我已知晓',
-          cancelText: '稍后重启',
-        });
-      } else {
-        toast.success('究极HID 驱动已安装');
-      }
-    } catch (e) {
-      toast.error(`安装失败：${e}`);
-    }
-  }
-
-  async function selectInputMode(target: InputMode) {
     if (switchingMode || target === inputMode) return;
     setSwitchingMode(true);
     try {
@@ -883,36 +884,6 @@ export default function PanelApp() {
       if (target === 'interception' && interceptionInstalled !== 'installed') {
         await handleInstallDriver();
         return;
-      }
-
-      // DD-HID：未安装则先 PnP 安装（无需重启）
-      if (target === 'dd_hid' && ddHidInstalled !== 'installed') {
-        await handleInstallDdHid();
-        return;
-      }
-
-      // DD-HID 模式需要管理员：当前非管理员则提示重启
-      const targetNeedsAdmin = target === 'dd_hid';
-      if (targetNeedsAdmin && !elevated) {
-        const ok = await confirm({
-          title: '需要管理员权限',
-          description: (
-            <>
-              究极HID 模式底层调用 DeviceIoControl，需要以管理员身份运行。
-              <br />
-              <br />
-              点击「以管理员重启」会立刻关闭当前应用并启动管理员实例，自动切换到所选模式。
-            </>
-          ),
-          confirmText: '以管理员重启',
-        });
-        if (!ok) return;
-        try {
-          await invoke('relaunch_as_admin', { mode: target });
-        } catch (e) {
-          toast.error(`提权重启失败：${e}`);
-        }
-        return; // 进程将退出，不再继续
       }
 
       // 常规切换
@@ -1557,10 +1528,10 @@ export default function PanelApp() {
                     ? '驱动待重启生效'
                     : '点击安装驱动'
                 : ddHidInstalled === 'installed'
-                  ? '极致兼容，HVCI 友好'
+                  ? '已屏蔽，建议卸载'
                   : ddHidInstalled === 'pending_reboot'
                     ? '驱动待重启清理'
-                    : '点击安装驱动',
+                    : '已屏蔽',
           active: inputMode === m,
           onClick: () => void selectInputMode(m),
         }))}
@@ -1609,7 +1580,6 @@ export default function PanelApp() {
           globalEnabled={globalEnabled}
           togglingGlobal={togglingGlobal}
           closeBehavior={closeBehaviorPreference}
-          elevated={elevated}
           interceptionInstalled={interceptionInstalled}
           ddHidInstalled={ddHidInstalled}
           autostartEnabled={sysInfo.autostart_enabled}
@@ -1722,7 +1692,6 @@ export default function PanelApp() {
           }}
           onInstallDriver={() => void handleInstallDriver()}
           onUninstallDriver={() => void handleUninstallDriver()}
-          onInstallDdHid={() => void handleInstallDdHid()}
           onUninstallDdHid={() => void handleUninstallDdHid()}
         />
       </Overlay>
