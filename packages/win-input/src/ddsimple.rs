@@ -1,5 +1,4 @@
-//! DD-HID（HID-Class 虚拟设备版本）后端，DLL 名称：`ddhid.[`DLL_VERSION`].dll`。
-
+//! DD Simple 后端，使用 `dd63330.dll`，独立于 DD-HID 驱动安装/卸载链路。
 #![cfg(windows)]
 
 use crate::dd_common::{DdFfi, DdSideButtonMode};
@@ -7,25 +6,18 @@ use qzh_profile::key_id::MouseButton;
 use std::path::Path;
 use tracing::info;
 
-macro_rules! dd_hid_version {
-    () => {
-        "63340"
-    };
-}
+pub const DLL_VERSION: &str = "63330";
+pub const DLL_NAME: &str = "dd63330.dll";
 
-/// DD-HID DLL 的版本号，同时也是驱动服务名（`ddhid63340.sys`）的后缀。
-pub const DLL_VERSION: &str = dd_hid_version!();
-pub const DLL_NAME: &str = concat!("ddhid.", dd_hid_version!(), ".dll");
-
-pub struct DdHidBackend {
+pub struct DdSimpleBackend {
     ffi: DdFfi,
 }
 
-impl DdHidBackend {
+impl DdSimpleBackend {
     pub fn new(resources_dir: &Path) -> Option<Self> {
         let dll = resources_dir.join(DLL_NAME);
-        let ffi = DdFfi::load(&dll, DdSideButtonMode::Hid63340StatePatch)?;
-        info!("DD-HID 后端初始化成功");
+        let ffi = DdFfi::load(&dll, DdSideButtonMode::SimpleMouseInputDataFlags)?;
+        info!("DD Simple 后端初始化成功");
         Some(Self { ffi })
     }
 

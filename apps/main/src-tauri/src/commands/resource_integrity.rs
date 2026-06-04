@@ -32,6 +32,12 @@ pub const EXPECTED_RESOURCES: &[ExpectedResource] = &[
         sha256: "01E8DB6893CF79E9E7AA3AFBEE76BEA6C4220C4D1A2C63BC2E5B7C109FDB831E",
     },
     ExpectedResource {
+        rel: "dd63330.dll",
+        label: "dd63330.dll",
+        size: 3_860_008,
+        sha256: "72FBA9C7721AC394A0803D0C97835B0DA21C9D6DDA8076FC0584A566CD7B2A9D",
+    },
+    ExpectedResource {
         rel: "ddhid-driver/ddc.exe",
         label: "ddhid-driver/ddc.exe",
         size: 97_240,
@@ -107,6 +113,19 @@ mod tests {
         assert_eq!(
             inf.sha256,
             "17FE3814F57E98DD2AF97F56B63502E474EA5E41CDA1A510FFE435EE6AD7A104"
+        );
+    }
+
+    #[test]
+    fn resource_manifest_pins_ddsimple_original_bytes() {
+        let dll = EXPECTED_RESOURCES
+            .iter()
+            .find(|item| item.rel == "dd63330.dll")
+            .unwrap();
+        assert_eq!(dll.size, 3_860_008);
+        assert_eq!(
+            dll.sha256,
+            "72FBA9C7721AC394A0803D0C97835B0DA21C9D6DDA8076FC0584A566CD7B2A9D"
         );
     }
 }

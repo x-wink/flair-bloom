@@ -48,7 +48,7 @@ const DEFAULT_SOUND: SoundSettings = {
 const DEFAULT_PROFILE_NAME = 'defults';
 
 type BurstMode = 'hold' | 'toggle';
-type InputMode = 'sendinput' | 'interception' | 'dd_hid';
+type InputMode = 'sendinput' | 'interception' | 'ddsimple' | 'dd_hid';
 type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
 
 interface AppStatus {
@@ -82,9 +82,10 @@ interface UpdateDownloadFailed {
 const INPUT_MODE_LABELS: Record<InputMode, string> = {
   sendinput: '通用模式',
   interception: '游戏模式',
-  dd_hid: '究极HID',
+  ddsimple: 'DD驱动',
+  dd_hid: 'DDHID',
 };
-const INPUT_MODE_LIST: InputMode[] = ['sendinput', 'interception', 'dd_hid'];
+const INPUT_MODE_LIST: InputMode[] = ['sendinput', 'interception', 'ddsimple', 'dd_hid'];
 const DD_HID_BLOCKED_NOTICE = (
   <>
     经测试DDHID驱动不稳定，可能导致电脑蓝屏死机问题，建议以管理员模式运行APP使用游戏模式。
@@ -143,7 +144,7 @@ interface ForkResult {
 function newRule(mode: BurstMode = 'hold'): BurstRule {
   const isHold = mode === 'hold';
   const triggerVk = isHold ? 0x51 : 0x46; // Hold: Q, Toggle: F
-  const targetVk = isHold ? 0x51 : 0x51;  // Hold: Q, Toggle: Q（与 F 不同，避免 DD-HID 同键限制）
+  const targetVk = isHold ? 0x51 : 0x51; // Hold: Q, Toggle: Q（与 F 不同，避免 DD-HID 同键限制）
   return {
     id: crypto.randomUUID(),
     enabled: !isHold,
@@ -295,52 +296,55 @@ export default function PanelApp() {
     }
   }, [confirm]);
 
-  const applyAppStatus = useCallback((status: AppStatus) => {
-    setElevated(status.elevated);
-    setInterceptionInstalled(status.interception_installed);
-    setDdHidInstalled(status.dd_hid_installed);
-    setSysInfo({
-      platform: status.platform,
-      os_family: status.os_family,
-      os_version: status.os_version,
-      webview_version: status.webview_version,
-      arch: status.arch,
-      locale: status.locale,
-      install_path: status.install_path,
-      log_dir: status.log_dir,
-      app_data_dir: status.app_data_dir,
-      autostart_enabled: status.autostart_enabled,
-      resources_ok: status.resources_ok,
-      missing_resources: status.missing_resources,
-    });
-    if ((INPUT_MODE_LIST as string[]).includes(status.input_mode)) {
-      if (status.input_mode === 'dd_hid') {
-        setInputMode('sendinput');
-        void showDdHidBlockedNotice();
-        if (!ddHidFallbackInFlightRef.current) {
-          ddHidFallbackInFlightRef.current = true;
-          invoke('set_input_mode', { mode: 'sendinput' })
-            .then(() => invoke<AppStatus>('get_app_status'))
-            .then((nextStatus) => {
-              if (
-                nextStatus.input_mode !== 'dd_hid' &&
-                (INPUT_MODE_LIST as string[]).includes(nextStatus.input_mode)
-              ) {
-                setInputMode(nextStatus.input_mode as InputMode);
-              }
-            })
-            .catch((e) => {
-              toast.warning(`已屏蔽究极HID，但回退通用模式失败：${e}`);
-            })
-            .finally(() => {
-              ddHidFallbackInFlightRef.current = false;
-            });
+  const applyAppStatus = useCallback(
+    (status: AppStatus) => {
+      setElevated(status.elevated);
+      setInterceptionInstalled(status.interception_installed);
+      setDdHidInstalled(status.dd_hid_installed);
+      setSysInfo({
+        platform: status.platform,
+        os_family: status.os_family,
+        os_version: status.os_version,
+        webview_version: status.webview_version,
+        arch: status.arch,
+        locale: status.locale,
+        install_path: status.install_path,
+        log_dir: status.log_dir,
+        app_data_dir: status.app_data_dir,
+        autostart_enabled: status.autostart_enabled,
+        resources_ok: status.resources_ok,
+        missing_resources: status.missing_resources,
+      });
+      if ((INPUT_MODE_LIST as string[]).includes(status.input_mode)) {
+        if (status.input_mode === 'dd_hid') {
+          setInputMode('sendinput');
+          void showDdHidBlockedNotice();
+          if (!ddHidFallbackInFlightRef.current) {
+            ddHidFallbackInFlightRef.current = true;
+            invoke('set_input_mode', { mode: 'sendinput' })
+              .then(() => invoke<AppStatus>('get_app_status'))
+              .then((nextStatus) => {
+                if (
+                  nextStatus.input_mode !== 'dd_hid' &&
+                  (INPUT_MODE_LIST as string[]).includes(nextStatus.input_mode)
+                ) {
+                  setInputMode(nextStatus.input_mode as InputMode);
+                }
+              })
+              .catch((e) => {
+                toast.warning(`已屏蔽究极HID，但回退通用模式失败：${e}`);
+              })
+              .finally(() => {
+                ddHidFallbackInFlightRef.current = false;
+              });
+          }
+          return;
         }
-        return;
+        setInputMode(status.input_mode as InputMode);
       }
-      setInputMode(status.input_mode as InputMode);
-    }
-  }, [showDdHidBlockedNotice, toast]);
+    },
+    [showDdHidBlockedNotice, toast],
+  );
 
   useEffect(() => {
     return () => {
@@ -883,6 +887,25 @@ export default function PanelApp() {
       // Interception 驱动：未安装则先安装并退出（要求重启电脑）
       if (target === 'interception' && interceptionInstalled !== 'installed') {
         await handleInstallDriver();
+        return;
+      }
+
+      if ((target === 'interception' || target === 'ddsimple') && !elevated) {
+        setModePickerOpen(false);
+        const label = INPUT_MODE_LABELS[target];
+        const ok = await confirm({
+          title: `以管理员模式启用${label}`,
+          description: (
+            <>
+              {label}
+              需要管理员权限才能初始化驱动通道。应用将以管理员权限重启，并自动切换到{label}。
+            </>
+          ),
+          confirmText: '以管理员重启',
+          cancelText: '取消',
+        });
+        if (!ok) return;
+        await invoke('relaunch_as_admin', { mode: target });
         return;
       }
 
@@ -1474,7 +1497,7 @@ export default function PanelApp() {
               title="点击选择输入模式"
             >
               {INPUT_MODE_LABELS[inputMode]}
-              {elevated && inputMode === 'dd_hid' ? ' ★' : ''}
+              {elevated && (inputMode === 'ddsimple' || inputMode === 'dd_hid') ? ' ★' : ''}
             </Button>
           </div>
           <div className="footer-control">
@@ -1523,15 +1546,21 @@ export default function PanelApp() {
               ? '最稳定，但很多游戏不响应'
               : m === 'interception'
                 ? interceptionInstalled === 'installed'
-                  ? '兼容多数游戏'
+                  ? elevated
+                    ? '老牌驱动，管理员已就绪'
+                    : '需要管理员'
                   : interceptionInstalled === 'pending_reboot'
                     ? '驱动待重启生效'
                     : '点击安装驱动'
-                : ddHidInstalled === 'installed'
-                  ? '已屏蔽，建议卸载'
-                  : ddHidInstalled === 'pending_reboot'
-                    ? '驱动待重启清理'
-                    : '已屏蔽',
+                : m === 'ddsimple'
+                  ? elevated
+                    ? '内置DD驱动，无需重启'
+                    : '需要管理员'
+                  : ddHidInstalled === 'installed'
+                    ? '已屏蔽，建议卸载'
+                    : ddHidInstalled === 'pending_reboot'
+                      ? '驱动待重启清理'
+                      : '已屏蔽',
           active: inputMode === m,
           onClick: () => void selectInputMode(m),
         }))}
@@ -1579,6 +1608,7 @@ export default function PanelApp() {
           switchingMode={switchingMode}
           globalEnabled={globalEnabled}
           togglingGlobal={togglingGlobal}
+          elevated={elevated}
           closeBehavior={closeBehaviorPreference}
           interceptionInstalled={interceptionInstalled}
           ddHidInstalled={ddHidInstalled}

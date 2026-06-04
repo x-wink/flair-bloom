@@ -29,9 +29,9 @@ pub fn init_input_backend(app: &tauri::AppHandle) {
             .unwrap_or_default();
         init_backend(mode);
 
-        if let Some(m) = cli_mode {
+        if cli_mode.is_some() {
             if let Ok(store) = app.store(crate::STORE_PATH) {
-                store.set("input_mode", serde_json::json!(m));
+                store.set("input_mode", serde_json::json!(mode.as_str()));
                 let _ = store.save();
             }
         }

@@ -1,12 +1,10 @@
-//! ddxoft DD SDK 的 FFI 装载层，由 [`crate::ddhid`] 共用。
+//! ddxoft DD SDK 的 FFI 装载层，由 [`crate::ddhid`] / [`crate::ddsimple`] 共用。
 //!
 //! 设计要点：
 //! - DLL 在运行时通过 `LoadLibraryW` 加载，避免编译期链接到不存在的导入库；
 //! - DD 协议要求首次调用 `DD_btn(0)`，返回 `1` 才表示内核驱动已就绪；
-//! - X1/X2 侧键：当前版本 DLL 的 `DD_btn` switch 只处理 1–32，对 >32 的参数走
-//!   out-of-range 路径——该路径读取内部状态字节后直接发送 HID report，不改状态位。
-//!   因此侧键注入需先手写状态字节（X1=0x08, X2=0x10），再以 `DD_btn(64)` 触发发送。
-//!   状态字节 RVA 通过静态拆解 SHA256=01E8DB… 版本确认为 [`BTN_STATE_RVA`]。
+//! - DD-HID 63340 的 X1/X2 侧键需要使用专用状态字节补丁；
+//! - DDSimple 的驱动路径使用 `MOUSE_INPUT_DATA.ButtonFlags`，侧键可直传 64/128/256/512。
 
 #![cfg(windows)]
 
@@ -26,12 +24,36 @@ type DdKeyFn = unsafe extern "C" fn(c_int, c_int) -> c_int;
 type DdTodcFn = unsafe extern "C" fn(c_int) -> c_int;
 type DdWhlFn = unsafe extern "C" fn(c_int) -> c_int;
 
-/// 按钮状态字节在当前版本（`ddhid.[`crate::ddhid::DLL_VERSION`].dll`）镜像中的 RVA（.data BSS 段）。
+/// 按钮状态字节在当前 DD-HID 版本（`ddhid.[`crate::ddhid::DLL_VERSION`].dll`）镜像中的 RVA（.data BSS 段）。
 ///
 /// 通过静态拆解确认：所有 L/R/M case handler 的 OR/XOR 指令及报告写入前
 /// 的 MOVZX 读取均以 RIP-relative 方式指向同一地址。
 /// 对应 DLL SHA256: 01E8DB6893CF79E9E7AA3AFBEE76BEA6C4220C4D1A2C63BC2E5B7C109FDB831E
 const BTN_STATE_RVA: usize = 0x204240;
+
+#[derive(Debug, Clone, Copy)]
+pub enum DdSideButtonMode {
+    Hid63340StatePatch,
+    SimpleMouseInputDataFlags,
+}
+
+fn simple_side_button_flag(button: MouseButton, is_up: bool) -> c_int {
+    match (button, is_up) {
+        (MouseButton::X1, false) => 64,
+        (MouseButton::X1, true) => 128,
+        (MouseButton::X2, false) => 256,
+        (MouseButton::X2, true) => 512,
+        _ => unreachable!(),
+    }
+}
+
+fn dd_wheel_code(up: bool) -> c_int {
+    if up {
+        1
+    } else {
+        2
+    }
+}
 
 pub struct DdFfi {
     handle: HMODULE,
@@ -43,6 +65,7 @@ pub struct DdFfi {
     mouse_diag_logged: AtomicBool,
     side_btn_diag_logged: AtomicBool,
     wheel_diag_logged: AtomicBool,
+    side_button_mode: DdSideButtonMode,
 }
 
 // SAFETY: HMODULE 在 64 位 Windows 上是地址不变的内核句柄
@@ -51,7 +74,7 @@ unsafe impl Send for DdFfi {}
 unsafe impl Sync for DdFfi {}
 
 impl DdFfi {
-    pub fn load(dll_path: &Path) -> Option<Self> {
+    pub fn load(dll_path: &Path, side_button_mode: DdSideButtonMode) -> Option<Self> {
         if !dll_path.exists() {
             warn!("DD DLL 不存在：{}", dll_path.display());
             return None;
@@ -114,6 +137,7 @@ impl DdFfi {
             mouse_diag_logged: AtomicBool::new(false),
             side_btn_diag_logged: AtomicBool::new(false),
             wheel_diag_logged: AtomicBool::new(false),
+            side_button_mode,
         })
     }
 
@@ -144,8 +168,9 @@ impl DdFfi {
         let Some(dd_whl) = self.dd_whl else {
             return false;
         };
-        // DD_whl：正值向上，负值向下；按 HID 每格 1 单位
-        let delta: c_int = if up { 1 } else { -1 };
+        // DD SDK: 1 = wheel up, 2 = wheel down. Passing -1 sets unrelated
+        // MOUSE_INPUT_DATA button bits in DDSimple and can trigger XBUTTON1.
+        let delta = dd_wheel_code(up);
         // SAFETY: dd_whl 已解析
         let ret = unsafe { dd_whl(delta) };
         if !self.wheel_diag_logged.swap(true, Ordering::SeqCst) {
@@ -157,28 +182,49 @@ impl DdFfi {
     pub fn send_mouse(&self, button: MouseButton, is_up: bool) -> bool {
         match button {
             MouseButton::X1 | MouseButton::X2 => {
-                // 当前版本 DLL 的 DD_btn switch 不处理侧键；直接补写内部状态位，
-                // 再以 DD_btn(64) 触发 out-of-range 路径发送 HID report。
-                let bit: u8 = if matches!(button, MouseButton::X1) { 0x08 } else { 0x10 };
-                // SAFETY: handle 是已加载的当前版本 DLL 基址；RVA 经静态拆解验证。
-                // .data BSS 段可读写，写入单字节无竞态（引擎单线程顺序发送）。
-                unsafe {
-                    let state = (self.handle as usize + BTN_STATE_RVA) as *mut u8;
-                    if is_up {
-                        *state &= !bit;
-                    } else {
-                        *state |= bit;
+                match self.side_button_mode {
+                    DdSideButtonMode::SimpleMouseInputDataFlags => {
+                        let flag = simple_side_button_flag(button, is_up);
+                        // SAFETY: dd_btn 已解析；DDSimple 内嵌驱动按 MOUSE_INPUT_DATA.ButtonFlags
+                        // 解释该字段，静态确认支持 X1/X2 down/up flag。
+                        let ret = unsafe { (self.dd_btn)(flag) };
+                        if !self.side_btn_diag_logged.swap(true, Ordering::SeqCst) {
+                            info!(
+                                "DD Simple 首次侧键注入：button={:?} is_up={} flag={} ret={}",
+                                button, is_up, flag, ret
+                            );
+                        }
+                        true
                     }
-                    // >32 参数走 out-of-range 路径：读当前状态字节 → 写 HID report → 发送
-                    (self.dd_btn)(64);
+                    DdSideButtonMode::Hid63340StatePatch => {
+                        // ddhid.63340.dll 的 DD_btn switch 不处理侧键；直接补写内部状态位，
+                        // 再以 DD_btn(64) 触发 out-of-range 路径发送 HID report。
+                        let bit: u8 = if matches!(button, MouseButton::X1) {
+                            0x08
+                        } else {
+                            0x10
+                        };
+                        // SAFETY: handle 是已加载的 ddhid.63340.dll 基址；RVA 经静态拆解验证。
+                        // .data BSS 段可读写，写入单字节无竞态（引擎单线程顺序发送）。
+                        unsafe {
+                            let state = (self.handle as usize + BTN_STATE_RVA) as *mut u8;
+                            if is_up {
+                                *state &= !bit;
+                            } else {
+                                *state |= bit;
+                            }
+                            // >32 参数走 out-of-range 路径：读当前状态字节 → 写 HID report → 发送
+                            (self.dd_btn)(64);
+                        }
+                        if !self.side_btn_diag_logged.swap(true, Ordering::SeqCst) {
+                            info!(
+                                "DD 首次侧键注入（状态位补写）：button={:?} is_up={} bit=0x{:02x}",
+                                button, is_up, bit
+                            );
+                        }
+                        true
+                    }
                 }
-                if !self.side_btn_diag_logged.swap(true, Ordering::SeqCst) {
-                    info!(
-                        "DD 首次侧键注入（状态位补写）：button={:?} is_up={} bit=0x{:02x}",
-                        button, is_up, bit
-                    );
-                }
-                true
             }
             _ => {
                 let flag: c_int = match (button, is_up) {
@@ -221,4 +267,23 @@ unsafe fn resolve<T: Copy>(handle: HMODULE, name_with_nul: &[u8]) -> Option<T> {
     // SAFETY: handle 存活、字符串 NUL 结尾
     let p = GetProcAddress(handle, name_with_nul.as_ptr());
     p.map(|f| std::mem::transmute_copy::<_, T>(&f))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn simple_side_button_flags_follow_mouse_input_data_values() {
+        assert_eq!(simple_side_button_flag(MouseButton::X1, false), 64);
+        assert_eq!(simple_side_button_flag(MouseButton::X1, true), 128);
+        assert_eq!(simple_side_button_flag(MouseButton::X2, false), 256);
+        assert_eq!(simple_side_button_flag(MouseButton::X2, true), 512);
+    }
+
+    #[test]
+    fn dd_wheel_codes_follow_sdk_values() {
+        assert_eq!(dd_wheel_code(true), 1);
+        assert_eq!(dd_wheel_code(false), 2);
+    }
 }

@@ -90,7 +90,8 @@ const ACTION_CONFIRM: Record<RepairCommand, string> = {
 const INPUT_MODE_LABEL: Record<string, string> = {
   sendinput: '通用模式',
   interception: '游戏模式',
-  dd_hid: '究极HID',
+  ddsimple: 'DD驱动',
+  dd_hid: 'DDHID',
 };
 
 function driverStatusLabel(status: DriverStatus): string {

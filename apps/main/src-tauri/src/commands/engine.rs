@@ -126,7 +126,10 @@ pub fn set_input_mode(
             InputMode::from_str(&mode).ok_or_else(|| format!("未知输入模式: {mode}"))?;
 
         if input_mode.requires_admin() && !win_driver::elevation::is_process_elevated() {
-            return Err("究极HID 模式需要管理员权限，请先以管理员身份重启应用".to_string());
+            return Err(format!(
+                "{} 需要管理员权限，请先以管理员身份重启应用",
+                input_mode_label(input_mode)
+            ));
         }
 
         if input_mode.requires_distinct_target_for_toggle() {
@@ -174,5 +177,15 @@ pub fn set_input_mode(
     {
         let _ = (app, state, mode);
         Err("仅 Windows 平台支持切换输入模式".to_string())
+    }
+}
+
+#[cfg(windows)]
+fn input_mode_label(mode: win_input::InputMode) -> &'static str {
+    match mode {
+        win_input::InputMode::SendInput => "通用模式",
+        win_input::InputMode::Interception => "游戏模式",
+        win_input::InputMode::DdSimple => "DD驱动",
+        win_input::InputMode::DdHid => "DDHID",
     }
 }

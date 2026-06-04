@@ -10,7 +10,7 @@ import ProfileCardList, { type SettingsProfileEntry } from './ProfileCardList';
 import './SettingsDialog.css';
 
 export type SettingsTab = 'general' | 'hotkeys' | 'sound' | 'profiles';
-type SettingsInputMode = 'sendinput' | 'interception' | 'dd_hid';
+type SettingsInputMode = 'sendinput' | 'interception' | 'ddsimple' | 'dd_hid';
 type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
 
 export interface SoundSettings {
@@ -33,6 +33,7 @@ interface Props {
   switchingMode: boolean;
   globalEnabled: boolean;
   togglingGlobal: boolean;
+  elevated: boolean;
   closeBehavior: CloseBehavior | null;
   interceptionInstalled: DriverStatus;
   ddHidInstalled: DriverStatus;
@@ -81,13 +82,15 @@ const DEFAULT_PROFILE_NAME = 'defults';
 const INPUT_MODE_LABELS: Record<SettingsInputMode, string> = {
   sendinput: '通用模式',
   interception: '游戏模式',
-  dd_hid: '究极HID',
+  ddsimple: 'DD驱动',
+  dd_hid: 'DDHID',
 };
 
 const INPUT_MODE_HINTS: Record<SettingsInputMode, string> = {
   sendinput: 'SendInput',
   interception: 'Interception',
-  dd_hid: 'DD-HID',
+  ddsimple: 'DD驱动',
+  dd_hid: 'DDHID',
 };
 
 const CLOSE_BEHAVIOR_OPTIONS: {
@@ -117,9 +120,13 @@ function driverStatusLabel(status: DriverStatus): string {
 
 function modeDetail(mode: SettingsInputMode, props: Props): string {
   if (mode === 'interception') {
-    return props.interceptionInstalled === 'installed'
-      ? '驱动已就绪'
-      : driverStatusLabel(props.interceptionInstalled);
+    if (props.interceptionInstalled !== 'installed') {
+      return driverStatusLabel(props.interceptionInstalled);
+    }
+    return props.elevated ? '管理员已就绪' : '需要管理员';
+  }
+  if (mode === 'ddsimple') {
+    return props.elevated ? '管理员已就绪' : '需要管理员';
   }
   if (mode === 'dd_hid') {
     if (props.ddHidInstalled === 'installed') return '已屏蔽，建议卸载';
@@ -218,20 +225,22 @@ export default function SettingsDialog(props: Props) {
 
             <SettingsSection title="输入模式">
               <CardList>
-                {(['sendinput', 'interception', 'dd_hid'] as SettingsInputMode[]).map((mode) => (
-                  <CardListButton
-                    key={mode}
-                    active={props.inputMode === mode}
-                    className="settings-mode"
-                    disabled={props.switchingMode}
-                    onClick={() => props.onSelectInputMode(mode)}
-                  >
-                    <span className="settings-mode-name">{INPUT_MODE_LABELS[mode]}</span>
-                    <span className="settings-mode-meta">
-                      {INPUT_MODE_HINTS[mode]} · {modeDetail(mode, props)}
-                    </span>
-                  </CardListButton>
-                ))}
+                {(['sendinput', 'interception', 'ddsimple', 'dd_hid'] as SettingsInputMode[]).map(
+                  (mode) => (
+                    <CardListButton
+                      key={mode}
+                      active={props.inputMode === mode}
+                      className="settings-mode"
+                      disabled={props.switchingMode}
+                      onClick={() => props.onSelectInputMode(mode)}
+                    >
+                      <span className="settings-mode-name">{INPUT_MODE_LABELS[mode]}</span>
+                      <span className="settings-mode-meta">
+                        {INPUT_MODE_HINTS[mode]} · {modeDetail(mode, props)}
+                      </span>
+                    </CardListButton>
+                  ),
+                )}
               </CardList>
               <p className="settings-note">驱动安装与卸载操作请前往「诊断修复」。</p>
             </SettingsSection>
