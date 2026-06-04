@@ -1,4 +1,4 @@
-//! 输入后端初始化：从 settings.json 读取 input_mode，或优先使用 CLI 参数。
+//! 输入后端初始化：启动时先落到 SendInput，避免非管理员进程直接加载驱动后端。
 
 #[cfg(windows)]
 use tauri::Manager;
@@ -14,22 +14,12 @@ pub fn init_input_backend(app: &tauri::AppHandle) {
             set_resources_dir(dir.join("resources"));
         }
 
-        let cli_mode = parse_switch_mode_arg();
-
-        let stored_mode: Option<String> = app.store(crate::STORE_PATH).ok().and_then(|store| {
-            store
-                .get("input_mode")
-                .and_then(|v| v.as_str().map(|s| s.to_string()))
-        });
-
-        let mode_str = cli_mode.clone().or(stored_mode);
-        let mode = mode_str
+        let cli_mode = parse_switch_mode_arg()
             .as_deref()
-            .and_then(InputMode::from_str)
-            .unwrap_or_default();
-        init_backend(mode);
+            .and_then(InputMode::from_str);
+        init_backend(InputMode::SendInput);
 
-        if cli_mode.is_some() {
+        if let Some(mode) = cli_mode {
             if let Ok(store) = app.store(crate::STORE_PATH) {
                 store.set("input_mode", serde_json::json!(mode.as_str()));
                 let _ = store.save();

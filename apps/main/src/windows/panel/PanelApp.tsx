@@ -56,6 +56,7 @@ interface AppStatus {
   interception_installed: DriverStatus;
   dd_hid_installed: DriverStatus;
   input_mode: string;
+  configured_input_mode: string;
   platform: string;
   os_family: string;
   os_version: string;
@@ -86,6 +87,14 @@ const INPUT_MODE_LABELS: Record<InputMode, string> = {
   dd_hid: 'DDHID',
 };
 const INPUT_MODE_LIST: InputMode[] = ['sendinput', 'interception', 'ddsimple', 'dd_hid'];
+function isInputMode(value: string): value is InputMode {
+  return (INPUT_MODE_LIST as string[]).includes(value);
+}
+
+function inputModeRequiresAdmin(mode: InputMode): boolean {
+  return mode !== 'sendinput';
+}
+
 const DD_HID_BLOCKED_NOTICE = (
   <>
     经测试DDHID驱动不稳定，可能导致电脑蓝屏死机问题，建议以管理员模式运行APP使用游戏模式。
@@ -276,6 +285,7 @@ export default function PanelApp() {
   const updateProgressDoneTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const updateDownloadFailedRef = useRef(false);
   const initialLoadDone = useRef(false);
+  const startupInputModeHandledRef = useRef(false);
   const ddHidFallbackInFlightRef = useRef(false);
   const ddHidNoticeOpenRef = useRef(false);
   const profileNameRef = useRef(profileName);
@@ -315,7 +325,7 @@ export default function PanelApp() {
         resources_ok: status.resources_ok,
         missing_resources: status.missing_resources,
       });
-      if ((INPUT_MODE_LIST as string[]).includes(status.input_mode)) {
+      if (isInputMode(status.input_mode)) {
         if (status.input_mode === 'dd_hid') {
           setInputMode('sendinput');
           void showDdHidBlockedNotice();
@@ -326,9 +336,9 @@ export default function PanelApp() {
               .then((nextStatus) => {
                 if (
                   nextStatus.input_mode !== 'dd_hid' &&
-                  (INPUT_MODE_LIST as string[]).includes(nextStatus.input_mode)
+                  isInputMode(nextStatus.input_mode)
                 ) {
-                  setInputMode(nextStatus.input_mode as InputMode);
+                  setInputMode(nextStatus.input_mode);
                 }
               })
               .catch((e) => {
@@ -340,11 +350,68 @@ export default function PanelApp() {
           }
           return;
         }
-        setInputMode(status.input_mode as InputMode);
+        setInputMode(status.input_mode);
       }
     },
     [showDdHidBlockedNotice, toast],
   );
+
+  async function reconcileStartupInputMode(status: AppStatus) {
+    if (startupInputModeHandledRef.current) return;
+    if (!isInputMode(status.configured_input_mode)) return;
+
+    const configured = status.configured_input_mode;
+    if (configured === 'sendinput' || configured === status.input_mode) return;
+
+    startupInputModeHandledRef.current = true;
+
+    if (configured === 'dd_hid') {
+      await showDdHidBlockedNotice();
+      try {
+        await invoke('set_input_mode', { mode: 'sendinput' });
+        const nextStatus = await invoke<AppStatus>('get_app_status');
+        applyAppStatus(nextStatus);
+      } catch (e) {
+        toast.warning(`已屏蔽DDHID，但回退通用模式失败：${e}`);
+      }
+      return;
+    }
+
+    if (inputModeRequiresAdmin(configured) && !status.elevated) {
+      const label = INPUT_MODE_LABELS[configured];
+      const ok = await confirm({
+        title: `以管理员模式恢复${label}`,
+        description: (
+          <>
+            已保存的输入模式是{label}，需要管理员权限才能初始化驱动通道。当前将先使用通用模式；
+            授权后应用会以管理员权限重启，并自动切换到{label}。
+          </>
+        ),
+        confirmText: '以管理员重启',
+        cancelText: '保持通用模式',
+      });
+      if (!ok) return;
+      try {
+        await invoke('relaunch_as_admin', { mode: configured });
+      } catch (e) {
+        toast.error(`启动管理员实例失败：${e}`);
+      }
+      return;
+    }
+
+    try {
+      await invoke('set_input_mode', { mode: configured });
+      const nextStatus = await invoke<AppStatus>('get_app_status');
+      applyAppStatus(nextStatus);
+      if (nextStatus.input_mode === configured) {
+        toast.success(`已恢复为${INPUT_MODE_LABELS[configured]}`);
+      } else if (isInputMode(nextStatus.input_mode)) {
+        toast.warning(`未能恢复配置模式，已停留在${INPUT_MODE_LABELS[nextStatus.input_mode]}`);
+      }
+    } catch (e) {
+      toast.error(`恢复配置模式失败：${e}`);
+    }
+  }
 
   useEffect(() => {
     return () => {
@@ -424,7 +491,10 @@ export default function PanelApp() {
       });
 
     invoke<AppStatus>('get_app_status')
-      .then(applyAppStatus)
+      .then((status) => {
+        applyAppStatus(status);
+        void reconcileStartupInputMode(status);
+      })
       .catch(() => {});
 
     // 启动期：以「activeProfilePath → load_profile」为唯一来源；
@@ -916,11 +986,11 @@ export default function PanelApp() {
       const actual = status.input_mode;
       if (actual === target) {
         toast.success(`已切换为${INPUT_MODE_LABELS[target]}`);
-      } else if ((INPUT_MODE_LIST as string[]).includes(actual)) {
+      } else if (isInputMode(actual)) {
         toast.warning(
           target === 'interception'
             ? '驱动未就绪，请重启电脑后再试'
-            : `切换未生效，已停留在${INPUT_MODE_LABELS[actual as InputMode]}`,
+            : `切换未生效，已停留在${INPUT_MODE_LABELS[actual]}`,
         );
       }
     } catch (e) {

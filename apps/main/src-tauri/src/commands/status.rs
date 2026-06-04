@@ -29,6 +29,7 @@ pub struct AppStatus {
     pub interception_installed: DriverStatus,
     pub dd_hid_installed: DriverStatus,
     pub input_mode: String,
+    pub configured_input_mode: String,
     pub platform: &'static str,
     pub os_family: &'static str,
     pub os_version: String,
@@ -51,6 +52,7 @@ impl AppStatus {
             interception_installed: collect_interception_installed(),
             dd_hid_installed: collect_dd_hid_installed(),
             input_mode: collect_input_mode(),
+            configured_input_mode: collect_configured_input_mode(app),
             platform: std::env::consts::OS,
             os_family: std::env::consts::FAMILY,
             os_version: win_sysinfo::os_version(),
@@ -145,6 +147,26 @@ fn collect_input_mode() -> String {
     "sendinput".to_string()
 }
 
+#[cfg(windows)]
+fn collect_configured_input_mode(app: &AppHandle) -> String {
+    use tauri_plugin_store::StoreExt;
+
+    app.store(crate::STORE_PATH)
+        .ok()
+        .and_then(|store| {
+            store
+                .get("input_mode")
+                .and_then(|v| v.as_str().and_then(win_input::InputMode::from_str))
+        })
+        .map(|mode| mode.as_str().to_string())
+        .unwrap_or_else(|| "sendinput".to_string())
+}
+
+#[cfg(not(windows))]
+fn collect_configured_input_mode(_app: &AppHandle) -> String {
+    "sendinput".to_string()
+}
+
 fn collect_autostart_enabled(app: &AppHandle) -> bool {
     use tauri_plugin_autostart::ManagerExt;
     app.autolaunch().is_enabled().unwrap_or(false)
@@ -194,6 +216,7 @@ mod tests {
             interception_installed: DriverStatus::Installed,
             dd_hid_installed: DriverStatus::PendingReboot,
             input_mode: "dd_hid".to_string(),
+            configured_input_mode: "dd_hid".to_string(),
             platform: "windows",
             os_family: "windows",
             os_version: "Windows 11 23H2 (Build 22631.4317)".to_string(),
@@ -219,6 +242,7 @@ mod tests {
             "interception_installed",
             "dd_hid_installed",
             "input_mode",
+            "configured_input_mode",
             "platform",
             "os_family",
             "os_version",
@@ -235,6 +259,7 @@ mod tests {
             assert!(obj.contains_key(key), "缺少键 {key}");
         }
         assert_eq!(obj["input_mode"], "dd_hid");
+        assert_eq!(obj["configured_input_mode"], "dd_hid");
         assert_eq!(obj["arch"], "x64");
         assert_eq!(obj["locale"], "zh-CN");
         // 三态序列化为 snake_case 字符串，前端按枚举值匹配
