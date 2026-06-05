@@ -140,6 +140,8 @@ packages/win-driver/src/
 
 **更新日志**：`CHANGELOG.md`（项目根目录）是唯一内容源，格式为 `## [版本号] - 日期` + 中文分节（新功能 / 问题修复 / 行为变更 / 升级方式 / 已知问题）。CI 发版时由 `scripts/extract-changelog.ts` 自动提取当前版本节作为 GitHub Release 正文，同时作为 `update.body` 通过 `update-ready` 事件在应用内「更新公告」弹窗展示。
 
+**填写原则**：`[Unreleased]` 节记录的是相较上一个发布版本的**最终净变化**，而非每次提交的独立记录。同一功能经多次迭代后只写最终结果，中间反复修改不单独列出；已被后续提交撤销的改动不出现在 changelog 中。
+
 **应用名称入口**（改名时同步修改以下位置）：
 - 前端：`apps/main/src/constants.ts` — `APP_NAME`（中文）、`APP_NAME_EN`（英文），所有前端代码从此引入
 - Rust：`apps/main/src-tauri/src/lib.rs` — `APP_NAME` / `APP_NAME_CN` 常量，Rust 代码引用此处

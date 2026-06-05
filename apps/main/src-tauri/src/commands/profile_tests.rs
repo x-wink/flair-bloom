@@ -142,6 +142,7 @@ fn profile_summary_counts_rules_and_hotkeys() {
     assert_eq!(summary.rules_enabled, 1);
     assert_eq!(summary.hold_count, 1);
     assert_eq!(summary.toggle_count, 1);
+    assert_eq!(summary.group_count, 0);
     assert_eq!(summary.global_toggle, Some(KeyId::Keyboard(0x70)));
     assert_eq!(summary.global_stop, Some(KeyId::Keyboard(0x71)));
     assert_eq!(

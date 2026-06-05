@@ -10,7 +10,8 @@ export interface ConfirmOptions {
   description?: ReactNode;
   body?: ReactNode;
   confirmText?: string;
-  cancelText?: string;
+  /** 传 null 则只显示确认按钮（纯提示型弹窗） */
+  cancelText?: string | null;
   tone?: ConfirmTone;
 }
 
@@ -51,9 +52,11 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
             {opts.description && <p className="modal-desc">{opts.description}</p>}
             {opts.body}
             <div className="modal-actions">
-              <Button variant="outline" tone="neutral" onClick={() => close(false)}>
-                {opts.cancelText ?? '取消'}
-              </Button>
+              {opts.cancelText !== null && (
+                <Button variant="outline" tone="neutral" onClick={() => close(false)}>
+                  {opts.cancelText ?? '取消'}
+                </Button>
+              )}
               <Button
                 variant="solid"
                 tone={opts.tone === 'danger' ? 'danger' : 'primary'}

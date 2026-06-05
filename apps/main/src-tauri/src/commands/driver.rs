@@ -1,4 +1,4 @@
-//! 驱动管理：Interception / DD-HID 安装卸载 + 提权重启。
+﻿//! 驱动管理：Interception / DD-HID 安装卸载 + 提权重启。
 //!
 //! 业务逻辑委托给 `win-driver` crate，本层仅负责 Tauri 桥接与状态广播。
 
@@ -180,7 +180,7 @@ pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<UninstallOutcome,
         let sys_still_present = win_driver::dd_hid::dd_hid_sys_installed();
         match win_driver::judge::judge_uninstall_result(sys_still_present, exe_result.clone()) {
             Ok(()) => Ok(UninstallOutcome {
-                message: "究极HID 驱动已卸载，建议重启电脑后再尝试重新安装。".to_string(),
+                message: "DDHID 驱动已卸载，建议重启电脑后再尝试重新安装。".to_string(),
                 pending_reboot: false,
             }),
             Err(e) => {

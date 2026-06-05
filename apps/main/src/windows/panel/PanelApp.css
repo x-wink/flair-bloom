@@ -87,7 +87,7 @@ body {
 }
 
 .panel.off {
-  background: linear-gradient(160deg, #e8eff7 0%, #cdd9e6 60%, #b8c7d8 100%);
+  background: linear-gradient(160deg, #f0edf8 0%, #e2ddf0 60%, #cfc9e6 100%);
 }
 
 .panel.on {
@@ -115,7 +115,7 @@ body {
 }
 
 .panel.off .panel-header {
-  color: #2a3a4a;
+  color: #2e2650;
 }
 
 .panel.on .panel-header {
@@ -312,7 +312,7 @@ body {
 }
 
 .rule-row.active {
-  animation: rule-pulse 2s ease-in-out infinite;
+  animation: rule-pulse 0.8s ease-in-out infinite;
 }
 
 .rule-row.active:hover {
@@ -340,6 +340,7 @@ body {
 }
 
 @keyframes rule-pulse {
+
   0%,
   100% {
     background: var(--fb-surface);
@@ -348,6 +349,7 @@ body {
       inset 3px 0 0 var(--fb-color-success),
       0 1px 2px rgba(0, 0, 0, 0.03);
   }
+
   50% {
     background: #f3fbec;
     border-color: #8fd96a;
@@ -358,6 +360,7 @@ body {
 }
 
 @keyframes rule-pulse-hover {
+
   0%,
   100% {
     background: var(--fb-surface);
@@ -366,6 +369,7 @@ body {
       inset 3px 0 0 var(--fb-color-success),
       0 2px 8px rgba(108, 77, 230, 0.1);
   }
+
   50% {
     background: #f3fbec;
     border-color: #8fd96a;
@@ -376,6 +380,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
+
   .rule-row.active,
   .rule-row.active:hover {
     animation: none;
@@ -537,8 +542,9 @@ select {
   justify-content: center;
   gap: var(--fb-space-3);
   width: 100%;
-  margin: var(--fb-space-2) 0 calc(-1 * var(--fb-space-7));
-  padding: var(--fb-space-4) 0 var(--fb-space-7);
+  margin: var(--fb-space-1) 0 calc(-1 * var(--fb-space-7));
+  /* bottom padding = card-bottom-offset(14px) - same visual gap as top(6px)，让文字视觉居中 */
+  padding: var(--fb-space-3) 0 calc(var(--fb-space-7) - var(--fb-space-3));
   border: none;
   background: transparent;
   color: var(--fb-text-weak);
@@ -566,7 +572,7 @@ select {
   display: flex;
   align-items: end;
   gap: var(--fb-space-4);
-  padding-top: var(--fb-space-4);
+  padding-top: var(--fb-space-3);
   border-top: 1px dashed #ececec;
 }
 
@@ -589,53 +595,112 @@ select {
 
 /* ── 规则分组容器 ── */
 .rule-group-container {
-  border: 1.5px solid var(--fb-border-default);
-  border-radius: var(--fb-radius-md);
+  border: 1.5px solid rgba(108, 77, 230, 0.22);
+  border-radius: var(--fb-radius-lg);
   overflow: hidden;
   margin-bottom: var(--fb-space-3);
+  background: rgba(108, 77, 230, 0.03);
   transition: border-color 0.15s;
 }
 
 .rule-group-container.drag-active {
   border-color: var(--fb-color-primary);
+  background: rgba(108, 77, 230, 0.06);
 }
 
 .rule-group-header {
   display: flex;
   align-items: center;
-  gap: var(--fb-space-3);
-  padding: var(--fb-space-3) var(--fb-space-4);
-  background: var(--fb-bg-subtle, #f7f7f9);
-  border-bottom: 1px solid var(--fb-border-default);
+  gap: var(--fb-space-2);
+  padding: var(--fb-space-2) var(--fb-space-3);
+  background: rgba(108, 77, 230, 0.06);
+  border-bottom: 1px solid rgba(108, 77, 230, 0.12);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s;
+}
+
+.rule-group-header:hover {
+  background: rgba(108, 77, 230, 0.1);
+}
+
+.rule-group-header.collapsed {
+  border-bottom-color: transparent;
+}
+
+/* 折叠指示器（chevron + 标题，纯展示） */
+.group-collapse-indicator {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+  flex: 0 0 auto;
+}
+
+.group-chevron {
+  flex-shrink: 0;
+  color: var(--fb-color-primary);
+  transition: transform 0.2s;
+  transform: rotate(180deg);
+}
+
+.group-collapse-indicator.collapsed .group-chevron {
+  transform: rotate(0deg);
 }
 
 .group-name-text {
   font-size: var(--fb-fs-sm);
   font-weight: 600;
   color: var(--fb-text-default);
-  cursor: pointer;
-  flex: 1;
-  border-radius: 3px;
-  padding: 1px 3px;
-}
-
-.group-name-text:hover {
-  background: var(--fb-bg-hover, #ebebeb);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .group-name-edit {
-  flex: 1;
   font-size: var(--fb-fs-sm);
   font-weight: 600;
   border: 1px solid var(--fb-color-primary);
   border-radius: 3px;
-  padding: 1px 4px;
+  padding: 1px 6px;
   outline: none;
   background: #fff;
   color: var(--fb-text-default);
+  width: 120px;
+  max-width: 100%;
+}
+
+/* 编辑图标按钮 */
+.group-edit-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: 4px;
+  color: var(--fb-text-weak);
+  opacity: 0;
+  transition:
+    opacity 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+
+.rule-group-header:hover .group-edit-btn {
+  opacity: 1;
+}
+
+.group-edit-btn:hover {
+  background: rgba(108, 77, 230, 0.1);
+  color: var(--fb-color-primary);
 }
 
 .disband-btn {
+  flex-shrink: 0;
+  margin-left: auto;
   font-size: var(--fb-fs-xs);
   color: var(--fb-text-weak);
   background: none;
@@ -643,11 +708,14 @@ select {
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 3px;
+  transition:
+    background 0.15s,
+    color 0.15s;
 }
 
 .disband-btn:hover {
-  background: var(--fb-bg-hover, #ebebeb);
-  color: var(--fb-text-default);
+  background: rgba(239, 68, 68, 0.1);
+  color: #dc2626;
 }
 
 .group-body {
@@ -745,4 +813,40 @@ select {
 
 .rules-bottom-actions .add-btn {
   flex: 1;
+}
+
+/* ── 自定义滚动条（全局灰调） ── */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 99px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.38);
+}
+
+.panel.on * {
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+}
+
+.panel.on ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+}
+
+.panel.on ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.5);
 }

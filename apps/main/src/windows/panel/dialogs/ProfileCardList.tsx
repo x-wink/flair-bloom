@@ -16,6 +16,7 @@ export interface ProfileSummary {
   rules_enabled: number;
   hold_count: number;
   toggle_count: number;
+  group_count: number;
   global_toggle: KeyId | null;
   global_stop: KeyId | null;
   panel_toggle: KeyId | null;
@@ -130,6 +131,12 @@ export default function ProfileCardList(props: Props) {
                   <strong>{profile.summary.toggle_count}</strong>
                   切换
                 </span>
+                {profile.summary.group_count > 0 && (
+                  <span>
+                    <strong>{profile.summary.group_count}</strong>
+                    互斥组
+                  </span>
+                )}
                 <span>
                   <strong>{profile.summary.rules_enabled}</strong>/{profile.summary.rules_total}{' '}
                   启用

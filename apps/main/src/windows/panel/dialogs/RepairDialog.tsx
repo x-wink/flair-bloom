@@ -284,7 +284,7 @@ export default function RepairDialog({
               </div>
             </li>
             <li>
-              <span className="repair-status-key">究极HID 驱动</span>
+              <span className="repair-status-key">DDHID 驱动</span>
               <div className="repair-status-actions">
                 <DriverFlag status={ddHidInstalled} />
                 {ddHidInstalled === 'not_installed' && (

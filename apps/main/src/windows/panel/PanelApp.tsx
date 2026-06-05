@@ -11,7 +11,7 @@ import Button from './components/Button';
 import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
 import { useConfirm } from './components/ConfirmDialog';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
-import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon } from './components/icons';
+import { ChevronIcon, CloseIcon, EditIcon, MenuIcon, MinimizeIcon } from './components/icons';
 import Kbd from './components/Kbd';
 import KeyCapture, { BROWSER_VK, keyboardKey, keyLabel, type KeyId } from './components/KeyCapture';
 import Overlay from './components/Overlay';
@@ -135,6 +135,7 @@ interface ProfileSummary {
   rules_enabled: number;
   hold_count: number;
   toggle_count: number;
+  group_count: number;
   global_toggle: KeyId | null;
   global_stop: KeyId | null;
   panel_toggle: KeyId | null;
@@ -285,6 +286,7 @@ export default function PanelApp() {
     current: string;
     draft: string;
   } | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<BurstMode>('toggle');
   const [hotkeys, setHotkeys] = useState<{
     global_toggle: KeyId | null;
@@ -311,10 +313,10 @@ export default function PanelApp() {
     ddHidNoticeOpenRef.current = true;
     try {
       await confirm({
-        title: '究极HID 已暂停使用',
+        title: 'DDHID 已暂停使用',
         description: DD_HID_BLOCKED_NOTICE,
-        confirmText: '我已知晓',
-        cancelText: '关闭',
+        confirmText: '知道了',
+        cancelText: null,
       });
     } finally {
       ddHidNoticeOpenRef.current = false;
@@ -354,7 +356,7 @@ export default function PanelApp() {
                 }
               })
               .catch((e) => {
-                toast.warning(`已屏蔽究极HID，但回退通用模式失败：${e}`);
+                toast.warning(`已屏蔽DDHID，但回退通用模式失败：${e}`);
               })
               .finally(() => {
                 ddHidFallbackInFlightRef.current = false;
@@ -793,17 +795,30 @@ export default function PanelApp() {
     const prev = prevActiveRuleIdsRef.current;
     const curr = activeRuleIds;
     prevActiveRuleIdsRef.current = curr;
+
+    // 先收集本次新启动的 toggle 规则
+    const startedRules: BurstRule[] = [];
     for (const id of curr) {
       if (!prev.has(id)) {
         const rule = rules.find((r) => r.id === id);
-        if (rule?.mode === 'toggle') speakToggle(rule, true);
+        if (rule?.mode === 'toggle') startedRules.push(rule);
       }
     }
+
+    // 停止播报：被同组新规则驱逐时跳过，避免覆盖后续的「开始」提示
     for (const id of prev) {
       if (!curr.has(id)) {
         const rule = rules.find((r) => r.id === id);
-        if (rule?.mode === 'toggle') speakToggle(rule, false);
+        if (rule?.mode !== 'toggle') continue;
+        const displaced =
+          rule.group != null && startedRules.some((r) => r.group === rule.group);
+        if (!displaced) speakToggle(rule, false);
       }
+    }
+
+    // 启动播报放最后，保证是 speakLatest 最终出声的那条
+    for (const rule of startedRules) {
+      speakToggle(rule, true);
     }
   }, [activeRuleIds, globalEnabled, rules]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -917,8 +932,8 @@ export default function PanelApp() {
             必须重启电脑后才能使用此驱动。
           </>
         ),
-        confirmText: '我已知晓',
-        cancelText: '稍后处理',
+        confirmText: '知道了',
+        cancelText: null,
       });
       return;
     }
@@ -952,8 +967,8 @@ export default function PanelApp() {
           <strong>安装完成后请重启电脑</strong>，重启后再次切换到游戏模式即可生效。
         </>
       ),
-      confirmText: '我已知晓',
-      cancelText: '稍后处理',
+      confirmText: '知道了',
+      cancelText: null,
     });
   }
 
@@ -1054,8 +1069,24 @@ export default function PanelApp() {
     setEditingGroupName({ current: name, draft: name });
   }
 
-  function disbandGroup(groupName: string) {
+  async function disbandGroup(groupName: string) {
+    const ok = await confirm({
+      title: '解散分组',
+      description: `将「${groupName}」解散，组内规则保留但不再互斥。`,
+      confirmText: '解散',
+      tone: 'danger',
+    });
+    if (!ok) return;
     pushRules((prev) => prev.map((r) => (r.group === groupName ? { ...r, group: null } : r)));
+  }
+
+  function toggleGroupCollapse(groupName: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupName)) next.delete(groupName);
+      else next.add(groupName);
+      return next;
+    });
   }
 
   function commitRenameGroup(oldName: string, newName: string) {
@@ -1372,8 +1403,8 @@ export default function PanelApp() {
             <strong>请重启电脑使卸载彻底生效。</strong>
           </>
         ),
-        confirmText: '我已知晓',
-        cancelText: '稍后处理',
+        confirmText: '知道了',
+        cancelText: null,
       });
     } catch (e) {
       toast.error(`卸载失败：${e}`);
@@ -1382,10 +1413,10 @@ export default function PanelApp() {
 
   async function handleUninstallDdHid() {
     const ok = await confirm({
-      title: '卸载究极HID 驱动',
+      title: '卸载DDHID 驱动',
       description: (
         <>
-          将卸载究极HID 虚拟驱动。卸载后究极HID 模式将不可用，应用会切回通用模式。
+          将卸载DDHID 虚拟驱动。卸载后DDHID 模式将不可用，应用会切回通用模式。
           <br />
           <br />
           卸载流程会调用 PnP 标准接口处理，建议卸载完成后重启电脑再尝试重新安装。
@@ -1403,7 +1434,7 @@ export default function PanelApp() {
       if (r.pending_reboot) {
         toast.warning(r.message, 8000);
       } else {
-        toast.success(r.message || '究极HID 驱动已卸载');
+        toast.success(r.message || 'DDHID 驱动已卸载');
       }
     } catch (e) {
       toast.error(`卸载失败：${e}`);
@@ -1481,11 +1512,44 @@ export default function PanelApp() {
                   {holdRules.map((rule) => {
                     const isActive = activeRuleIds.has(rule.id);
                     const showAdvanced = advancedOpen[rule.id];
+                    const isDragging = draggingId === rule.id;
+                    const isDragTarget =
+                      dragOverInfo?.kind === 'rule' &&
+                      dragOverInfo.ruleId === rule.id &&
+                      draggingId !== rule.id;
                     return (
                       <div
                         key={rule.id}
-                        className={`rule-row${rule.enabled ? '' : ' disabled'}${isActive ? ' active' : ''}`}
+                        className={`rule-row${rule.enabled ? '' : ' disabled'}${isActive ? ' active' : ''}${isDragging ? ' dragging' : ''}${isDragTarget ? ' drag-target' : ''}`}
+                        draggable
+                        onDragStart={(e) => {
+                          draggingIdRef.current = rule.id;
+                          e.dataTransfer.setData('text/plain', rule.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                          setDraggingId(rule.id);
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setDragOverInfo({ kind: 'rule', ruleId: rule.id });
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const srcId = draggingIdRef.current || e.dataTransfer.getData('text/plain');
+                          draggingIdRef.current = null;
+                          if (srcId && srcId !== rule.id) handleDropBeforeRule(srcId, rule.id);
+                          setDraggingId(null);
+                          setDragOverInfo(null);
+                        }}
+                        onDragEnd={() => {
+                          draggingIdRef.current = null;
+                          setDraggingId(null);
+                          setDragOverInfo(null);
+                        }}
                       >
+                        <span className="drag-handle" aria-hidden>
+                          ⠿
+                        </span>
                         <button
                           className="del-btn"
                           onClick={() => handleDelete(rule.id)}
@@ -1745,6 +1809,7 @@ export default function PanelApp() {
                   const isEditing = editingGroupName?.current === groupName;
                   const isGroupDragOver =
                     dragOverInfo?.kind === 'group' && dragOverInfo.name === groupName;
+                  const isCollapsed = collapsedGroups.has(groupName);
                   return (
                     <div
                       key={groupName}
@@ -1762,7 +1827,10 @@ export default function PanelApp() {
                         setDragOverInfo(null);
                       }}
                     >
-                      <div className="rule-group-header">
+                      <div
+                        className={`rule-group-header${isCollapsed ? ' collapsed' : ''}`}
+                        onClick={() => !isEditing && toggleGroupCollapse(groupName)}
+                      >
                         {isEditing ? (
                           <input
                             className="group-name-edit"
@@ -1785,51 +1853,64 @@ export default function PanelApp() {
                                 setEditingGroupName(null);
                               }
                             }}
+                            onClick={(e) => e.stopPropagation()}
                             onDragOver={(e) => e.preventDefault()}
                             onDrop={(e) => e.preventDefault()}
                           />
                         ) : (
-                          <span
-                            className="group-name-text"
-                            title="点击重命名"
-                            onClick={() =>
-                              setEditingGroupName({ current: groupName, draft: groupName })
-                            }
+                          <div className={`group-collapse-indicator${isCollapsed ? ' collapsed' : ''}`}>
+                            <ChevronIcon size={12} className="group-chevron" />
+                            <span className="group-name-text">{groupName}</span>
+                          </div>
+                        )}
+                        {!isEditing && (
+                          <button
+                            className="group-edit-btn"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditingGroupName({ current: groupName, draft: groupName });
+                            }}
+                            title="重命名"
                           >
-                            {groupName}
-                          </span>
+                            <EditIcon size={12} />
+                          </button>
                         )}
                         <button
                           className="disband-btn"
-                          onClick={() => disbandGroup(groupName)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            disbandGroup(groupName);
+                          }}
                           title="解散分组（规则保留）"
                         >
                           解散
                         </button>
                       </div>
-                      <div className="group-body">
-                        {groupRules.map(renderToggleCard)}
-                        <div
-                          className={`group-drop-zone${isGroupDragOver ? ' drag-active' : ''}`}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            setDragOverInfo({ kind: 'group', name: groupName });
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            const srcId =
-                              draggingIdRef.current || e.dataTransfer.getData('text/plain');
-                            draggingIdRef.current = null;
-                            if (srcId) handleDropToGroup(srcId, groupName);
-                            setDraggingId(null);
-                            setDragOverInfo(null);
-                          }}
-                        >
-                          拖入规则
+                      {!isCollapsed && (
+                        <div className="group-body">
+                          {groupRules.map(renderToggleCard)}
+                          <div
+                            className={`group-drop-zone${isGroupDragOver ? ' drag-active' : ''}`}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setDragOverInfo({ kind: 'group', name: groupName });
+                            }}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              const srcId =
+                                draggingIdRef.current || e.dataTransfer.getData('text/plain');
+                              draggingIdRef.current = null;
+                              if (srcId) handleDropToGroup(srcId, groupName);
+                              setDraggingId(null);
+                              setDragOverInfo(null);
+                            }}
+                          >
+                            拖入规则
+                          </div>
                         </div>
-                      </div>
+                      )}
                     </div>
                   );
                 })}
@@ -1891,18 +1972,21 @@ export default function PanelApp() {
                               onDrop={(e) => e.preventDefault()}
                             />
                           ) : (
-                            <span
-                              className="group-name-text"
-                              title="点击重命名"
+                            <span className="group-name-text">{pendingGroupName}</span>
+                          )}
+                          {!isPendingEditing && (
+                            <button
+                              className="group-edit-btn"
                               onClick={() =>
                                 setEditingGroupName({
                                   current: pendingGroupName,
                                   draft: pendingGroupName,
                                 })
                               }
+                              title="重命名"
                             >
-                              {pendingGroupName}
-                            </span>
+                              <EditIcon size={12} />
+                            </button>
                           )}
                           <button
                             className="disband-btn"

@@ -259,6 +259,7 @@ pub struct ProfileSummary {
     pub rules_enabled: usize,
     pub hold_count: usize,
     pub toggle_count: usize,
+    pub group_count: usize,
     pub global_toggle: Option<KeyId>,
     pub global_stop: Option<KeyId>,
     pub panel_toggle: Option<KeyId>,
@@ -277,12 +278,19 @@ fn profile_summary(profile: &Profile) -> ProfileSummary {
             BurstMode::Toggle => toggle_count += 1,
         }
     }
+    let group_count = profile
+        .rules
+        .iter()
+        .filter_map(|r| r.group.as_deref())
+        .collect::<std::collections::HashSet<_>>()
+        .len();
 
     ProfileSummary {
         rules_total: profile.rules.len(),
         rules_enabled,
         hold_count,
         toggle_count,
+        group_count,
         global_toggle: profile.hotkeys.global_toggle,
         global_stop: profile.hotkeys.global_stop,
         panel_toggle: profile.hotkeys.panel_toggle,

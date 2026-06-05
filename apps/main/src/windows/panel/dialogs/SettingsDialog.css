@@ -3,6 +3,15 @@
   height: min(600px, 84vh);
 }
 
+.settings-card .fb-dialog__footer {
+  flex-wrap: nowrap;
+}
+
+.settings-card .fb-dialog__footer .fb-btn {
+  flex: 0 0 auto;
+  width: fit-content;
+}
+
 .settings-body {
   padding: 0 var(--fb-space-6);
 }

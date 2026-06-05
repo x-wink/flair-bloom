@@ -1,4 +1,4 @@
-//! 规则 CRUD + 输入模式切换 + 按键捕获。驱动管理已迁至 [`super::driver`]。
+﻿//! 规则 CRUD + 输入模式切换 + 按键捕获。驱动管理已迁至 [`super::driver`]。
 
 use crate::engine::BurstEngine;
 use qzh_profile::{BurstRule, Hotkeys, KeyId, MAX_RULES};
@@ -57,14 +57,14 @@ pub fn set_rules(state: State<EngineState>, rules: Vec<BurstRule>) -> Result<(),
                 }
                 if rule.target_key == rule.trigger_key {
                     return Err(format!(
-                        "究极HID 模式下，切换连发规则「{}」的目标键不可与启动热键相同",
+                        "DDHID 模式下，切换连发规则「{}」的目标键不可与启动热键相同",
                         rule.id
                     ));
                 }
                 let stop = rule.stop_key.unwrap_or(rule.trigger_key);
                 if rule.target_key == stop {
                     return Err(format!(
-                        "究极HID 模式下，切换连发规则「{}」的目标键不可与停止热键相同",
+                        "DDHID 模式下，切换连发规则「{}」的目标键不可与停止热键相同",
                         rule.id
                     ));
                 }
@@ -141,7 +141,7 @@ pub fn set_input_mode(
                     KeyId::Mouse(MouseButton::X1) | KeyId::Mouse(MouseButton::X2)
                 ) {
                     return Err(format!(
-                        "切换失败：规则「{}」的目标键是鼠标侧键，究极HID 模式不支持。请把目标键改为左/右/中键或键盘键。",
+                        "切换失败：规则「{}」的目标键是鼠标侧键，DDHID 模式不支持。请把目标键改为左/右/中键或键盘键。",
                         rule.id
                     ));
                 }
@@ -150,14 +150,14 @@ pub fn set_input_mode(
                 }
                 if rule.target_key == rule.trigger_key {
                     return Err(format!(
-                        "切换失败：切换连发规则「{}」的目标键与启动热键相同。\n究极HID 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
+                        "切换失败：切换连发规则「{}」的目标键与启动热键相同。\nDDHID 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
                         rule.id
                     ));
                 }
                 let stop = rule.stop_key.unwrap_or(rule.trigger_key);
                 if rule.target_key == stop {
                     return Err(format!(
-                        "切换失败：切换连发规则「{}」的目标键与停止热键相同。\n究极HID 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
+                        "切换失败：切换连发规则「{}」的目标键与停止热键相同。\nDDHID 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
                         rule.id
                     ));
                 }

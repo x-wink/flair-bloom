@@ -41,7 +41,7 @@
 
 .fb-dialog__footer {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   gap: var(--fb-space-3);
   padding: var(--fb-space-6);
@@ -50,8 +50,8 @@
 }
 
 .fb-dialog__footer .fb-btn {
-  flex: none;
-  min-width: max-content;
+  flex: 0 0 auto;
+  width: fit-content;
 }
 
 .fb-dialog__footer--end {

@@ -1,4 +1,4 @@
-//! 会话级稳定状态汇总。
+﻿//! 会话级稳定状态汇总。
 //!
 //! UI 启动时拉一次 [`get_app_status`]，之后只通过 `app-status-changed` 事件刷新。
 //! 高频/事件驱动的状态（规则、激活规则 ID、global_enabled）仍走独立命令，
@@ -175,7 +175,7 @@ fn collect_autostart_enabled(app: &AppHandle) -> bool {
 /// 资源完整性自检：检查驱动安装器是否齐全且未被换行转换 / 杀软改写。
 ///
 /// Windows 安装包会把这些 exe 落到 `<resource_dir>/resources/`，杀软误删或解压不全
-/// 时会让"安装游戏模式驱动 / 究极HID"按下去就报错。把缺失项列出来给反馈链路用，
+/// 时会让"安装游戏模式驱动 / DDHID"按下去就报错。把缺失项列出来给反馈链路用，
 /// 比让用户自己翻日志强得多。其它平台没有这些资源，恒返回 OK。
 fn collect_resource_health(app: &AppHandle) -> (bool, Vec<String>) {
     #[cfg(windows)]
