@@ -107,6 +107,7 @@ mod tests {
             mode: BurstMode::Hold,
             stop_key: None,
             interval_ms: 5, // < 10
+            group: None,
         });
         assert!(matches!(
             save_to_path(&path, &profile),

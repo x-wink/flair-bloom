@@ -115,6 +115,7 @@ fn profile_summary_counts_rules_and_hotkeys() {
                 mode: BurstMode::Hold,
                 stop_key: None,
                 interval_ms: 10,
+                group: None,
             },
             BurstRule {
                 id: "toggle".to_string(),
@@ -124,6 +125,7 @@ fn profile_summary_counts_rules_and_hotkeys() {
                 mode: BurstMode::Toggle,
                 stop_key: Some(KeyId::Keyboard(0x48)),
                 interval_ms: 20,
+                group: None,
             },
         ],
         hotkeys: Hotkeys {

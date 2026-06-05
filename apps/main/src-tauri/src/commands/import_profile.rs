@@ -199,6 +199,7 @@ fn gaibang_parse_rules(data: &str) -> Vec<BurstRule> {
             mode: BurstMode::Hold,
             stop_key: None,
             interval_ms,
+            group: None,
         })
         .collect()
 }

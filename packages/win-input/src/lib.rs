@@ -668,6 +668,7 @@ mod tests {
         KeyId::Mouse(button)
     }
 
+    #[cfg(windows)]
     #[test]
     fn ddsimple_mode_uses_canonical_string_and_legacy_alias() {
         assert_eq!(InputMode::from_str("ddsimple"), Some(InputMode::DdSimple));
@@ -675,6 +676,7 @@ mod tests {
         assert_eq!(InputMode::DdSimple.as_str(), "ddsimple");
     }
 
+    #[cfg(windows)]
     #[test]
     fn non_sendinput_modes_require_admin() {
         assert!(!InputMode::SendInput.requires_admin());
@@ -683,6 +685,7 @@ mod tests {
         assert!(InputMode::DdHid.requires_admin());
     }
 
+    #[cfg(windows)]
     #[test]
     fn ddsimple_does_not_inherit_ddhid_toggle_limit() {
         assert!(!InputMode::DdSimple.requires_distinct_target_for_toggle());

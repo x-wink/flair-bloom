@@ -301,6 +301,7 @@ fn factory_default_rules() -> Vec<BurstRule> {
             mode: BurstMode::Hold,
             stop_key: None,
             interval_ms: 10,
+            group: None,
         },
         BurstRule {
             id: make_id(),
@@ -310,6 +311,7 @@ fn factory_default_rules() -> Vec<BurstRule> {
             mode: BurstMode::Toggle,
             stop_key: None,
             interval_ms: 10,
+            group: None,
         },
     ]
 }

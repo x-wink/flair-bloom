@@ -294,6 +294,9 @@ impl BurstEngine {
     }
 
     fn handle_toggle_press(&self, rule: &BurstRule) {
+        // 先取规则快照，避免持有 rules 锁时再嵌套锁 toggle_states
+        let rules_snap = revive(self.rules.lock()).clone();
+
         let mut states = revive(self.toggle_states.lock());
         let active = states.entry(rule.id.clone()).or_insert(false);
         if *active {
@@ -302,7 +305,27 @@ impl BurstEngine {
             self.stop_burst(&rule.id);
         } else {
             *active = true;
+            // 收集同组其他正在运行的 Toggle 规则，在同一把锁内原子地设为 false
+            let displaced: Vec<String> = if let Some(ref group) = rule.group {
+                let mut to_stop = Vec::new();
+                for r in &rules_snap {
+                    if r.id != rule.id
+                        && r.mode == BurstMode::Toggle
+                        && r.group.as_deref() == Some(group.as_str())
+                        && states.get(&r.id).copied().unwrap_or(false)
+                    {
+                        states.insert(r.id.clone(), false);
+                        to_stop.push(r.id.clone());
+                    }
+                }
+                to_stop
+            } else {
+                Vec::new()
+            };
             drop(states);
+            for id in displaced {
+                self.stop_burst(&id);
+            }
             self.start_toggle_burst(rule);
         }
     }
@@ -638,6 +661,7 @@ mod tests {
             mode,
             stop_key: None,
             interval_ms: 10,
+            group: None,
         }
     }
 

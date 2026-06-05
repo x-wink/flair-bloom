@@ -19,6 +19,7 @@ fn migrate_step(data: Value, from_version: u32) -> Result<Value, MigrateError> {
     match from_version {
         1 => migrate_v1_to_v2(data),
         2 => migrate_v2_to_v3(data),
+        3 => migrate_v3_to_v4(data),
         v => Err(MigrateError::UnknownVersion(v)),
     }
 }
@@ -71,6 +72,12 @@ fn wrap_optional_keyboard_field(obj: &mut Value, field: &str) {
 /// v2 → v3：新增 WheelUp / WheelDown 枚举值，旧数据无结构变更，仅升版本号。
 fn migrate_v2_to_v3(mut data: Value) -> Result<Value, MigrateError> {
     data["schema_version"] = json!(3);
+    Ok(data)
+}
+
+/// v3 → v4：BurstRule 新增可选 `group` 字段，旧数据无结构变更（`#[serde(default)]` 兜底），仅升版本号。
+fn migrate_v3_to_v4(mut data: Value) -> Result<Value, MigrateError> {
+    data["schema_version"] = json!(4);
     Ok(data)
 }
 

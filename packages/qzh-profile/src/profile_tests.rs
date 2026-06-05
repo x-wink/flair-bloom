@@ -26,6 +26,7 @@ fn rule(id: &str, mode: BurstMode, trigger: KeyId, target: KeyId, interval: u32)
         mode,
         stop_key: None,
         interval_ms: interval,
+        group: None,
     }
 }
 

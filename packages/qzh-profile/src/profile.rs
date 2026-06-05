@@ -15,7 +15,8 @@ use crate::key_id::KeyId;
 /// - v1：所有按键字段为裸 `u32` VK 码。
 /// - v2：按键字段改为 [`KeyId`]，支持键盘 + 鼠标 5 键。
 /// - v3：MouseButton 新增 WheelUp / WheelDown，旧文件向后兼容（新字段有默认值不涉及结构变更）。
-pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+/// - v4：BurstRule 新增可选 `group` 字段，用于 Toggle 规则互斥分组；旧文件向后兼容。
+pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 /// 单个 [`Profile`] 允许的最大规则数量，超出会在 [`Profile::validate`] 阶段被拒绝。
 pub const MAX_RULES: usize = 64;
 
@@ -68,6 +69,10 @@ pub struct BurstRule {
     pub stop_key: Option<KeyId>,
     /// Milliseconds between simulated keypresses. Clamped to [10, 10000].
     pub interval_ms: u32,
+    /// Toggle 规则互斥分组名。同组内激活一条规则时，其他活跃的同组 Toggle 规则自动停止。
+    /// Hold 规则忽略此字段。`None` 表示不属于任何分组。
+    #[serde(default)]
+    pub group: Option<String>,
 }
 
 /// 连发触发模式。
