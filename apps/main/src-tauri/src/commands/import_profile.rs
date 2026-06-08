@@ -10,7 +10,7 @@ use tauri::{AppHandle, State};
 
 use qzh_profile::{
     Advanced, BurstMode, BurstRule, Hotkeys, KeyId, MouseButton, Profile, ProfileMeta,
-    CURRENT_SCHEMA_VERSION, MAX_RULES,
+    CURRENT_SCHEMA_VERSION, MAX_INTERVAL_MS, MAX_RULES, MIN_INTERVAL_MS,
 };
 
 use super::engine::EngineState;
@@ -152,7 +152,7 @@ fn gaibang_active_vks(cfg: &GaibangConfig) -> Vec<u32> {
 }
 
 fn gaibang_interval(cfg: &GaibangConfig) -> u32 {
-    ((cfg.delay_us / 1000) as u32).clamp(10, 10000)
+    ((cfg.delay_us / 1000) as u32).clamp(MIN_INTERVAL_MS, MAX_INTERVAL_MS)
 }
 
 fn gaibang_parse_preview(data: &str, dir_name: &str) -> ImportPreview {
@@ -377,11 +377,13 @@ pub fn import_external_config(
         return Err(format!("规则数量 {} 超过上限 {MAX_RULES}", rules.len()));
     }
     for (i, rule) in rules.iter().enumerate() {
-        if !(10..=10000).contains(&rule.interval_ms) {
+        if !(MIN_INTERVAL_MS..=MAX_INTERVAL_MS).contains(&rule.interval_ms) {
             return Err(format!(
-                "第 {} 条规则间隔 {}ms 超出范围",
+                "第 {} 条规则间隔 {}ms 超出范围 [{}, {}]",
                 i + 1,
-                rule.interval_ms
+                rule.interval_ms,
+                MIN_INTERVAL_MS,
+                MAX_INTERVAL_MS
             ));
         }
     }

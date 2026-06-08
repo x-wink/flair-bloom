@@ -8,6 +8,7 @@ use crate::bootstrap::{
     agreement::AGREEMENT_VERSION,
     update::{build_updater, download_update, proxy_github_download_url, UpdateLock},
 };
+use crate::commands::engine::EngineState;
 
 const PENDING_UPDATE_DIR: &str = "pending_update";
 
@@ -43,7 +44,8 @@ pub fn agree_license(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn exit_app(app: AppHandle) {
+pub fn exit_app(app: AppHandle, engine: State<EngineState>) {
+    engine.0.shutdown();
     app.exit(0);
 }
 

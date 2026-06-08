@@ -29,8 +29,8 @@ impl DdHidBackend {
         Some(Self { ffi })
     }
 
-    pub fn send_key(&self, vk: u32, is_up: bool) {
-        self.ffi.send_key(vk, is_up);
+    pub fn send_key(&self, vk: u32, is_up: bool) -> bool {
+        self.ffi.send_key(vk, is_up)
     }
 
     pub fn send_mouse(&self, button: MouseButton, is_up: bool) -> bool {

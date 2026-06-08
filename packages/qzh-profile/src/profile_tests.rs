@@ -41,7 +41,13 @@ fn validate_accepts_empty_profile() {
 
 #[test]
 fn validate_accepts_interval_at_lower_bound() {
-    let p = make_profile(vec![rule("r", BurstMode::Hold, kbd(0x41), kbd(0x42), 10)]);
+    let p = make_profile(vec![rule(
+        "r",
+        BurstMode::Hold,
+        kbd(0x41),
+        kbd(0x42),
+        MIN_INTERVAL_MS,
+    )]);
     assert!(p.validate().is_ok());
 }
 
@@ -52,17 +58,17 @@ fn validate_accepts_interval_at_upper_bound() {
         BurstMode::Hold,
         kbd(0x41),
         kbd(0x42),
-        10000,
+        MAX_INTERVAL_MS,
     )]);
     assert!(p.validate().is_ok());
 }
 
 #[test]
 fn validate_rejects_interval_below_minimum() {
-    let p = make_profile(vec![rule("r", BurstMode::Hold, kbd(0x41), kbd(0x42), 9)]);
+    let p = make_profile(vec![rule("r", BurstMode::Hold, kbd(0x41), kbd(0x42), 0)]);
     assert!(matches!(
         p.validate(),
-        Err(ProfileError::InvalidInterval(9))
+        Err(ProfileError::InvalidInterval(0))
     ));
 }
 
@@ -73,11 +79,11 @@ fn validate_rejects_interval_above_maximum() {
         BurstMode::Hold,
         kbd(0x41),
         kbd(0x42),
-        10001,
+        MAX_INTERVAL_MS + 1,
     )]);
     assert!(matches!(
         p.validate(),
-        Err(ProfileError::InvalidInterval(10001))
+        Err(ProfileError::InvalidInterval(i)) if i == MAX_INTERVAL_MS + 1
     ));
 }
 

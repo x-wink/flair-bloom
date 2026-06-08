@@ -30,6 +30,7 @@ pub struct AppStatus {
     pub dd_hid_installed: DriverStatus,
     pub input_mode: String,
     pub configured_input_mode: String,
+    pub scheduler_hp_degraded: bool,
     pub platform: &'static str,
     pub os_family: &'static str,
     pub os_version: String,
@@ -53,6 +54,10 @@ impl AppStatus {
             dd_hid_installed: collect_dd_hid_installed(),
             input_mode: collect_input_mode(),
             configured_input_mode: collect_configured_input_mode(app),
+            scheduler_hp_degraded: app
+                .state::<crate::commands::engine::EngineState>()
+                .0
+                .scheduler_hp_degraded(),
             platform: std::env::consts::OS,
             os_family: std::env::consts::FAMILY,
             os_version: win_sysinfo::os_version(),
@@ -217,6 +222,7 @@ mod tests {
             dd_hid_installed: DriverStatus::PendingReboot,
             input_mode: "dd_hid".to_string(),
             configured_input_mode: "dd_hid".to_string(),
+            scheduler_hp_degraded: false,
             platform: "windows",
             os_family: "windows",
             os_version: "Windows 11 23H2 (Build 22631.4317)".to_string(),
@@ -243,6 +249,7 @@ mod tests {
             "dd_hid_installed",
             "input_mode",
             "configured_input_mode",
+            "scheduler_hp_degraded",
             "platform",
             "os_family",
             "os_version",

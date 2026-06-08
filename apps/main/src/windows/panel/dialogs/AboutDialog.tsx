@@ -18,6 +18,7 @@ export interface AboutDialogInfo {
   app_data_dir: string;
   resources_ok: boolean;
   missing_resources: string[];
+  scheduler_hp_degraded: boolean;
 }
 
 interface Props {
@@ -86,6 +87,7 @@ export default function AboutDialog({
         app_data_dir: info.app_data_dir,
         resources_ok: info.resources_ok,
         missing_resources: info.missing_resources,
+        scheduler_hp_degraded: info.scheduler_hp_degraded,
       };
       await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
       onCopied();
@@ -140,6 +142,7 @@ export default function AboutDialog({
             />
             <InfoRow label="主机架构" value={info.arch || '—'} />
             <InfoRow label="语言区域" value={info.locale || '—'} />
+            <InfoRow label="高精度计时" value={info.scheduler_hp_degraded ? '已降级' : '可用'} />
             <InfoRow
               label="WebView2"
               value={

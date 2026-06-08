@@ -13,7 +13,7 @@ pub mod schema_migrate;
 pub use key_id::{KeyId, MouseButton};
 pub use profile::{
     Advanced, BurstMode, BurstRule, Hotkeys, Profile, ProfileError, ProfileMeta,
-    CURRENT_SCHEMA_VERSION, MAX_RULES,
+    CURRENT_SCHEMA_VERSION, DEFAULT_INTERVAL_MS, MAX_INTERVAL_MS, MAX_RULES, MIN_INTERVAL_MS,
 };
 pub use schema_migrate::migrate_profile;
 
@@ -106,12 +106,12 @@ mod tests {
             target_key: KeyId::Keyboard(0x51),
             mode: BurstMode::Hold,
             stop_key: None,
-            interval_ms: 5, // < 10
+            interval_ms: 0,
             group: None,
         });
         assert!(matches!(
             save_to_path(&path, &profile),
-            Err(ProfileError::InvalidInterval(5))
+            Err(ProfileError::InvalidInterval(0))
         ));
         let _ = std::fs::remove_file(&path);
     }

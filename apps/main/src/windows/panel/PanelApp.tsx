@@ -46,6 +46,9 @@ const DEFAULT_SOUND: SoundSettings = {
   globalOnly: false,
 };
 const DEFAULT_PROFILE_NAME = 'defults';
+const MIN_INTERVAL_MS = 1;
+const DEFAULT_INTERVAL_MS = 10;
+const MAX_INTERVAL_MS = 10000;
 
 type BurstMode = 'hold' | 'toggle';
 type InputMode = 'sendinput' | 'interception' | 'ddsimple' | 'dd_hid';
@@ -57,6 +60,7 @@ interface AppStatus {
   dd_hid_installed: DriverStatus;
   input_mode: string;
   configured_input_mode: string;
+  scheduler_hp_degraded: boolean;
   platform: string;
   os_family: string;
   os_version: string;
@@ -152,6 +156,15 @@ interface ForkResult {
   path: string;
 }
 
+interface RelayKeyResult {
+  accepted_physical: boolean;
+  handled: boolean;
+}
+
+function keyToken(key: KeyId): string {
+  return `${key.kind}:${key.code}`;
+}
+
 function newRule(mode: BurstMode = 'hold'): BurstRule {
   const isHold = mode === 'hold';
   const triggerVk = isHold ? 0x51 : 0x46; // Hold: Q, Toggle: F
@@ -163,7 +176,7 @@ function newRule(mode: BurstMode = 'hold'): BurstRule {
     target_key: keyboardKey(targetVk),
     mode,
     stop_key: null,
-    interval_ms: 10,
+    interval_ms: DEFAULT_INTERVAL_MS,
     group: null,
   };
 }
@@ -244,6 +257,7 @@ export default function PanelApp() {
     autostart_enabled: boolean;
     resources_ok: boolean;
     missing_resources: string[];
+    scheduler_hp_degraded: boolean;
   }>({
     platform: '',
     os_family: '',
@@ -257,6 +271,7 @@ export default function PanelApp() {
     autostart_enabled: false,
     resources_ok: true,
     missing_resources: [],
+    scheduler_hp_degraded: false,
   });
   const [togglingAutostart, setTogglingAutostart] = useState(false);
   const [sound, setSound] = useState<SoundSettings>(DEFAULT_SOUND);
@@ -306,6 +321,9 @@ export default function PanelApp() {
   const ddHidFallbackInFlightRef = useRef(false);
   const ddHidNoticeOpenRef = useRef(false);
   const profileNameRef = useRef(profileName);
+  const relayedKeyDownsRef = useRef<Map<string, KeyId>>(new Map());
+  const relayDownInFlightRef = useRef<Set<string>>(new Set());
+  const relayedKeyReleasedEarlyRef = useRef<Set<string>>(new Set());
   const isDefaultProfile = profileName === DEFAULT_PROFILE_NAME;
 
   const showDdHidBlockedNotice = useCallback(async () => {
@@ -341,6 +359,7 @@ export default function PanelApp() {
         autostart_enabled: status.autostart_enabled,
         resources_ok: status.resources_ok,
         missing_resources: status.missing_resources,
+        scheduler_hp_degraded: status.scheduler_hp_degraded,
       });
       if (isInputMode(status.input_mode)) {
         if (status.input_mode === 'dd_hid') {
@@ -640,6 +659,15 @@ export default function PanelApp() {
   // （热键、Toggle 触发键、pressed_keys 维护）。
   // bubble 阶段注册：KeyCapture 在 capture 阶段 stopPropagation()，捕获模式下不干扰。
   useEffect(() => {
+    const releaseRelayedDowns = () => {
+      const pending = [...relayedKeyDownsRef.current.values()];
+      relayedKeyDownsRef.current.clear();
+      relayDownInFlightRef.current.clear();
+      relayedKeyReleasedEarlyRef.current.clear();
+      for (const key of pending) {
+        invoke('relay_key_event', { key, isUp: true }).catch(() => {});
+      }
+    };
     const downHandler = (e: KeyboardEvent) => {
       const allowDefault = isEditableKeyboardTarget(e.target);
       if (!allowDefault) e.preventDefault();
@@ -647,7 +675,23 @@ export default function PanelApp() {
       if (vk !== undefined) {
         const key = keyboardKey(vk);
         if (!e.repeat) {
-          invoke('relay_key_event', { key, isUp: false }).catch(() => {});
+          const token = keyToken(key);
+          relayDownInFlightRef.current.add(token);
+          invoke<RelayKeyResult>('relay_key_event', { key, isUp: false })
+            .then((result) => {
+              relayDownInFlightRef.current.delete(token);
+              if (result.accepted_physical) {
+                if (relayedKeyReleasedEarlyRef.current.delete(token)) {
+                  invoke('relay_key_event', { key, isUp: true }).catch(() => {});
+                } else {
+                  relayedKeyDownsRef.current.set(token, key);
+                }
+              }
+            })
+            .catch(() => {
+              relayDownInFlightRef.current.delete(token);
+              relayedKeyReleasedEarlyRef.current.delete(token);
+            });
         }
       }
     };
@@ -655,16 +699,32 @@ export default function PanelApp() {
       if (!isEditableKeyboardTarget(e.target)) e.preventDefault();
       const vk = BROWSER_VK[e.code];
       if (vk !== undefined) {
-        invoke('relay_key_event', { key: { kind: 'keyboard', code: vk }, isUp: true }).catch(
-          () => {},
-        );
+        const key = keyboardKey(vk);
+        const token = keyToken(key);
+        if (!relayedKeyDownsRef.current.delete(token)) {
+          if (relayDownInFlightRef.current.has(token)) {
+            relayedKeyReleasedEarlyRef.current.add(token);
+          }
+          return;
+        }
+        invoke('relay_key_event', { key, isUp: true }).catch(() => {});
+      }
+    };
+    const visibilityHandler = () => {
+      if (document.visibilityState === 'hidden') {
+        releaseRelayedDowns();
       }
     };
     window.addEventListener('keydown', downHandler);
     window.addEventListener('keyup', upHandler);
+    window.addEventListener('blur', releaseRelayedDowns);
+    document.addEventListener('visibilitychange', visibilityHandler);
     return () => {
       window.removeEventListener('keydown', downHandler);
       window.removeEventListener('keyup', upHandler);
+      window.removeEventListener('blur', releaseRelayedDowns);
+      document.removeEventListener('visibilitychange', visibilityHandler);
+      releaseRelayedDowns();
     };
   }, []);
 
@@ -810,8 +870,7 @@ export default function PanelApp() {
       if (!curr.has(id)) {
         const rule = rules.find((r) => r.id === id);
         if (rule?.mode !== 'toggle') continue;
-        const displaced =
-          rule.group != null && startedRules.some((r) => r.group === rule.group);
+        const displaced = rule.group != null && startedRules.some((r) => r.group === rule.group);
         if (!displaced) speakToggle(rule, false);
       }
     }
@@ -1535,7 +1594,8 @@ export default function PanelApp() {
                         onDrop={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
-                          const srcId = draggingIdRef.current || e.dataTransfer.getData('text/plain');
+                          const srcId =
+                            draggingIdRef.current || e.dataTransfer.getData('text/plain');
                           draggingIdRef.current = null;
                           if (srcId && srcId !== rule.id) handleDropBeforeRule(srcId, rule.id);
                           setDraggingId(null);
@@ -1580,14 +1640,14 @@ export default function PanelApp() {
                               <div className="interval-input">
                                 <input
                                   type="number"
-                                  min={10}
-                                  max={10000}
+                                  min={MIN_INTERVAL_MS}
+                                  max={MAX_INTERVAL_MS}
                                   value={rule.interval_ms}
                                   onChange={(e) =>
                                     updateRule(rule.id, {
                                       interval_ms: Math.max(
-                                        10,
-                                        Math.min(10000, Number(e.target.value)),
+                                        MIN_INTERVAL_MS,
+                                        Math.min(MAX_INTERVAL_MS, Number(e.target.value)),
                                       ),
                                     })
                                   }
@@ -1727,12 +1787,15 @@ export default function PanelApp() {
                       <div className="interval-input">
                         <input
                           type="number"
-                          min={10}
-                          max={10000}
+                          min={MIN_INTERVAL_MS}
+                          max={MAX_INTERVAL_MS}
                           value={rule.interval_ms}
                           onChange={(e) =>
                             updateRule(rule.id, {
-                              interval_ms: Math.max(10, Math.min(10000, Number(e.target.value))),
+                              interval_ms: Math.max(
+                                MIN_INTERVAL_MS,
+                                Math.min(MAX_INTERVAL_MS, Number(e.target.value)),
+                              ),
                             })
                           }
                         />
@@ -1858,7 +1921,9 @@ export default function PanelApp() {
                             onDrop={(e) => e.preventDefault()}
                           />
                         ) : (
-                          <div className={`group-collapse-indicator${isCollapsed ? ' collapsed' : ''}`}>
+                          <div
+                            className={`group-collapse-indicator${isCollapsed ? ' collapsed' : ''}`}
+                          >
                             <ChevronIcon size={12} className="group-chevron" />
                             <span className="group-name-text">{groupName}</span>
                           </div>
@@ -2257,6 +2322,7 @@ export default function PanelApp() {
               app_data_dir: sysInfo.app_data_dir,
               resources_ok: sysInfo.resources_ok,
               missing_resources: sysInfo.missing_resources,
+              scheduler_hp_degraded: sysInfo.scheduler_hp_degraded,
             } satisfies AboutDialogInfo
           }
           updateNotice={updateNotice}

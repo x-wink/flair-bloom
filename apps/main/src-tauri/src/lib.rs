@@ -70,6 +70,7 @@ pub fn run() {
     let burst_engine = Arc::new(BurstEngine::new());
     let engine_for_listener = burst_engine.clone();
     let engine_for_tray = burst_engine.clone();
+    let engine_for_exit = burst_engine.clone();
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
@@ -189,6 +190,11 @@ pub fn run() {
             info!("{} started", APP_NAME);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running FlairBloom");
+        .build(tauri::generate_context!())
+        .expect("error while building FlairBloom")
+        .run(move |_app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                engine_for_exit.shutdown();
+            }
+        });
 }

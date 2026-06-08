@@ -2,7 +2,7 @@ use crypto::aes;
 use qzh_format::header::{FileHeader, MAGIC, VERSION};
 use qzh_profile::{
     migrate_profile, Advanced, BurstMode, BurstRule, Hotkeys, KeyId, Profile, ProfileMeta,
-    CURRENT_SCHEMA_VERSION,
+    CURRENT_SCHEMA_VERSION, DEFAULT_INTERVAL_MS,
 };
 use std::{
     path::{Path, PathBuf},
@@ -308,7 +308,7 @@ fn factory_default_rules() -> Vec<BurstRule> {
             target_key: KeyId::Keyboard(0x51),
             mode: BurstMode::Hold,
             stop_key: None,
-            interval_ms: 10,
+            interval_ms: DEFAULT_INTERVAL_MS,
             group: None,
         },
         BurstRule {
@@ -318,7 +318,7 @@ fn factory_default_rules() -> Vec<BurstRule> {
             target_key: KeyId::Keyboard(0x46),
             mode: BurstMode::Toggle,
             stop_key: None,
-            interval_ms: 10,
+            interval_ms: DEFAULT_INTERVAL_MS,
             group: None,
         },
     ]

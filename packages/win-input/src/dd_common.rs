@@ -141,7 +141,7 @@ impl DdFfi {
         })
     }
 
-    pub fn send_key(&self, vk: u32, is_up: bool) {
+    pub fn send_key(&self, vk: u32, is_up: bool) -> bool {
         // SAFETY: dd_todc 已解析
         let ddcode = unsafe { (self.dd_todc)(vk as c_int) };
         let first = !self.diag_logged.swap(true, Ordering::SeqCst);
@@ -149,7 +149,7 @@ impl DdFfi {
             if first {
                 warn!("DD_todc({:#x}) 返回 0，VK 无映射，键已丢弃", vk);
             }
-            return;
+            return false;
         }
         let flag = if is_up { 2 } else { 1 };
         // SAFETY: dd_key 已解析
@@ -160,6 +160,7 @@ impl DdFfi {
                 vk, ddcode, flag, ret
             );
         }
+        ret == 1
     }
 
     /// 注入滚轮事件。`up=true` 时向上，`up=false` 时向下。

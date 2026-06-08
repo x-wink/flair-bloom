@@ -340,7 +340,6 @@ body {
 }
 
 @keyframes rule-pulse {
-
   0%,
   100% {
     background: var(--fb-surface);
@@ -360,7 +359,6 @@ body {
 }
 
 @keyframes rule-pulse-hover {
-
   0%,
   100% {
     background: var(--fb-surface);
@@ -380,7 +378,6 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-
   .rule-row.active,
   .rule-row.active:hover {
     animation: none;

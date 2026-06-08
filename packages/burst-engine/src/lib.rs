@@ -1,24 +1,30 @@
+mod rules;
+mod scheduler;
+pub mod stress;
+
 use qzh_profile::key_id::KeyId;
 #[cfg(any(test, windows))]
 use qzh_profile::key_id::MouseButton;
 use qzh_profile::profile::{BurstMode, BurstRule, Hotkeys};
+use rules::RuleSnapshot;
+use scheduler::{release_simulated_keys, PhysicalKeys, SchedulerHandle, SimulatedKeys};
 #[cfg(windows)]
 use std::sync::{atomic::AtomicU32, RwLock, Weak};
+#[cfg(windows)]
+use std::thread;
 use std::{
     collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
     },
-    thread,
-    time::Duration,
 };
 #[cfg(windows)]
 use tracing::error;
 use tracing::info;
+use win_input::{clear_pending_injections, clear_relay_injections};
 #[cfg(windows)]
-use win_input::{clear_pending_injections, try_consume_injection, SIM_MARKER};
-use win_input::{key_down, key_up};
+use win_input::{try_consume_injection, SIM_MARKER};
 #[cfg(windows)]
 use windows_sys::Win32::{
     Foundation::{LPARAM, WPARAM},
@@ -58,19 +64,6 @@ pub fn rehook_keyboard() {
 #[cfg(not(windows))]
 pub fn rehook_keyboard() {}
 
-type ActiveLoops = Arc<
-    Mutex<
-        HashMap<
-            String,
-            (
-                Arc<AtomicBool>,
-                thread::Thread,
-                KeyId,
-                thread::JoinHandle<()>,
-            ),
-        >,
-    >,
->;
 type GlobalChangedCb = Arc<Mutex<Option<Box<dyn Fn(bool) + Send + Sync>>>>;
 type PanelToggleCb = Arc<Mutex<Option<Box<dyn Fn() + Send + Sync>>>>;
 
@@ -81,14 +74,42 @@ fn revive<T>(r: std::sync::LockResult<T>) -> T {
     r.unwrap_or_else(|e| e.into_inner())
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EngineLifecycle {
+    Paused,
+    Running,
+    Stopping,
+    ShuttingDown,
+    Shutdown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct KeyProcessResult {
+    pub accepted_physical: bool,
+    pub handled: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ActiveRule {
+    mode: BurstMode,
+    group: Option<String>,
+}
+
+#[derive(Debug)]
+struct RuntimeState {
+    lifecycle: EngineLifecycle,
+    active_rules: HashMap<String, ActiveRule>,
+    toggle_states: HashMap<String, bool>,
+    stop_generation: u64,
+}
+
 pub struct BurstEngine {
     pub global_enabled: Arc<AtomicBool>,
-    rules: Arc<Mutex<Vec<BurstRule>>>,
-    /// rule_id -> (cancel_flag, thread_handle, target_key, join_handle)
-    active_loops: ActiveLoops,
-    toggle_states: Arc<Mutex<HashMap<String, bool>>>,
-    /// 当前物理按下的键；用于过滤 OS 生成的 key-repeat。
-    pressed_keys: Arc<Mutex<HashSet<KeyId>>>,
+    rules: Arc<Mutex<RuleSnapshot>>,
+    runtime: Arc<Mutex<RuntimeState>>,
+    physical_pressed: PhysicalKeys,
+    simulated_keys: SimulatedKeys,
+    scheduler: SchedulerHandle,
     hotkeys: Arc<Mutex<Hotkeys>>,
     /// 全局开关状态被热键改变时调用（由 app 层注册，用于同步托盘与前端）。
     on_global_changed: GlobalChangedCb,
@@ -104,12 +125,20 @@ impl Default for BurstEngine {
 
 impl BurstEngine {
     pub fn new() -> Self {
+        let physical_pressed = Arc::new(Mutex::new(HashSet::new()));
+        let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
         Self {
             global_enabled: Arc::new(AtomicBool::new(false)),
-            rules: Arc::new(Mutex::new(Vec::new())),
-            active_loops: Arc::new(Mutex::new(HashMap::new())),
-            toggle_states: Arc::new(Mutex::new(HashMap::new())),
-            pressed_keys: Arc::new(Mutex::new(HashSet::new())),
+            rules: Arc::new(Mutex::new(RuleSnapshot::default())),
+            runtime: Arc::new(Mutex::new(RuntimeState {
+                lifecycle: EngineLifecycle::Paused,
+                active_rules: HashMap::new(),
+                toggle_states: HashMap::new(),
+                stop_generation: 0,
+            })),
+            physical_pressed: physical_pressed.clone(),
+            simulated_keys: simulated_keys.clone(),
+            scheduler: SchedulerHandle::start(physical_pressed, simulated_keys),
             hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
             on_global_changed: Arc::new(Mutex::new(None)),
             on_panel_toggle: Arc::new(Mutex::new(None)),
@@ -120,19 +149,9 @@ impl BurstEngine {
         *revive(self.hotkeys.lock()) = hotkeys;
     }
 
-    /// 取消所有正在运行的连发循环并清空 toggle 状态。
-    /// 在全局开关关闭时调用，防止连发线程继续注入按键。
+    /// 兼容旧调用名：停止所有活动规则，并等待 scheduler 完成目标键释放。
     pub fn cancel_all_loops(&self) {
-        let mut loops = revive(self.active_loops.lock());
-        for (cancel, thread_handle, _, _) in loops.values() {
-            cancel.store(true, Ordering::SeqCst);
-            thread_handle.unpark();
-            thread_handle.unpark();
-        }
-        loops.clear();
-        revive(self.toggle_states.lock()).clear();
-        #[cfg(windows)]
-        clear_pending_injections();
+        self.stop_runtime_activity(true);
     }
 
     /// 注册全局开关热键触发时的回调（供 app 层同步托盘与前端事件）。
@@ -146,266 +165,326 @@ impl BurstEngine {
     }
 
     pub fn set_rules(&self, rules: Vec<BurstRule>) {
-        self.cancel_all_loops();
-        *revive(self.rules.lock()) = rules;
+        self.stop_runtime_activity(true);
+        *revive(self.rules.lock()) = RuleSnapshot::new(rules);
     }
 
     pub fn get_rules(&self) -> Vec<BurstRule> {
-        revive(self.rules.lock()).clone()
+        revive(self.rules.lock()).rules()
     }
 
     /// 当前正在执行连发的规则 ID 集合：hold 模式表示触发键被按住，toggle 模式表示已开启。
     /// 用于前端轮询展示激活态视觉反馈。
     pub fn get_active_ids(&self) -> Vec<String> {
-        revive(self.active_loops.lock()).keys().cloned().collect()
+        let mut ids = revive(self.runtime.lock())
+            .active_rules
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        ids.sort();
+        ids
     }
 
     /// 返回 true 表示引擎处理了本次按键（热键触发或规则匹配），false 表示未匹配或重复按下。
     /// 供中继调用方决定是否 preventDefault。
     pub fn on_key_press(&self, key: KeyId) -> bool {
-        // 低级键盘 hook 没有可靠的 key-repeat 标志。用按下集合识别首次 down，
-        // 避免长按全局热键时重复切换开关，也避免依赖 KBDLLHOOKSTRUCT.flags 保留位。
-        if !revive(self.pressed_keys.lock()).insert(key) {
-            return false;
-        }
-
-        // 全局热键检测：优先于规则处理，且不受 global_enabled 当前状态限制
-        {
-            let hk = revive(self.hotkeys.lock());
-            let start = hk.global_toggle;
-            let stop = hk.global_stop.or(start); // None 时停止键 = 开启键（切换模式）
-            let panel = hk.panel_toggle;
-            let enabled = self.global_enabled.load(Ordering::SeqCst);
-
-            if panel == Some(key) {
-                drop(hk);
-                if let Some(cb) = revive(self.on_panel_toggle.lock()).as_ref() {
-                    cb();
-                }
-                return true;
-            }
-            if start == Some(key) && !enabled {
-                drop(hk);
-                self.global_enabled.store(true, Ordering::SeqCst);
-                if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
-                    cb(true);
-                }
-                return true;
-            }
-            if stop == Some(key) && enabled {
-                drop(hk);
-                self.global_enabled.store(false, Ordering::SeqCst);
-                self.cancel_all_loops();
-                if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
-                    cb(false);
-                }
-                return true;
-            }
-        }
-
-        if !self.global_enabled.load(Ordering::SeqCst) {
-            return false;
-        }
-        let rules = revive(self.rules.lock()).clone();
-        let mut handled = false;
-        for rule in rules.iter().filter(|r| r.enabled) {
-            match rule.mode {
-                BurstMode::Hold => {
-                    if rule.trigger_key == key {
-                        self.start_hold_burst(rule);
-                        handled = true;
-                    }
-                }
-                BurstMode::Toggle => {
-                    let stop = rule.stop_key.unwrap_or(rule.trigger_key);
-                    if rule.trigger_key == key || stop == key {
-                        let started = revive(self.toggle_states.lock())
-                            .get(&rule.id)
-                            .copied()
-                            .unwrap_or(false);
-                        if started {
-                            if stop == key {
-                                self.handle_toggle_press(rule);
-                                handled = true;
-                            }
-                        } else if rule.trigger_key == key {
-                            self.handle_toggle_press(rule);
-                            handled = true;
-                        }
-                    }
-                }
-            }
-        }
-        handled
+        self.on_key_press_event(key).handled
     }
 
     pub fn on_key_release(&self, key: KeyId) {
-        revive(self.pressed_keys.lock()).remove(&key);
+        let _ = self.on_key_release_event(key);
+    }
 
-        let rules = revive(self.rules.lock()).clone();
-        for rule in rules
-            .iter()
-            .filter(|r| r.enabled && r.trigger_key == key && r.mode == BurstMode::Hold)
+    pub fn on_key_press_event(&self, key: KeyId) -> KeyProcessResult {
         {
-            self.stop_burst(&rule.id);
-        }
-    }
-
-    fn start_hold_burst(&self, rule: &BurstRule) {
-        if revive(self.active_loops.lock()).contains_key(&rule.id) {
-            return;
-        }
-        let cancel = Arc::new(AtomicBool::new(false));
-        let cancel_clone = cancel.clone();
-        let target_key = rule.target_key;
-        let interval_ms = rule.interval_ms;
-        // spawn 在锁外执行，避免 thread::spawn panic 时中毒 Mutex
-        let handle = thread::spawn(move || {
-            let hold_ms = (interval_ms as u64 / 3)
-                .clamp(5, 30)
-                .min((interval_ms as u64).saturating_sub(1));
-            let rest_ms = interval_ms as u64 - hold_ms;
-            let result = std::panic::catch_unwind(|| {
-                while !cancel_clone.load(Ordering::SeqCst) {
-                    key_down(target_key);
-                    thread::park_timeout(Duration::from_millis(hold_ms));
-                    key_up(target_key);
-                    if cancel_clone.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    thread::park_timeout(Duration::from_millis(rest_ms));
-                }
-            });
-            if result.is_err() {
-                key_up(target_key);
+            let mut pressed = revive(self.physical_pressed.lock());
+            if !pressed.insert(key) {
+                return KeyProcessResult {
+                    accepted_physical: false,
+                    handled: false,
+                };
             }
-        });
-        let mut loops = revive(self.active_loops.lock());
-        if loops.contains_key(&rule.id) {
-            // spawn 后极罕见的并发插入：取消刚启动的线程
-            cancel.store(true, Ordering::SeqCst);
-            handle.thread().unpark();
-            return;
         }
-        loops.insert(
-            rule.id.clone(),
-            (cancel, handle.thread().clone(), target_key, handle),
-        );
-    }
 
-    fn handle_toggle_press(&self, rule: &BurstRule) {
-        // 先取规则快照，避免持有 rules 锁时再嵌套锁 toggle_states
-        let rules_snap = revive(self.rules.lock()).clone();
-
-        let mut states = revive(self.toggle_states.lock());
-        let active = states.entry(rule.id.clone()).or_insert(false);
-        if *active {
-            *active = false;
-            drop(states);
-            self.stop_burst(&rule.id);
-        } else {
-            *active = true;
-            // 收集同组其他正在运行的 Toggle 规则，在同一把锁内原子地设为 false
-            let displaced: Vec<String> = if let Some(ref group) = rule.group {
-                let mut to_stop = Vec::new();
-                for r in &rules_snap {
-                    if r.id != rule.id
-                        && r.mode == BurstMode::Toggle
-                        && r.group.as_deref() == Some(group.as_str())
-                        && states.get(&r.id).copied().unwrap_or(false)
-                    {
-                        states.insert(r.id.clone(), false);
-                        to_stop.push(r.id.clone());
-                    }
-                }
-                to_stop
-            } else {
-                Vec::new()
+        if self.handle_hotkey_press(key) {
+            return KeyProcessResult {
+                accepted_physical: true,
+                handled: true,
             };
-            drop(states);
-            for id in displaced {
-                self.stop_burst(&id);
-            }
-            self.start_toggle_burst(rule);
+        }
+
+        if !self.global_enabled.load(Ordering::SeqCst) {
+            return KeyProcessResult {
+                accepted_physical: true,
+                handled: false,
+            };
+        }
+
+        let rules = revive(self.rules.lock()).enabled_press_rules(key);
+        let mut handled = false;
+        for rule in rules {
+            handled = self.handle_rule_press(key, rule) || handled;
+        }
+        KeyProcessResult {
+            accepted_physical: true,
+            handled,
         }
     }
 
-    fn start_toggle_burst(&self, rule: &BurstRule) {
-        if revive(self.active_loops.lock()).contains_key(&rule.id) {
-            return;
+    pub fn on_key_release_event(&self, key: KeyId) -> KeyProcessResult {
+        let accepted_physical = revive(self.physical_pressed.lock()).remove(&key);
+        if !accepted_physical {
+            return KeyProcessResult {
+                accepted_physical: false,
+                handled: false,
+            };
         }
-        let cancel = Arc::new(AtomicBool::new(false));
-        let cancel_clone = cancel.clone();
-        let target_key = rule.target_key;
-        let interval_ms = rule.interval_ms;
-        let handle = thread::spawn(move || {
-            let hold_ms = (interval_ms as u64 / 3)
-                .clamp(5, 30)
-                .min((interval_ms as u64).saturating_sub(1));
-            let rest_ms = interval_ms as u64 - hold_ms;
-            let result = std::panic::catch_unwind(|| {
-                while !cancel_clone.load(Ordering::SeqCst) {
-                    key_down(target_key);
-                    thread::park_timeout(Duration::from_millis(hold_ms));
-                    key_up(target_key);
-                    if cancel_clone.load(Ordering::SeqCst) {
-                        break;
-                    }
-                    thread::park_timeout(Duration::from_millis(rest_ms));
+
+        let rules = revive(self.rules.lock()).enabled_hold_release_rules(key);
+        let mut handled = false;
+        for rule in rules {
+            handled = self.stop_rule(&rule.id) || handled;
+        }
+        KeyProcessResult {
+            accepted_physical,
+            handled,
+        }
+    }
+
+    pub fn set_global_enabled(&self, enabled: bool, wait: bool) {
+        if enabled {
+            self.global_enabled.store(true, Ordering::SeqCst);
+            let mut runtime = revive(self.runtime.lock());
+            if runtime.lifecycle != EngineLifecycle::Shutdown {
+                runtime.lifecycle = EngineLifecycle::Running;
+            }
+        } else {
+            self.global_enabled.store(false, Ordering::SeqCst);
+            self.pause_runtime(wait);
+        }
+    }
+
+    pub fn shutdown(&self) {
+        let generation = {
+            let mut runtime = revive(self.runtime.lock());
+            if runtime.lifecycle == EngineLifecycle::Shutdown {
+                return;
+            }
+            runtime.lifecycle = EngineLifecycle::ShuttingDown;
+            runtime.stop_generation = runtime.stop_generation.saturating_add(1);
+            runtime.active_rules.clear();
+            runtime.toggle_states.clear();
+            runtime.stop_generation
+        };
+        self.global_enabled.store(false, Ordering::SeqCst);
+        if !self.scheduler.shutdown_blocking(generation) {
+            release_simulated_keys(&self.simulated_keys);
+        }
+        clear_pending_injections();
+        clear_relay_injections();
+        revive(self.runtime.lock()).lifecycle = EngineLifecycle::Shutdown;
+    }
+
+    pub fn scheduler_hp_degraded(&self) -> bool {
+        self.scheduler.hp_degraded()
+    }
+
+    pub fn lifecycle(&self) -> EngineLifecycle {
+        revive(self.runtime.lock()).lifecycle
+    }
+
+    fn handle_hotkey_press(&self, key: KeyId) -> bool {
+        let hk = revive(self.hotkeys.lock());
+        let start = hk.global_toggle;
+        let stop = hk.global_stop.or(start);
+        let panel = hk.panel_toggle;
+        let enabled = self.global_enabled.load(Ordering::SeqCst);
+        drop(hk);
+
+        if panel == Some(key) {
+            if let Some(cb) = revive(self.on_panel_toggle.lock()).as_ref() {
+                cb();
+            }
+            return true;
+        }
+        if start == Some(key) && !enabled {
+            self.set_global_enabled(true, false);
+            if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
+                cb(true);
+            }
+            return true;
+        }
+        if stop == Some(key) && enabled {
+            self.set_global_enabled(false, false);
+            if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
+                cb(false);
+            }
+            return true;
+        }
+        false
+    }
+
+    fn handle_rule_press(&self, key: KeyId, rule: Arc<BurstRule>) -> bool {
+        match rule.mode {
+            BurstMode::Hold => {
+                if rule.trigger_key != key {
+                    return false;
                 }
-            });
-            if result.is_err() {
-                key_up(target_key);
+                self.start_rule(rule)
             }
-        });
-        let mut loops = revive(self.active_loops.lock());
-        if loops.contains_key(&rule.id) {
-            cancel.store(true, Ordering::SeqCst);
-            handle.thread().unpark();
-            return;
+            BurstMode::Toggle => self.handle_toggle_press(key, rule),
         }
-        loops.insert(
-            rule.id.clone(),
-            (cancel, handle.thread().clone(), target_key, handle),
-        );
     }
 
-    fn stop_burst(&self, rule_id: &str) {
-        if let Some((cancel, thread_handle, _, _join)) =
-            revive(self.active_loops.lock()).remove(rule_id)
+    fn handle_toggle_press(&self, key: KeyId, rule: Arc<BurstRule>) -> bool {
+        let stop = rule.stop_key.unwrap_or(rule.trigger_key);
+        let mut start_rule = false;
+        let mut stop_ids = Vec::new();
+        let generation;
         {
-            cancel.store(true, Ordering::SeqCst);
-            // 调用两次覆盖 hold_ms 和 rest_ms 两个 park 点：
-            // token 是单 bit，若线程在 hold_ms 睡眠则第一次唤醒、第二次 no-op；
-            // 若 token 已被 hold_ms 消耗而线程进入 rest_ms，第二次唤醒 rest_ms。
-            thread_handle.unpark();
-            thread_handle.unpark();
+            let mut runtime = revive(self.runtime.lock());
+            if !runtime_can_start(&runtime) {
+                return false;
+            }
+            let started = runtime
+                .toggle_states
+                .get(&rule.id)
+                .copied()
+                .unwrap_or(false);
+            if started {
+                if stop != key {
+                    return false;
+                }
+                runtime.toggle_states.insert(rule.id.clone(), false);
+                runtime.active_rules.remove(&rule.id);
+                stop_ids.push(rule.id.clone());
+            } else {
+                if rule.trigger_key != key {
+                    return false;
+                }
+                if let Some(group) = rule.group.as_deref() {
+                    let displaced = runtime
+                        .active_rules
+                        .iter()
+                        .filter_map(|(id, active)| {
+                            (id != &rule.id
+                                && active.mode == BurstMode::Toggle
+                                && active.group.as_deref() == Some(group))
+                            .then_some(id.clone())
+                        })
+                        .collect::<Vec<_>>();
+                    for id in displaced {
+                        runtime.toggle_states.insert(id.clone(), false);
+                        runtime.active_rules.remove(&id);
+                        stop_ids.push(id);
+                    }
+                }
+                runtime.toggle_states.insert(rule.id.clone(), true);
+                runtime.active_rules.insert(
+                    rule.id.clone(),
+                    ActiveRule {
+                        mode: BurstMode::Toggle,
+                        group: rule.group.clone(),
+                    },
+                );
+                start_rule = true;
+            }
+            generation = runtime.stop_generation;
+        }
+
+        for id in stop_ids {
+            self.scheduler.stop_rule(id, generation);
+        }
+        if start_rule {
+            self.scheduler.start_rule(rule, generation);
+        }
+        true
+    }
+
+    fn start_rule(&self, rule: Arc<BurstRule>) -> bool {
+        let generation = {
+            let mut runtime = revive(self.runtime.lock());
+            if !runtime_can_start(&runtime) || runtime.active_rules.contains_key(&rule.id) {
+                return false;
+            }
+            runtime.active_rules.insert(
+                rule.id.clone(),
+                ActiveRule {
+                    mode: rule.mode.clone(),
+                    group: rule.group.clone(),
+                },
+            );
+            runtime.stop_generation
+        };
+        self.scheduler.start_rule(rule, generation);
+        true
+    }
+
+    fn stop_rule(&self, rule_id: &str) -> bool {
+        let generation = {
+            let mut runtime = revive(self.runtime.lock());
+            let Some(active) = runtime.active_rules.remove(rule_id) else {
+                return false;
+            };
+            if active.mode == BurstMode::Toggle {
+                runtime.toggle_states.insert(rule_id.to_string(), false);
+            }
+            runtime.stop_generation
+        };
+        self.scheduler.stop_rule(rule_id.to_string(), generation);
+        true
+    }
+
+    fn pause_runtime(&self, wait: bool) {
+        self.global_enabled.store(false, Ordering::SeqCst);
+        self.stop_runtime_activity(wait);
+    }
+
+    fn stop_runtime_activity(&self, wait: bool) {
+        let generation = {
+            let mut runtime = revive(self.runtime.lock());
+            if matches!(
+                runtime.lifecycle,
+                EngineLifecycle::ShuttingDown | EngineLifecycle::Shutdown
+            ) {
+                return;
+            }
+            runtime.lifecycle = EngineLifecycle::Stopping;
+            runtime.stop_generation = runtime.stop_generation.saturating_add(1);
+            runtime.active_rules.clear();
+            runtime.toggle_states.clear();
+            runtime.stop_generation
+        };
+
+        if wait {
+            if !self.scheduler.stop_all_blocking(generation) {
+                release_simulated_keys(&self.simulated_keys);
+            }
+        } else {
+            self.scheduler.stop_all_async(generation);
+        }
+        clear_pending_injections();
+        clear_relay_injections();
+
+        let mut runtime = revive(self.runtime.lock());
+        if runtime.lifecycle != EngineLifecycle::Shutdown {
+            runtime.lifecycle = if self.global_enabled.load(Ordering::SeqCst) {
+                EngineLifecycle::Running
+            } else {
+                EngineLifecycle::Paused
+            };
         }
     }
 }
 
 impl Drop for BurstEngine {
     fn drop(&mut self) {
-        let entries: Vec<_> = {
-            let mut loops = revive(self.active_loops.lock());
-            loops.drain().map(|(_, v)| v).collect()
-        };
-        // 先全部发出取消信号
-        for (cancel, thread_handle, _, _) in &entries {
-            cancel.store(true, Ordering::SeqCst);
-            thread_handle.unpark();
-            thread_handle.unpark();
-        }
-        // join 后再补发 key_up，确保线程已完成自身的 key_up，避免与线程竞态
-        for (_, _, target_key, join_handle) in entries {
-            // 仅在线程 panic 时补发 key_up；正常退出路径线程已自行调用
-            if join_handle.join().is_err() {
-                key_up(target_key);
-            }
-        }
-        #[cfg(windows)]
-        clear_pending_injections();
+        self.shutdown();
     }
+}
+
+fn runtime_can_start(runtime: &RuntimeState) -> bool {
+    runtime.lifecycle == EngineLifecycle::Running
 }
 
 /// WH_KEYBOARD_LL 低级键盘钩子回调；运行在安装 hook 的线程（消息循环线程）上。
@@ -713,8 +792,8 @@ mod tests {
         let engine = BurstEngine::new();
         let trigger = KeyId::Keyboard(0x51);
         let target = KeyId::Keyboard(0x45);
-        engine.global_enabled.store(true, Ordering::SeqCst);
         engine.set_rules(vec![rule("hold-q", BurstMode::Hold, trigger, target)]);
+        engine.set_global_enabled(true, false);
 
         engine.on_key_press(trigger);
         assert_eq!(engine.get_active_ids(), vec!["hold-q".to_string()]);
@@ -731,8 +810,8 @@ mod tests {
         let engine = BurstEngine::new();
         let trigger = KeyId::Keyboard(0x51);
         let target = KeyId::Keyboard(0x45);
-        engine.global_enabled.store(true, Ordering::SeqCst);
         engine.set_rules(vec![rule("toggle-q", BurstMode::Toggle, trigger, target)]);
+        engine.set_global_enabled(true, false);
 
         engine.on_key_press(trigger);
         assert_eq!(engine.get_active_ids(), vec!["toggle-q".to_string()]);
@@ -763,5 +842,44 @@ mod tests {
         engine.on_key_release(key);
         engine.on_key_press(key);
         assert!(!engine.global_enabled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn relay_result_distinguishes_repeated_down_from_physical_acceptance() {
+        let engine = BurstEngine::new();
+        let key = KeyId::Keyboard(0x51);
+
+        let first = engine.on_key_press_event(key);
+        let repeated = engine.on_key_press_event(key);
+
+        assert!(first.accepted_physical);
+        assert!(!repeated.accepted_physical);
+    }
+
+    #[test]
+    fn toggle_group_starts_new_rule_and_stops_old_rule() {
+        let engine = BurstEngine::new();
+        let mut a = rule(
+            "toggle-a",
+            BurstMode::Toggle,
+            KeyId::Keyboard(0x51),
+            KeyId::Keyboard(0x41),
+        );
+        let mut b = rule(
+            "toggle-b",
+            BurstMode::Toggle,
+            KeyId::Keyboard(0x45),
+            KeyId::Keyboard(0x42),
+        );
+        a.group = Some("g".to_string());
+        b.group = Some("g".to_string());
+        engine.set_rules(vec![a, b]);
+        engine.set_global_enabled(true, false);
+
+        engine.on_key_press(KeyId::Keyboard(0x51));
+        engine.on_key_release(KeyId::Keyboard(0x51));
+        engine.on_key_press(KeyId::Keyboard(0x45));
+
+        assert_eq!(engine.get_active_ids(), vec!["toggle-b".to_string()]);
     }
 }

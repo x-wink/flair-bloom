@@ -21,15 +21,15 @@ use interception::InterceptionBackend;
 use qzh_profile::key_id::KeyId;
 #[cfg(any(test, windows))]
 use qzh_profile::key_id::MouseButton;
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 use std::collections::{HashMap, VecDeque};
 #[cfg(windows)]
 use std::path::PathBuf;
 #[cfg(windows)]
 use std::sync::atomic::AtomicBool;
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 use std::sync::{Mutex, OnceLock};
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 use std::time::{Duration, Instant};
 #[cfg(windows)]
 use tracing::{info, warn};
@@ -47,28 +47,67 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{XBUTTON1, XBUTTON2};
 /// 写入 SendInput 的 dwExtraInfo，hook 据此过滤程序自身模拟的按键，消除竞态。
 pub const SIM_MARKER: usize = 0x5148_5844;
 
-#[cfg(windows)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct InputEvent {
+    pub key: KeyId,
+    pub is_up: bool,
+}
+
+impl InputEvent {
+    pub fn down(key: KeyId) -> Self {
+        Self { key, is_up: false }
+    }
+
+    pub fn up(key: KeyId) -> Self {
+        Self { key, is_up: true }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DispatchResult {
+    Sent,
+    Noop,
+    Failed,
+    FallbackSent,
+}
+
+impl DispatchResult {
+    pub fn was_sent(self) -> bool {
+        matches!(self, Self::Sent | Self::FallbackSent)
+    }
+}
+
+#[cfg(any(test, windows))]
 const SIM_TTL: Duration = Duration::from_millis(50);
+#[cfg(any(test, windows))]
+const RELAY_TTL: Duration = Duration::from_millis(200);
 
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 type PendingMap = HashMap<(KeyId, bool), VecDeque<Instant>>;
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 static PENDING_INJECTIONS: OnceLock<Mutex<PendingMap>> = OnceLock::new();
+#[cfg(any(test, windows))]
+static RELAY_INJECTIONS: OnceLock<Mutex<PendingMap>> = OnceLock::new();
 
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 fn pending_map() -> &'static Mutex<PendingMap> {
     PENDING_INJECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(windows)]
+#[cfg(any(test, windows))]
+fn relay_map() -> &'static Mutex<PendingMap> {
+    RELAY_INJECTIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[cfg(any(test, windows))]
 fn revive<T>(r: std::sync::LockResult<T>) -> T {
     r.unwrap_or_else(|e| e.into_inner())
 }
 
-#[cfg(windows)]
-fn drop_expired(queue: &mut VecDeque<Instant>, now: Instant) {
+#[cfg(any(test, windows))]
+fn drop_expired(queue: &mut VecDeque<Instant>, now: Instant, ttl: Duration) {
     while let Some(&front) = queue.front() {
-        if now.duration_since(front) > SIM_TTL {
+        if now.duration_since(front) > ttl {
             queue.pop_front();
         } else {
             break;
@@ -76,33 +115,82 @@ fn drop_expired(queue: &mut VecDeque<Instant>, now: Instant) {
     }
 }
 
-#[cfg(windows)]
-fn record_injection(key: KeyId, is_up: bool) {
-    let mut map = revive(pending_map().lock());
+#[cfg(any(test, windows))]
+fn record_injection_in(map: &'static Mutex<PendingMap>, key: KeyId, is_up: bool, ttl: Duration) {
+    let mut map = revive(map.lock());
     let queue = map.entry((key, is_up)).or_default();
     let now = Instant::now();
-    drop_expired(queue, now);
+    drop_expired(queue, now, ttl);
     queue.push_back(now);
 }
 
-/// hook 端调用：若该 (KeyId, is_up) 对应有未过期的 sim 记录，pop 一条并返回 true。
-#[cfg(windows)]
-pub fn try_consume_injection(key: KeyId, is_up: bool) -> bool {
-    let mut map = revive(pending_map().lock());
+#[cfg(any(test, windows))]
+fn record_injection(key: KeyId, is_up: bool) {
+    record_injection_in(pending_map(), key, is_up, SIM_TTL);
+}
+
+#[cfg(any(test, windows))]
+fn record_relay_injection(key: KeyId, is_up: bool) {
+    record_injection_in(relay_map(), key, is_up, RELAY_TTL);
+}
+
+#[cfg(any(test, windows))]
+fn try_consume_from(
+    map: &'static Mutex<PendingMap>,
+    key: KeyId,
+    is_up: bool,
+    ttl: Duration,
+) -> bool {
+    let mut map = revive(map.lock());
     let Some(queue) = map.get_mut(&(key, is_up)) else {
         return false;
     };
-    drop_expired(queue, Instant::now());
+    drop_expired(queue, Instant::now(), ttl);
     queue.pop_front().is_some()
 }
 
+/// hook 端调用：若该 (KeyId, is_up) 对应有未过期的 sim 记录，pop 一条并返回 true。
+#[cfg(any(test, windows))]
+pub fn try_consume_injection(key: KeyId, is_up: bool) -> bool {
+    try_consume_from(pending_map(), key, is_up, SIM_TTL)
+}
+
+#[cfg(all(not(windows), not(test)))]
+pub fn try_consume_injection(_key: KeyId, _is_up: bool) -> bool {
+    false
+}
+
+/// WebView relay 端调用：若该事件是应用刚注入后由 DOM 回灌的模拟事件，pop 一条并返回 true。
+#[cfg(any(test, windows))]
+pub fn try_consume_relay_injection(key: KeyId, is_up: bool) -> bool {
+    try_consume_from(relay_map(), key, is_up, RELAY_TTL)
+}
+
+#[cfg(all(not(windows), not(test)))]
+pub fn try_consume_relay_injection(_key: KeyId, _is_up: bool) -> bool {
+    false
+}
+
 /// 清空注入队列（引擎重置规则或关闭时调用）。
-#[cfg(windows)]
+#[cfg(any(test, windows))]
 pub fn clear_pending_injections() {
     if let Some(lock) = PENDING_INJECTIONS.get() {
         revive(lock.lock()).clear();
     }
 }
+
+#[cfg(all(not(windows), not(test)))]
+pub fn clear_pending_injections() {}
+
+#[cfg(any(test, windows))]
+pub fn clear_relay_injections() {
+    if let Some(lock) = RELAY_INJECTIONS.get() {
+        revive(lock.lock()).clear();
+    }
+}
+
+#[cfg(all(not(windows), not(test)))]
+pub fn clear_relay_injections() {}
 
 #[cfg(windows)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
@@ -370,7 +458,7 @@ impl InputMode {
 }
 
 #[cfg(windows)]
-unsafe fn send_kbd_via_sendinput(vk: u32, flags: u32) {
+unsafe fn send_kbd_via_sendinput(vk: u32, flags: u32) -> bool {
     // SAFETY: MapVirtualKeyW 对任意 u32 安全
     let scan_ex = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX);
     let scan = (scan_ex & 0xFF) as u16;
@@ -398,11 +486,11 @@ unsafe fn send_kbd_via_sendinput(vk: u32, flags: u32) {
         },
     };
     // SAFETY: input 是栈上完整初始化的 INPUT_KEYBOARD
-    SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
+    SendInput(1, &input, std::mem::size_of::<INPUT>() as i32) == 1
 }
 
 #[cfg(windows)]
-unsafe fn send_wheel_via_sendinput(up: bool) {
+unsafe fn send_wheel_via_sendinput(up: bool) -> bool {
     // WHEEL_DELTA = 120 per notch；向下用补码表示负值
     let mouse_data: u32 = if up { 120u32 } else { (-120i32) as u32 };
     let input = INPUT {
@@ -419,11 +507,11 @@ unsafe fn send_wheel_via_sendinput(up: bool) {
         },
     };
     // SAFETY: input 是栈上完整初始化的 INPUT_MOUSE
-    SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
+    SendInput(1, &input, std::mem::size_of::<INPUT>() as i32) == 1
 }
 
 #[cfg(windows)]
-unsafe fn send_mouse_via_sendinput(button: MouseButton, is_up: bool) {
+unsafe fn send_mouse_via_sendinput(button: MouseButton, is_up: bool) -> bool {
     let (dw_flags, mouse_data) = match (button, is_up) {
         (MouseButton::Left, false) => (MOUSEEVENTF_LEFTDOWN, 0),
         (MouseButton::Left, true) => (MOUSEEVENTF_LEFTUP, 0),
@@ -452,70 +540,86 @@ unsafe fn send_mouse_via_sendinput(button: MouseButton, is_up: bool) {
         },
     };
     // SAFETY: input 是栈上完整初始化的 INPUT_MOUSE
-    SendInput(1, &input, std::mem::size_of::<INPUT>() as i32);
+    SendInput(1, &input, std::mem::size_of::<INPUT>() as i32) == 1
 }
 
 pub fn key_down(key: KeyId) {
-    #[cfg(windows)]
-    {
-        dispatch(key, false);
-    }
-    #[cfg(not(windows))]
-    let _ = key;
+    let _ = key_event(InputEvent::down(key));
 }
 
 pub fn key_up(key: KeyId) {
+    let _ = key_event(InputEvent::up(key));
+}
+
+pub fn key_event(event: InputEvent) -> DispatchResult {
     #[cfg(windows)]
     {
-        dispatch(key, true);
+        dispatch(event.key, event.is_up)
     }
     #[cfg(not(windows))]
-    let _ = key;
+    {
+        let _ = event;
+        DispatchResult::Noop
+    }
+}
+
+pub fn key_events(events: &[InputEvent]) -> Vec<DispatchResult> {
+    events.iter().copied().map(key_event).collect()
 }
 
 #[cfg(windows)]
-fn send_via_sendinput(key: KeyId, is_up: bool) {
+fn send_via_sendinput(key: KeyId, is_up: bool) -> DispatchResult {
     // SAFETY: 各 send_*_via_sendinput 的 Safety 契约由调用方保证
-    match key {
+    let sent = match key {
         KeyId::Keyboard(vk) => unsafe {
             let flags = if is_up { KEYEVENTF_KEYUP } else { 0 };
-            send_kbd_via_sendinput(vk, flags);
+            send_kbd_via_sendinput(vk, flags)
         },
         KeyId::Mouse(MouseButton::WheelUp | MouseButton::WheelDown) => {
             if !is_up {
                 let up = matches!(key, KeyId::Mouse(MouseButton::WheelUp));
-                unsafe { send_wheel_via_sendinput(up) };
+                unsafe { send_wheel_via_sendinput(up) }
+            } else {
+                return DispatchResult::Noop;
             }
         }
-        KeyId::Mouse(btn) => unsafe {
-            send_mouse_via_sendinput(btn, is_up);
-        },
+        KeyId::Mouse(btn) => unsafe { send_mouse_via_sendinput(btn, is_up) },
+    };
+    if sent {
+        record_relay_injection(key, is_up);
+        DispatchResult::Sent
+    } else {
+        DispatchResult::Failed
     }
 }
 
 #[cfg(windows)]
-fn dispatch(key: KeyId, is_up: bool) {
+fn dispatch(key: KeyId, is_up: bool) -> DispatchResult {
     let mode = CURRENT_MODE
         .get()
         .map(|a| a.load(std::sync::atomic::Ordering::SeqCst))
         .unwrap_or(MODE_SENDINPUT);
     match resolve_route(mode, key, is_up) {
         DispatchRoute::SendInput => send_via_sendinput(key, is_up),
-        DispatchRoute::Noop => {}
+        DispatchRoute::Noop => DispatchResult::Noop,
         DispatchRoute::InterceptionKeyboard(vk) => {
             if let Some(lock) = INTERCEPTION_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
-                    backend.send_key(vk, is_up);
-                    return;
+                    if backend.send_key(vk, is_up) {
+                        record_relay_injection(key, is_up);
+                        return DispatchResult::Sent;
+                    }
+                    return DispatchResult::Failed;
                 }
             }
-            send_via_sendinput(key, is_up);
+            send_via_sendinput(key, is_up)
         }
         DispatchRoute::InterceptionWheel { up } => {
             if let Some(lock) = INTERCEPTION_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     if backend.send_wheel(up) {
-                        return;
+                        record_relay_injection(key, false);
+                        return DispatchResult::Sent;
                     }
                     if !INTERCEPTION_MOUSE_FALLBACK_LOGGED
                         .swap(true, std::sync::atomic::Ordering::SeqCst)
@@ -524,13 +628,22 @@ fn dispatch(key: KeyId, is_up: bool) {
                     }
                 }
             }
-            unsafe { send_wheel_via_sendinput(up) };
+            let result = if unsafe { send_wheel_via_sendinput(up) } {
+                DispatchResult::FallbackSent
+            } else {
+                DispatchResult::Failed
+            };
+            if result.was_sent() {
+                record_relay_injection(key, false);
+            }
+            result
         }
         DispatchRoute::InterceptionMouse(btn) => {
             if let Some(lock) = INTERCEPTION_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     if backend.send_mouse(btn, is_up) {
-                        return;
+                        record_relay_injection(key, is_up);
+                        return DispatchResult::Sent;
                     }
                     if !INTERCEPTION_MOUSE_FALLBACK_LOGGED
                         .swap(true, std::sync::atomic::Ordering::SeqCst)
@@ -539,21 +652,25 @@ fn dispatch(key: KeyId, is_up: bool) {
                     }
                 }
             }
-            send_via_sendinput(key, is_up);
+            send_via_sendinput(key, is_up)
         }
         DispatchRoute::DdHidKeyboard(vk) => {
             if let Some(lock) = DD_HID_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     log_dd_route("DD-HID", is_up, key);
                     record_injection(key, is_up);
-                    backend.send_key(vk, is_up);
-                    return;
+                    if backend.send_key(vk, is_up) {
+                        record_relay_injection(key, is_up);
+                        return DispatchResult::Sent;
+                    }
+                    try_consume_injection(key, is_up);
+                    return DispatchResult::Failed;
                 }
             }
             if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 warn!("当前模式 DD-HID 但后端不存在，回退 SendInput");
             }
-            send_via_sendinput(key, is_up);
+            send_via_sendinput(key, is_up)
         }
         DispatchRoute::DdHidWheel { up } => {
             if let Some(lock) = DD_HID_BACKEND.get() {
@@ -561,7 +678,8 @@ fn dispatch(key: KeyId, is_up: bool) {
                     log_dd_route("DD-HID", false, key);
                     record_injection(key, false);
                     if backend.send_wheel(up) {
-                        return;
+                        record_relay_injection(key, false);
+                        return DispatchResult::Sent;
                     }
                     try_consume_injection(key, false);
                 }
@@ -569,7 +687,15 @@ fn dispatch(key: KeyId, is_up: bool) {
             if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 warn!("当前模式 DD-HID 但滚轮回退 SendInput");
             }
-            unsafe { send_wheel_via_sendinput(up) };
+            let result = if unsafe { send_wheel_via_sendinput(up) } {
+                DispatchResult::FallbackSent
+            } else {
+                DispatchResult::Failed
+            };
+            if result.was_sent() {
+                record_relay_injection(key, false);
+            }
+            result
         }
         DispatchRoute::DdHidMouse(btn) => {
             let mut backend_seen = false;
@@ -583,7 +709,8 @@ fn dispatch(key: KeyId, is_up: bool) {
                     // 避免 50ms TTL 内把后续物理 X1/X2 事件误消费。
                     record_injection(key, is_up);
                     if backend.send_mouse(btn, is_up) {
-                        return;
+                        record_relay_injection(key, is_up);
+                        return DispatchResult::Sent;
                     }
                     // DD 不支持（X1/X2）→ 回退 SendInput（SIM_MARKER 路径），撤销预登记
                     try_consume_injection(key, is_up);
@@ -593,21 +720,25 @@ fn dispatch(key: KeyId, is_up: bool) {
             {
                 warn!("当前模式 DD-HID 但后端不存在，回退 SendInput");
             }
-            send_via_sendinput(key, is_up);
+            send_via_sendinput(key, is_up)
         }
         DispatchRoute::DdSimpleKeyboard(vk) => {
             if let Some(lock) = DD_SIMPLE_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     log_dd_route("DD Simple", is_up, key);
                     record_injection(key, is_up);
-                    backend.send_key(vk, is_up);
-                    return;
+                    if backend.send_key(vk, is_up) {
+                        record_relay_injection(key, is_up);
+                        return DispatchResult::Sent;
+                    }
+                    try_consume_injection(key, is_up);
+                    return DispatchResult::Failed;
                 }
             }
             if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 warn!("当前模式 DD Simple 但后端不存在，回退 SendInput");
             }
-            send_via_sendinput(key, is_up);
+            send_via_sendinput(key, is_up)
         }
         DispatchRoute::DdSimpleWheel { up } => {
             if let Some(lock) = DD_SIMPLE_BACKEND.get() {
@@ -615,7 +746,8 @@ fn dispatch(key: KeyId, is_up: bool) {
                     log_dd_route("DD Simple", false, key);
                     record_injection(key, false);
                     if backend.send_wheel(up) {
-                        return;
+                        record_relay_injection(key, false);
+                        return DispatchResult::Sent;
                     }
                     try_consume_injection(key, false);
                 }
@@ -623,7 +755,15 @@ fn dispatch(key: KeyId, is_up: bool) {
             if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
                 warn!("当前模式 DD Simple 但滚轮回退 SendInput");
             }
-            unsafe { send_wheel_via_sendinput(up) };
+            let result = if unsafe { send_wheel_via_sendinput(up) } {
+                DispatchResult::FallbackSent
+            } else {
+                DispatchResult::Failed
+            };
+            if result.was_sent() {
+                record_relay_injection(key, false);
+            }
+            result
         }
         DispatchRoute::DdSimpleMouse(btn) => {
             let mut backend_seen = false;
@@ -633,7 +773,8 @@ fn dispatch(key: KeyId, is_up: bool) {
                     log_dd_route("DD Simple", is_up, key);
                     record_injection(key, is_up);
                     if backend.send_mouse(btn, is_up) {
-                        return;
+                        record_relay_injection(key, is_up);
+                        return DispatchResult::Sent;
                     }
                     try_consume_injection(key, is_up);
                 }
@@ -642,7 +783,7 @@ fn dispatch(key: KeyId, is_up: bool) {
             {
                 warn!("当前模式 DD Simple 但后端不存在，回退 SendInput");
             }
-            send_via_sendinput(key, is_up);
+            send_via_sendinput(key, is_up)
         }
     }
 }
@@ -666,6 +807,30 @@ mod tests {
 
     fn mouse(button: MouseButton) -> KeyId {
         KeyId::Mouse(button)
+    }
+
+    #[test]
+    fn pending_injection_is_consumed_once_and_keeps_direction() {
+        clear_pending_injections();
+        let key = KeyId::Keyboard(0x51);
+
+        record_injection(key, false);
+
+        assert!(!try_consume_injection(key, true));
+        assert!(try_consume_injection(key, false));
+        assert!(!try_consume_injection(key, false));
+    }
+
+    #[test]
+    fn relay_injection_is_consumed_once_and_keeps_direction() {
+        clear_relay_injections();
+        let key = KeyId::Keyboard(0x45);
+
+        record_relay_injection(key, false);
+
+        assert!(!try_consume_relay_injection(key, true));
+        assert!(try_consume_relay_injection(key, false));
+        assert!(!try_consume_relay_injection(key, false));
     }
 
     #[cfg(windows)]

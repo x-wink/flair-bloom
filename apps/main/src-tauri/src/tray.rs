@@ -33,7 +33,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>, engine: Arc<BurstEngine>) -> t
         .on_menu_event(move |app, event| match event.id.as_ref() {
             "toggle" => {
                 let enabled = !engine_clone.global_enabled.load(Ordering::SeqCst);
-                engine_clone.global_enabled.store(enabled, Ordering::SeqCst);
+                engine_clone.set_global_enabled(enabled, true);
                 if let Ok(m) = build_menu(app, enabled) {
                     if let Some(tray) = app.tray_by_id("main") {
                         let _ = tray.set_menu(Some(m));
@@ -44,7 +44,10 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>, engine: Arc<BurstEngine>) -> t
             "open" => {
                 crate::show_panel(app);
             }
-            "quit" => app.exit(0),
+            "quit" => {
+                engine_clone.shutdown();
+                app.exit(0);
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {

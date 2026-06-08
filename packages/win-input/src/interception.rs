@@ -40,12 +40,12 @@ impl InterceptionBackend {
         })
     }
 
-    pub fn send_key(&self, vk: u32, is_up: bool) {
+    pub fn send_key(&self, vk: u32, is_up: bool) -> bool {
         // SAFETY: MapVirtualKeyW 对任意 u32 安全
         let scan_ex = unsafe { MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX) };
         let scan = (scan_ex & 0xFF) as u16;
         if scan == 0 {
-            return;
+            return false;
         }
         let prefix = (scan_ex >> 8) & 0xFF;
         let mut state: u16 = if is_up {
@@ -68,7 +68,7 @@ impl InterceptionBackend {
                 self.keyboard_device,
                 &stroke as *const InterceptionKeyStroke as *const InterceptionStroke,
                 1,
-            );
+            ) == 1
         }
     }
 

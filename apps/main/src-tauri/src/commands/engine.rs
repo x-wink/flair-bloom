@@ -1,19 +1,24 @@
 ﻿//! 规则 CRUD + 输入模式切换 + 按键捕获。驱动管理已迁至 [`super::driver`]。
 
 use crate::engine::BurstEngine;
-use qzh_profile::{BurstRule, Hotkeys, KeyId, MAX_RULES};
+use qzh_profile::{BurstRule, Hotkeys, KeyId, MAX_INTERVAL_MS, MAX_RULES, MIN_INTERVAL_MS};
+use serde::Serialize;
 use std::sync::{atomic::Ordering, Arc};
 #[allow(unused_imports)]
 use tauri::{AppHandle, Emitter, Manager, State};
+use win_input::try_consume_relay_injection;
 
 pub struct EngineState(pub Arc<BurstEngine>);
 
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct RelayKeyResult {
+    pub accepted_physical: bool,
+    pub handled: bool,
+}
+
 #[tauri::command]
 pub fn set_global_enabled(app: AppHandle, state: State<EngineState>, enabled: bool) {
-    state.0.global_enabled.store(enabled, Ordering::SeqCst);
-    if !enabled {
-        state.0.cancel_all_loops();
-    }
+    state.0.set_global_enabled(enabled, true);
     if let Some(tray) = app.tray_by_id("main") {
         if let Ok(menu) = crate::tray::build_menu(&app, enabled) {
             let _ = tray.set_menu(Some(menu));
@@ -38,11 +43,13 @@ pub fn set_rules(state: State<EngineState>, rules: Vec<BurstRule>) -> Result<(),
         return Err(format!("规则数量 {} 超过上限 {}", rules.len(), MAX_RULES));
     }
     for (i, rule) in rules.iter().enumerate() {
-        if !(10..=10000).contains(&rule.interval_ms) {
+        if !(MIN_INTERVAL_MS..=MAX_INTERVAL_MS).contains(&rule.interval_ms) {
             return Err(format!(
-                "第 {} 条规则间隔 {}ms 超出范围 [10, 10000]",
+                "第 {} 条规则间隔 {}ms 超出范围 [{}, {}]",
                 i + 1,
-                rule.interval_ms
+                rule.interval_ms,
+                MIN_INTERVAL_MS,
+                MAX_INTERVAL_MS
             ));
         }
     }
@@ -88,14 +95,24 @@ pub fn get_active_rules(state: State<EngineState>) -> Vec<String> {
 
 /// 面板聚焦时 WH_KEYBOARD_LL 不触发，前端将键盘事件中继到引擎统一处理。
 /// 注意：WebView 默认行为必须由前端在 DOM 事件内同步 preventDefault；
-/// 这里的返回值只表示引擎是否处理了按键，不能用于事后取消 F3 等浏览器快捷键。
+/// 这里的 handled 只表示引擎是否处理了按键，不能用于事后取消 F3 等浏览器快捷键。
 #[tauri::command]
-pub fn relay_key_event(state: State<EngineState>, key: KeyId, is_up: bool) -> bool {
-    if is_up {
-        state.0.on_key_release(key);
-        false
+pub fn relay_key_event(state: State<EngineState>, key: KeyId, is_up: bool) -> RelayKeyResult {
+    if try_consume_relay_injection(key, is_up) {
+        return RelayKeyResult {
+            accepted_physical: false,
+            handled: false,
+        };
+    }
+
+    let result = if is_up {
+        state.0.on_key_release_event(key)
     } else {
-        state.0.on_key_press(key)
+        state.0.on_key_press_event(key)
+    };
+    RelayKeyResult {
+        accepted_physical: result.accepted_physical,
+        handled: result.handled,
     }
 }
 
@@ -164,6 +181,7 @@ pub fn set_input_mode(
             }
         }
 
+        state.0.cancel_all_loops();
         init_backend(input_mode);
 
         if let Ok(store) = app.store(crate::STORE_PATH) {

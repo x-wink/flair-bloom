@@ -19,6 +19,9 @@ use crate::key_id::KeyId;
 pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 /// 单个 [`Profile`] 允许的最大规则数量，超出会在 [`Profile::validate`] 阶段被拒绝。
 pub const MAX_RULES: usize = 64;
+pub const MIN_INTERVAL_MS: u32 = 1;
+pub const DEFAULT_INTERVAL_MS: u32 = 10;
+pub const MAX_INTERVAL_MS: u32 = 10000;
 
 /// 一份完整的连发配置文件。落盘时序列化为 JSON，再由 [`crate::header::FileHeader`] 与
 /// `crypto` 包装为 `.qzh` 二进制文件。
@@ -67,7 +70,7 @@ pub struct BurstRule {
     /// Toggle mode only: separate stop hotkey. Defaults to trigger_key when None.
     #[serde(default)]
     pub stop_key: Option<KeyId>,
-    /// Milliseconds between simulated keypresses. Clamped to [10, 10000].
+    /// Milliseconds between simulated keypresses. Clamped to [`MIN_INTERVAL_MS`, `MAX_INTERVAL_MS`].
     pub interval_ms: u32,
     /// Toggle 规则互斥分组名。同组内激活一条规则时，其他活跃的同组 Toggle 规则自动停止。
     /// Hold 规则忽略此字段。`None` 表示不属于任何分组。
@@ -119,8 +122,8 @@ pub enum ProfileError {
     /// 规则数量超过 [`MAX_RULES`]。
     #[error("rule count exceeds maximum of {MAX_RULES}")]
     TooManyRules,
-    /// 连发间隔不在 `[10, 10000]` ms 范围内。
-    #[error("rule interval {0}ms is out of range [10, 10000]")]
+    /// 连发间隔不在允许范围内。
+    #[error("rule interval {0}ms is out of range")]
     InvalidInterval(u32),
     /// DD-HID 模式下 Toggle 规则的 `target_key == trigger_key`，会导致自循环。
     #[error("rule {0}: target_key must differ from trigger_key in DD mode")]
@@ -165,7 +168,7 @@ impl Profile {
         }
         for rule in &self.rules {
             let i = rule.interval_ms;
-            if !(10..=10000).contains(&i) {
+            if !(MIN_INTERVAL_MS..=MAX_INTERVAL_MS).contains(&i) {
                 return Err(ProfileError::InvalidInterval(i));
             }
             if !distinct_target || !rule.enabled {
