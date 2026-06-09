@@ -465,13 +465,7 @@ impl SchedulerWorker {
             return AcquireOutcome::Shared;
         }
 
-        if !allow_while_physical_down
-            && self
-                .physical_keys
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .contains(&key)
-        {
+        if !allow_while_physical_down && self.is_physically_blocked(key) {
             return AcquireOutcome::BlockedByPhysical;
         }
 
@@ -480,6 +474,23 @@ impl SchedulerWorker {
             .owners
             .insert(owner.to_string(), allow_while_physical_down);
         AcquireOutcome::Acquired
+    }
+
+    /// 目标键是否真的被物理按住。`physical_keys` 由 hook 维护，但 DD 等后端的注入回灌
+    /// 仅靠启发式队列过滤（非 SIM_MARKER 精确过滤），偶尔漏过会把自身注入误记为物理按下，
+    /// 且该集合从不整体清空 → 目标键被永久误判为"按住"而停止注入。命中拦截前用
+    /// `GetAsyncKeyState` 复核真实物理状态，发现陈旧泄漏就地清除并放行。
+    fn is_physically_blocked(&self, key: KeyId) -> bool {
+        let mut pressed = self.physical_keys.lock().unwrap_or_else(|e| e.into_inner());
+        if !pressed.contains(&key) {
+            return false;
+        }
+        if key_physically_down(key) {
+            return true;
+        }
+        pressed.remove(&key);
+        warn!("清除陈旧物理按键记录（疑似注入回灌泄漏）: key={key:?}");
+        false
     }
 
     fn release_owner(&mut self, key: KeyId, owner: &str) -> Option<InputEvent> {
@@ -544,6 +555,33 @@ pub(crate) fn release_simulated_keys(simulated_keys: &SimulatedKeys) {
     if !events.is_empty() {
         let _ = key_events(&events);
     }
+}
+
+/// 查询某个键当前是否处于物理按下状态。高位 `0x8000` 表示按下。
+/// 非 Windows 平台无法查询，保守地信任 `physical_keys` 记录（返回 `true`），
+/// 使既有单元测试与跨平台行为保持不变。
+#[cfg(windows)]
+fn key_physically_down(key: KeyId) -> bool {
+    use qzh_profile::key_id::MouseButton;
+    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
+    let vk: i32 = match key {
+        KeyId::Keyboard(vk) => vk as i32,
+        KeyId::Mouse(MouseButton::Left) => 0x01, // VK_LBUTTON
+        KeyId::Mouse(MouseButton::Right) => 0x02, // VK_RBUTTON
+        KeyId::Mouse(MouseButton::Middle) => 0x04, // VK_MBUTTON
+        KeyId::Mouse(MouseButton::X1) => 0x05,   // VK_XBUTTON1
+        KeyId::Mouse(MouseButton::X2) => 0x06,   // VK_XBUTTON2
+        // 滚轮是瞬发事件，不存在"按住"状态，一律视为未按下（陈旧记录即清除）。
+        KeyId::Mouse(MouseButton::WheelUp | MouseButton::WheelDown) => return false,
+    };
+    // SAFETY: GetAsyncKeyState 对任意 vKey 取值安全，无副作用
+    let state = unsafe { GetAsyncKeyState(vk) };
+    (state as u16 & 0x8000) != 0
+}
+
+#[cfg(not(windows))]
+fn key_physically_down(_key: KeyId) -> bool {
+    true
 }
 
 fn decrement_simulated_key(simulated: &mut HashMap<KeyId, usize>, key: KeyId) {
