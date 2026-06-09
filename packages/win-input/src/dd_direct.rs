@@ -98,7 +98,42 @@ impl DdSimpleDirectIo {
             warn!("DDSimple 直接 IO：无法打开 \\\\.\\dd63330，降级为 DLL 模式");
             return None;
         }
-        info!("DDSimple 直接 IO：设备已打开，ExtraInformation 将写入 SIM_MARKER");
+
+        // DDSimple 驱动要求先经过 DD_btn(0) 握手才接受注入 IOCTL；独立句柄未握手时
+        // DeviceIoControl 静默返回 0，导致注入丢失。发无害探针（零位移、零按钮的
+        // MOUSE_INPUT_DATA）确认驱动接受本句柄，否则关闭句柄、降级为 DLL 模式。
+        let mut probe = MouseInputData {
+            unit_id: 1,
+            flags: 0,
+            button_flags: 0,
+            button_data: 0,
+            raw_buttons: 0,
+            last_x: 0,
+            last_y: 0,
+            extra_information: SIM_MARKER as u32,
+        };
+        let mut probe_bytes = 0u32;
+        // SAFETY: handle 有效；probe 是正确布局的 MOUSE_INPUT_DATA（24 字节）
+        let probe_ok = unsafe {
+            DeviceIoControl(
+                handle,
+                IOCTL_MOUSE,
+                std::ptr::addr_of_mut!(probe).cast(),
+                size_of::<MouseInputData>() as u32,
+                std::ptr::null_mut(),
+                0,
+                &mut probe_bytes,
+                std::ptr::null_mut(),
+            )
+        };
+        if probe_ok == 0 {
+            warn!("DDSimple 直接 IO：探针 IOCTL 失败（驱动需握手），降级为 DLL 模式");
+            // SAFETY: handle 是刚才 CreateFileW 返回的有效句柄
+            unsafe { CloseHandle(handle) };
+            return None;
+        }
+
+        info!("DDSimple 直接 IO：探针 IOCTL 成功，ExtraInformation 将写入 SIM_MARKER");
         Some(Self {
             handle,
             kbd_first_logged: AtomicBool::new(false),
