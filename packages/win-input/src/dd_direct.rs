@@ -63,6 +63,9 @@ struct MouseInputData {
 /// 持有对 DDSimple 驱动的独立设备句柄，注入时写入 `SIM_MARKER`。
 pub struct DdSimpleDirectIo {
     handle: HANDLE,
+    /// 键盘 IOCTL 握手是否通过。鼠标探针成功不代表键盘通道可用（部分构建对
+    /// `IOCTL_KEYBOARD` 有独立握手要求），为 `false` 时键盘走 DLL/SendInput 回退。
+    kbd_direct_ok: bool,
     kbd_first_logged: AtomicBool,
     mouse_first_logged: AtomicBool,
 }
@@ -133,9 +136,39 @@ impl DdSimpleDirectIo {
             return None;
         }
 
-        info!("DDSimple 直接 IO：探针 IOCTL 成功，ExtraInformation 将写入 SIM_MARKER");
+        // 键盘通道单独握手：发零位（make_code=0、flags=0）的 KEYBOARD_INPUT_DATA 无害探针。
+        // 与鼠标零位探针同理仅验证 IOCTL 通路，不产生可见按键；携带 SIM_MARKER 使
+        // 本进程 hook 可过滤。失败不影响鼠标直接 IO，仅令键盘走回退。
+        let mut kbd_probe = KeyboardInputData {
+            unit_id: 1,
+            make_code: 0,
+            flags: 0,
+            reserved: 0,
+            extra_information: SIM_MARKER as u32,
+        };
+        let mut kbd_probe_bytes = 0u32;
+        // SAFETY: handle 有效；kbd_probe 是正确布局的 KEYBOARD_INPUT_DATA（12 字节）
+        let kbd_probe_ok = unsafe {
+            DeviceIoControl(
+                handle,
+                IOCTL_KEYBOARD,
+                std::ptr::addr_of_mut!(kbd_probe).cast(),
+                size_of::<KeyboardInputData>() as u32,
+                std::ptr::null_mut(),
+                0,
+                &mut kbd_probe_bytes,
+                std::ptr::null_mut(),
+            )
+        };
+        let kbd_direct_ok = kbd_probe_ok != 0;
+        if kbd_direct_ok {
+            info!("DDSimple 直接 IO：键鼠探针 IOCTL 均成功，ExtraInformation 将写入 SIM_MARKER");
+        } else {
+            warn!("DDSimple 直接 IO：鼠标探针成功但键盘探针失败，键盘将回退 SendInput");
+        }
         Some(Self {
             handle,
+            kbd_direct_ok,
             kbd_first_logged: AtomicBool::new(false),
             mouse_first_logged: AtomicBool::new(false),
         })
@@ -147,6 +180,10 @@ impl DdSimpleDirectIo {
     /// 返回 `None`：此 VK 无法通过 `MapVirtualKeyW` 得到 scan code（E1 前缀或无效键），
     /// 调用方应降级到 DLL 路径。
     pub fn send_key(&self, vk: u32, is_up: bool) -> Option<bool> {
+        // 键盘通道握手未通过：交回调用方走 DLL/SendInput 回退，避免静默丢键。
+        if !self.kbd_direct_ok {
+            return None;
+        }
         // SAFETY: MapVirtualKeyW 对任意 u32 vk 安全
         let scan_ex = unsafe { MapVirtualKeyW(vk, MAPVK_VK_TO_VSC_EX) };
         let scan = (scan_ex & 0xFF) as u16;

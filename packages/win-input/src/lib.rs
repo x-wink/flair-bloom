@@ -657,19 +657,23 @@ fn dispatch(key: KeyId, is_up: bool) -> DispatchResult {
             send_via_sendinput(key, is_up)
         }
         DispatchRoute::DdHidKeyboard(vk) => {
+            let mut backend_seen = false;
             if let Some(lock) = DD_HID_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
+                    backend_seen = true;
                     log_dd_route("DD-HID", is_up, key);
                     record_injection(key, is_up);
                     if backend.send_key(vk, is_up) {
                         record_relay_injection(key, is_up);
                         return DispatchResult::Sent;
                     }
+                    // DD 注入失败（VK 无映射 / 驱动拒绝）→ 撤销预登记，回退 SendInput，
+                    // 与鼠标路由对称，避免按键被直接丢弃。
                     try_consume_injection(key, is_up);
-                    return DispatchResult::Failed;
                 }
             }
-            if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            if !backend_seen && !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
                 warn!("当前模式 DD-HID 但后端不存在，回退 SendInput");
             }
             send_via_sendinput(key, is_up)
@@ -725,8 +729,10 @@ fn dispatch(key: KeyId, is_up: bool) -> DispatchResult {
             send_via_sendinput(key, is_up)
         }
         DispatchRoute::DdSimpleKeyboard(vk) => {
+            let mut backend_seen = false;
             if let Some(lock) = DD_SIMPLE_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
+                    backend_seen = true;
                     log_dd_route("DD Simple", is_up, key);
                     // 直接 IO 路径：ExtraInformation = SIM_MARKER，hook 端通过 dwExtraInfo 过滤，
                     // 无需 PENDING_INJECTIONS 登记；DLL 路径需在发送前登记以防 hook 竞态。
@@ -738,13 +744,15 @@ fn dispatch(key: KeyId, is_up: bool) -> DispatchResult {
                         record_relay_injection(key, is_up);
                         return DispatchResult::Sent;
                     }
+                    // 直接 IO 键盘 IOCTL 被驱动拒绝 / VK 无 scan code → 撤销登记，回退 SendInput，
+                    // 与鼠标路由对称，避免按键被直接丢弃。
                     if use_pending {
                         try_consume_injection(key, is_up);
                     }
-                    return DispatchResult::Failed;
                 }
             }
-            if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            if !backend_seen && !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst)
+            {
                 warn!("当前模式 DD Simple 但后端不存在，回退 SendInput");
             }
             send_via_sendinput(key, is_up)

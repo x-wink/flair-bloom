@@ -160,6 +160,11 @@ impl DdFfi {
                 vk, ddcode, flag, ret
             );
         }
+        // 反汇编两个 DLL 确认 DD_key 成功必返回 1：
+        // - dd63330.dll（DDSimple）：注入路径直接转发 DeviceIoControl 的 BOOL（成功=1、失败=0），
+        //   另有 -1（设备未打开）/ -2（ddcode 不在表内）两个错误哨兵；故 `ret == 1` 等价于成功。
+        // - ddhid.63340.dll（DD-HID）：注入路径恒返回 1（无失败回报，fire-and-forget）。
+        // 因此 `ret == 1` 是两者通用、确定的成功判据。
         ret == 1
     }
 
