@@ -9,7 +9,7 @@ Monorepo 结构，Rust workspace + pnpm workspace 双层管理。
 ## 当前阶段（2026-05-30）
 
 - 当前基线：`v0.2.x`，以体验完善、稳定性和完整配置管理为主。
-- 已完成主能力：按压 / Toggle 连发、键盘全键位、鼠标 5 键、滚轮连发、三档输入模式（SendInput / Interception / DD-HID）、多配置文件、全局热键、面板显隐热键、设置面板、声音反馈、诊断修复、外部配置导入、自动更新、系统托盘、开机自启。
+- 已完成主能力：按压 / Toggle 连发、键盘全键位、鼠标 5 键、滚轮连发、多输入模式（SendInput / Interception / DD驱动；DD-HID 暂停）、多配置文件、全局热键、面板显隐热键、设置面板、声音反馈、诊断修复、外部配置导入、自动更新、系统托盘、开机自启。
 - 配置 schema：`CURRENT_SCHEMA_VERSION = 3`。v1→v2 将裸 VK 升级为 `KeyId`，v2→v3 增加滚轮上 / 下。
 - 后续主线：v0.3 桌宠、v0.4 许可证与亲友专属功能、v0.5 落地页与运营基础、v1.0 完整功能。
 - 进度标记：`[x]` 表示当前代码或发布流程已具备，`[ ]` 表示仍在规划或未完成。
@@ -496,7 +496,7 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 {
   "agreed": true,
   "agreed_at": 1748000000,
-  "agreement_version": "1.2",
+  "agreement_version": "1.3",
   "app_version_at_agree": "0.2.4"
 }
 ```
@@ -525,7 +525,7 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 | 按压连发                 | packages/burst-engine                           |
 | 一键连发（热键 Toggle）  | packages/burst-engine                           |
 | 键盘 / 鼠标 / 滚轮连发   | packages/burst-engine + packages/win-input      |
-| 三档输入模式             | packages/win-input + apps/main/src-tauri/commands/engine.rs |
+| 多输入模式               | packages/win-input + apps/main/src-tauri/commands/engine.rs |
 | 配置文件 CRUD            | apps/main — commands/profile.rs                 |
 | 外部配置导入             | apps/main — commands/import_profile.rs + ImportDialog |
 | `.qzh` 加密格式          | packages/qzh-format + packages/qzh-profile      |
