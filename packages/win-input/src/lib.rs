@@ -6,6 +6,8 @@
 #[cfg(windows)]
 mod dd_common;
 #[cfg(windows)]
+mod dd_direct;
+#[cfg(windows)]
 pub mod ddhid;
 #[cfg(windows)]
 pub mod ddsimple;
@@ -726,12 +728,19 @@ fn dispatch(key: KeyId, is_up: bool) -> DispatchResult {
             if let Some(lock) = DD_SIMPLE_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     log_dd_route("DD Simple", is_up, key);
-                    record_injection(key, is_up);
+                    // 直接 IO 路径：ExtraInformation = SIM_MARKER，hook 端通过 dwExtraInfo 过滤，
+                    // 无需 PENDING_INJECTIONS 登记；DLL 路径需在发送前登记以防 hook 竞态。
+                    let use_pending = !backend.has_direct_io();
+                    if use_pending {
+                        record_injection(key, is_up);
+                    }
                     if backend.send_key(vk, is_up) {
                         record_relay_injection(key, is_up);
                         return DispatchResult::Sent;
                     }
-                    try_consume_injection(key, is_up);
+                    if use_pending {
+                        try_consume_injection(key, is_up);
+                    }
                     return DispatchResult::Failed;
                 }
             }
@@ -744,12 +753,17 @@ fn dispatch(key: KeyId, is_up: bool) -> DispatchResult {
             if let Some(lock) = DD_SIMPLE_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     log_dd_route("DD Simple", false, key);
-                    record_injection(key, false);
+                    let use_pending = !backend.has_direct_io();
+                    if use_pending {
+                        record_injection(key, false);
+                    }
                     if backend.send_wheel(up) {
                         record_relay_injection(key, false);
                         return DispatchResult::Sent;
                     }
-                    try_consume_injection(key, false);
+                    if use_pending {
+                        try_consume_injection(key, false);
+                    }
                 }
             }
             if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -771,12 +785,17 @@ fn dispatch(key: KeyId, is_up: bool) -> DispatchResult {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     backend_seen = true;
                     log_dd_route("DD Simple", is_up, key);
-                    record_injection(key, is_up);
+                    let use_pending = !backend.has_direct_io();
+                    if use_pending {
+                        record_injection(key, is_up);
+                    }
                     if backend.send_mouse(btn, is_up) {
                         record_relay_injection(key, is_up);
                         return DispatchResult::Sent;
                     }
-                    try_consume_injection(key, is_up);
+                    if use_pending {
+                        try_consume_injection(key, is_up);
+                    }
                 }
             }
             if !backend_seen && !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst)
