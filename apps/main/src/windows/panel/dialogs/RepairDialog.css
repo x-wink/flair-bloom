@@ -18,7 +18,7 @@
   align-items: center;
   justify-content: space-between;
   gap: var(--fb-space-3);
-  margin: 0 0 var(--fb-space-4);
+  margin: var(--fb-space-4) 0 var(--fb-space-4);
   font-size: var(--fb-fs-sm);
 }
 
@@ -295,10 +295,4 @@
   color: var(--fb-text-faint);
   -webkit-user-select: text;
   user-select: text;
-}
-
-@media (max-width: 520px) {
-  .fb-dialog__footer .fb-btn {
-    flex: 1 1 auto;
-  }
 }

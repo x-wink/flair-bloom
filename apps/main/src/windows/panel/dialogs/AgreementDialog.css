@@ -17,7 +17,11 @@
   color: var(--fb-text-regular);
 }
 
-/* footer 布局：hint 占满一行，按钮均分下一行 */
+/* footer 布局：hint 占满一行，按钮按内容宽度排在下一行 */
+.agreement-card .fb-dialog__footer {
+  flex-wrap: wrap;
+}
+
 .agreement-hint {
   flex: 0 0 100%;
   margin: 0;
@@ -27,6 +31,6 @@
 }
 
 .agreement-action {
-  flex: 1 !important;
-  min-width: 0 !important;
+  flex: 0 0 auto;
+  min-width: max-content;
 }
