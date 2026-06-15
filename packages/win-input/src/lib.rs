@@ -6,8 +6,6 @@
 #[cfg(windows)]
 mod dd_common;
 #[cfg(windows)]
-mod dd_direct;
-#[cfg(windows)]
 pub mod ddhid;
 #[cfg(windows)]
 pub mod ddsimple;
@@ -228,7 +226,17 @@ impl InputMode {
         }
     }
 
+    /// DD 系列（DDSimple / DD-HID）驱动注入无法携带 `SIM_MARKER`（驱动把 ExtraInformation
+    /// 写死为 0），自注入只能靠 `PENDING_INJECTIONS` 时间窗口队列过滤。该队列对
+    /// `target == trigger / stop` 的 Toggle 规则无法可靠区分「用户真实按下停止键」与
+    /// 「自身注入回灌」，会导致连发自停或停不掉。故 DD 系列禁止 Toggle 目标键与启动/停止键相同。
     pub fn requires_distinct_target_for_toggle(&self) -> bool {
+        matches!(self, Self::DdHid | Self::DdSimple)
+    }
+
+    /// 鼠标侧键（X1/X2）作为目标键是否被禁止。仅 DD-HID（63340 `DD_btn` 不支持侧键值域）
+    /// 受限；DDSimple 的 `dd63330` 走 `MOUSE_INPUT_DATA.ButtonFlags`，原生支持 X1/X2。
+    pub fn forbids_side_button_target(&self) -> bool {
         matches!(self, Self::DdHid)
     }
 
@@ -446,6 +454,10 @@ pub enum InputMode {
 #[cfg(not(windows))]
 impl InputMode {
     pub fn requires_distinct_target_for_toggle(&self) -> bool {
+        false
+    }
+
+    pub fn forbids_side_button_target(&self) -> bool {
         false
     }
 
@@ -734,21 +746,17 @@ fn dispatch(key: KeyId, is_up: bool) -> DispatchResult {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     backend_seen = true;
                     log_dd_route("DD Simple", is_up, key);
-                    // 直接 IO 路径：ExtraInformation = SIM_MARKER，hook 端通过 dwExtraInfo 过滤，
-                    // 无需 PENDING_INJECTIONS 登记；DLL 路径需在发送前登记以防 hook 竞态。
-                    let use_pending = !backend.has_direct_io();
-                    if use_pending {
-                        record_injection(key, is_up);
-                    }
+                    // dd63330 驱动注入时把 ExtraInformation 写死为 0（内核键盘注入函数
+                    // VA 0x140003d13 显式清零），回到 LL hook 时 dwExtraInfo 恒为 0，SIM_MARKER
+                    // 无法幸存。故一律先登记 PENDING_INJECTIONS，由时间窗口队列过滤自身注入回灌，
+                    // 否则 hook 会把注入误判为物理按键。
+                    record_injection(key, is_up);
                     if backend.send_key(vk, is_up) {
                         record_relay_injection(key, is_up);
                         return DispatchResult::Sent;
                     }
-                    // 直接 IO 键盘 IOCTL 被驱动拒绝 / VK 无 scan code → 撤销登记，回退 SendInput，
-                    // 与鼠标路由对称，避免按键被直接丢弃。
-                    if use_pending {
-                        try_consume_injection(key, is_up);
-                    }
+                    // VK 无 scan code / 驱动拒绝 → 撤销登记，回退 SendInput，避免按键被直接丢弃。
+                    try_consume_injection(key, is_up);
                 }
             }
             if !backend_seen && !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst)
@@ -761,17 +769,14 @@ fn dispatch(key: KeyId, is_up: bool) -> DispatchResult {
             if let Some(lock) = DD_SIMPLE_BACKEND.get() {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     log_dd_route("DD Simple", false, key);
-                    let use_pending = !backend.has_direct_io();
-                    if use_pending {
-                        record_injection(key, false);
-                    }
+                    // 同键盘：dd63330 驱动把 ExtraInformation 写死为 0，SIM_MARKER 无法幸存，
+                    // 一律登记 PENDING_INJECTIONS 兜底自注入回灌。
+                    record_injection(key, false);
                     if backend.send_wheel(up) {
                         record_relay_injection(key, false);
                         return DispatchResult::Sent;
                     }
-                    if use_pending {
-                        try_consume_injection(key, false);
-                    }
+                    try_consume_injection(key, false);
                 }
             }
             if !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
@@ -793,17 +798,14 @@ fn dispatch(key: KeyId, is_up: bool) -> DispatchResult {
                 if let Some(backend) = revive(lock.lock()).as_ref() {
                     backend_seen = true;
                     log_dd_route("DD Simple", is_up, key);
-                    let use_pending = !backend.has_direct_io();
-                    if use_pending {
-                        record_injection(key, is_up);
-                    }
+                    // 同键盘/滚轮：dd63330 驱动把 ExtraInformation 写死为 0，SIM_MARKER 不可用，
+                    // 一律登记 PENDING_INJECTIONS 兜底自注入回灌。
+                    record_injection(key, is_up);
                     if backend.send_mouse(btn, is_up) {
                         record_relay_injection(key, is_up);
                         return DispatchResult::Sent;
                     }
-                    if use_pending {
-                        try_consume_injection(key, is_up);
-                    }
+                    try_consume_injection(key, is_up);
                 }
             }
             if !backend_seen && !DD_FALLBACK_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst)
@@ -879,8 +881,24 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn ddsimple_does_not_inherit_ddhid_toggle_limit() {
-        assert!(!InputMode::DdSimple.requires_distinct_target_for_toggle());
+    fn dd_series_forbids_same_key_toggle() {
+        // DD 系列驱动注入无法携带 SIM_MARKER（驱动清零 ExtraInformation），
+        // 同键 Toggle 无法可靠区分自注入与物理停止键，故两者都禁止。
+        assert!(InputMode::DdSimple.requires_distinct_target_for_toggle());
+        assert!(InputMode::DdHid.requires_distinct_target_for_toggle());
+        // 非 DD 系列不受限。
+        assert!(!InputMode::SendInput.requires_distinct_target_for_toggle());
+        assert!(!InputMode::Interception.requires_distinct_target_for_toggle());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_ddhid_forbids_side_button_target() {
+        // DDSimple 的 dd63330 走 MOUSE_INPUT_DATA.ButtonFlags，原生支持 X1/X2 侧键。
+        assert!(InputMode::DdHid.forbids_side_button_target());
+        assert!(!InputMode::DdSimple.forbids_side_button_target());
+        assert!(!InputMode::SendInput.forbids_side_button_target());
+        assert!(!InputMode::Interception.forbids_side_button_target());
     }
 
     #[test]

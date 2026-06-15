@@ -58,21 +58,22 @@ pub fn set_rules(state: State<EngineState>, rules: Vec<BurstRule>) -> Result<(),
     {
         let mode = win_input::current_mode();
         if mode.requires_distinct_target_for_toggle() {
+            let label = input_mode_label(mode);
             for rule in rules.iter().filter(|r| r.enabled) {
                 if !matches!(rule.mode, qzh_profile::profile::BurstMode::Toggle) {
                     continue;
                 }
                 if rule.target_key == rule.trigger_key {
                     return Err(format!(
-                        "DDHID 模式下，切换连发规则「{}」的目标键不可与启动热键相同",
-                        rule.id
+                        "{} 模式下，切换连发规则「{}」的目标键不可与启动热键相同",
+                        label, rule.id
                     ));
                 }
                 let stop = rule.stop_key.unwrap_or(rule.trigger_key);
                 if rule.target_key == stop {
                     return Err(format!(
-                        "DDHID 模式下，切换连发规则「{}」的目标键不可与停止热键相同",
-                        rule.id
+                        "{} 模式下，切换连发规则「{}」的目标键不可与停止热键相同",
+                        label, rule.id
                     ));
                 }
             }
@@ -149,33 +150,39 @@ pub fn set_input_mode(
             ));
         }
 
-        if input_mode.requires_distinct_target_for_toggle() {
+        {
             use qzh_profile::key_id::{KeyId, MouseButton};
+            let label = input_mode_label(input_mode);
+            let forbids_side_button = input_mode.forbids_side_button_target();
+            let distinct_target = input_mode.requires_distinct_target_for_toggle();
             let rules = state.0.get_rules();
             for rule in rules.iter().filter(|r| r.enabled) {
-                if matches!(
-                    rule.target_key,
-                    KeyId::Mouse(MouseButton::X1) | KeyId::Mouse(MouseButton::X2)
-                ) {
+                if forbids_side_button
+                    && matches!(
+                        rule.target_key,
+                        KeyId::Mouse(MouseButton::X1) | KeyId::Mouse(MouseButton::X2)
+                    )
+                {
                     return Err(format!(
-                        "切换失败：规则「{}」的目标键是鼠标侧键，DDHID 模式不支持。请把目标键改为左/右/中键或键盘键。",
-                        rule.id
+                        "切换失败：规则「{}」的目标键是鼠标侧键，{} 模式不支持。请把目标键改为左/右/中键或键盘键。",
+                        rule.id, label
                     ));
                 }
-                if !matches!(rule.mode, qzh_profile::profile::BurstMode::Toggle) {
+                if !distinct_target || !matches!(rule.mode, qzh_profile::profile::BurstMode::Toggle)
+                {
                     continue;
                 }
                 if rule.target_key == rule.trigger_key {
                     return Err(format!(
-                        "切换失败：切换连发规则「{}」的目标键与启动热键相同。\nDDHID 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
-                        rule.id
+                        "切换失败：切换连发规则「{}」的目标键与启动热键相同。\n{} 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
+                        rule.id, label
                     ));
                 }
                 let stop = rule.stop_key.unwrap_or(rule.trigger_key);
                 if rule.target_key == stop {
                     return Err(format!(
-                        "切换失败：切换连发规则「{}」的目标键与停止热键相同。\nDDHID 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
-                        rule.id
+                        "切换失败：切换连发规则「{}」的目标键与停止热键相同。\n{} 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
+                        rule.id, label
                     ));
                 }
             }

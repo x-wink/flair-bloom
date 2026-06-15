@@ -1,14 +1,21 @@
 //! DD Simple 后端，使用 `dd63330.dll`，独立于 DD-HID 驱动安装/卸载链路。
 //!
-//! 注入优先级：
-//! 1. `DdSimpleDirectIo`（直接 DeviceIoControl，写入 SIM_MARKER）— hook 可精确过滤
-//! 2. `DdFfi`（DLL 调用，ExtraInformation 硬编码为 0）— 由 PENDING_INJECTIONS 队列兜底
+//! 注入统一走 `DdFfi`（DLL 调用，内部 `DeviceIoControl` 到 `\\.\dd63330`）。
 //!
-//! DLL 始终参与初始化（`DD_btn(0)` 自检确认驱动就绪），之后的注入尽量走直接 IO。
+//! **自注入回灌过滤（经反汇编 dd63330 内核驱动确认）**：驱动的键盘注入函数
+//! （VA 0x140003d13 `mov dword [staging+8], 0`）与鼠标注入函数（VA 0x140004072
+//! `mov dword [staging+0x14], 0`）都把 staging 结构的 `ExtraInformation` **显式写死为 0**，
+//! 从不读取来源缓冲区的对应字段。因此注入事件回到 LL hook 时 `dwExtraInfo` 恒为 0，
+//! 无法像 SendInput/Interception 那样用 `SIM_MARKER` 精确过滤。本后端的自注入只能靠
+//! `PENDING_INJECTIONS` 时间窗口队列兜底（见 `lib.rs` 各 DdSimple* 路由，与 DD-HID 一致）。
+//!
+//! 历史教训：曾有一条「直接 DeviceIoControl 写入 SIM_MARKER」的 `dd_direct` 旁路，企图绕过
+//! DLL 实现精确过滤——但驱动层同样清零 ExtraInformation，该旁路无任何收益且会诱使调用方
+//! 关闭 PENDING_INJECTIONS 登记，导致 `trigger==target` 规则把自身注入误判为物理按键而自停。
+//! 已整体移除，不要重新引入。
 #![cfg(windows)]
 
 use crate::dd_common::{DdFfi, DdSideButtonMode};
-use crate::dd_direct::DdSimpleDirectIo;
 use qzh_profile::key_id::MouseButton;
 use std::path::Path;
 use tracing::info;
@@ -18,7 +25,6 @@ pub const DLL_NAME: &str = "dd63330.dll";
 
 pub struct DdSimpleBackend {
     ffi: DdFfi,
-    direct_io: Option<DdSimpleDirectIo>,
 }
 
 impl DdSimpleBackend {
@@ -26,41 +32,19 @@ impl DdSimpleBackend {
         let dll = resources_dir.join(DLL_NAME);
         // DLL 加载失败 = 驱动未安装，整体不可用
         let ffi = DdFfi::load(&dll, DdSideButtonMode::SimpleMouseInputDataFlags)?;
-        let direct_io = DdSimpleDirectIo::new();
-        if direct_io.is_some() {
-            info!("DD Simple 后端初始化成功（直接 IO 模式，ExtraInformation = SIM_MARKER）");
-        } else {
-            info!("DD Simple 后端初始化成功（DLL 模式，PENDING_INJECTIONS 兜底）");
-        }
-        Some(Self { ffi, direct_io })
-    }
-
-    /// 当前注入路径是否为直接 IO（即 SIM_MARKER 已写入，调用方无需 `record_injection`）。
-    pub fn has_direct_io(&self) -> bool {
-        self.direct_io.is_some()
+        info!("DD Simple 后端初始化成功（自注入由 PENDING_INJECTIONS 过滤）");
+        Some(Self { ffi })
     }
 
     pub fn send_key(&self, vk: u32, is_up: bool) -> bool {
-        if let Some(direct) = &self.direct_io {
-            // None = 该 VK 无 scan code（Pause 等极少数键）：直接返回 false。
-            // 不降级到 DLL，因为调用方在 has_direct_io()==true 时已跳过 record_injection，
-            // 若此时 DLL 成功注入却无 PENDING_INJECTIONS 记录，hook 端会误判为物理按键。
-            return direct.send_key(vk, is_up).unwrap_or(false);
-        }
         self.ffi.send_key(vk, is_up)
     }
 
     pub fn send_mouse(&self, button: MouseButton, is_up: bool) -> bool {
-        if let Some(direct) = &self.direct_io {
-            return direct.send_mouse(button, is_up);
-        }
         self.ffi.send_mouse(button, is_up)
     }
 
     pub fn send_wheel(&self, up: bool) -> bool {
-        if let Some(direct) = &self.direct_io {
-            return direct.send_wheel(up);
-        }
         self.ffi.send_wheel(up)
     }
 }

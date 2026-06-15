@@ -239,6 +239,7 @@ fn worker_loop(
         stats,
         physical_keys,
         simulated_keys,
+        physical_down_probe: key_physically_down,
     };
     let mut wait = platform_wait::WaitContext::new(command_waker, hp_degraded);
 
@@ -276,6 +277,9 @@ struct SchedulerWorker {
     stats: Option<Arc<SchedulerStats>>,
     physical_keys: PhysicalKeys,
     simulated_keys: SimulatedKeys,
+    /// 物理按下状态探针，默认 [`key_physically_down`]（GetAsyncKeyState）。
+    /// 抽成字段以便单元测试在无真实键盘输入时注入确定的物理状态。
+    physical_down_probe: fn(KeyId) -> bool,
 }
 
 #[derive(Default)]
@@ -485,7 +489,7 @@ impl SchedulerWorker {
         if !pressed.contains(&key) {
             return false;
         }
-        if key_physically_down(key) {
+        if (self.physical_down_probe)(key) {
             return true;
         }
         pressed.remove(&key);
@@ -859,6 +863,8 @@ mod tests {
             stats: None,
             physical_keys: physical_keys.clone(),
             simulated_keys: simulated_keys.clone(),
+            // 默认信任真实探针；需要确定物理状态的用例自行覆盖 physical_down_probe。
+            physical_down_probe: key_physically_down,
         };
         (worker, physical_keys, simulated_keys)
     }
@@ -938,6 +944,9 @@ mod tests {
         let (mut worker, physical_keys, _) = test_worker();
         let key = KeyId::Keyboard(0x45);
         physical_keys.lock().unwrap().insert(key);
+        // 模拟该键确实被物理按住（GetAsyncKeyState 在测试环境无法真按键，注入确定探针），
+        // 否则 is_physically_blocked 的自愈逻辑会把集合记录当作陈旧泄漏清除。
+        worker.physical_down_probe = |_| true;
 
         assert_eq!(
             worker.acquire_owner(key, "different-trigger", false),
