@@ -7,7 +7,9 @@ use qzh_profile::key_id::KeyId;
 use qzh_profile::key_id::MouseButton;
 use qzh_profile::profile::{BurstMode, BurstRule, Hotkeys};
 use rules::RuleSnapshot;
-use scheduler::{release_simulated_keys, PhysicalKeys, SchedulerHandle, SimulatedKeys};
+use scheduler::{
+    release_simulated_keys, PhysicalKeys, RuleExpiredCb, SchedulerHandle, SimulatedKeys,
+};
 #[cfg(windows)]
 use std::sync::{atomic::AtomicU32, RwLock, Weak};
 #[cfg(windows)]
@@ -125,20 +127,31 @@ impl Default for BurstEngine {
 
 impl BurstEngine {
     pub fn new() -> Self {
-        let physical_pressed = Arc::new(Mutex::new(HashSet::new()));
-        let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
+        let physical_pressed: PhysicalKeys = Arc::new(Mutex::new(HashSet::new()));
+        let simulated_keys: SimulatedKeys = Arc::new(Mutex::new(HashMap::new()));
+        let runtime = Arc::new(Mutex::new(RuntimeState {
+            lifecycle: EngineLifecycle::Paused,
+            active_rules: HashMap::new(),
+            toggle_states: HashMap::new(),
+            stop_generation: 0,
+        }));
+        // 调度器 liveness 兜底自停某规则时，同步清理引擎侧运行态，使该规则可被重新触发；
+        // 否则 active_rules 残留会让 start_rule 误判规则仍活跃而拒绝重启。
+        let runtime_for_expiry = runtime.clone();
+        let on_expired: RuleExpiredCb = Arc::new(move |id: &str| {
+            let mut rt = revive(runtime_for_expiry.lock());
+            rt.active_rules.remove(id);
+            rt.toggle_states.remove(id);
+        });
+        let scheduler =
+            SchedulerHandle::start(physical_pressed.clone(), simulated_keys.clone(), on_expired);
         Self {
             global_enabled: Arc::new(AtomicBool::new(false)),
             rules: Arc::new(Mutex::new(RuleSnapshot::default())),
-            runtime: Arc::new(Mutex::new(RuntimeState {
-                lifecycle: EngineLifecycle::Paused,
-                active_rules: HashMap::new(),
-                toggle_states: HashMap::new(),
-                stop_generation: 0,
-            })),
-            physical_pressed: physical_pressed.clone(),
-            simulated_keys: simulated_keys.clone(),
-            scheduler: SchedulerHandle::start(physical_pressed, simulated_keys),
+            runtime,
+            physical_pressed,
+            simulated_keys,
+            scheduler,
             hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
             on_global_changed: Arc::new(Mutex::new(None)),
             on_panel_toggle: Arc::new(Mutex::new(None)),

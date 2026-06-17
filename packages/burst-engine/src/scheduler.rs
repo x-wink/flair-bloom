@@ -6,10 +6,14 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use tracing::warn;
+use tracing::{error, warn};
 use win_input::{key_events, DispatchResult, InputEvent};
 
 const ACK_TIMEOUT: Duration = Duration::from_millis(500);
+
+/// 规则被调度器自行判定失活（liveness 兜底）时回调，参数为规则 ID。
+/// 由引擎注册，用于同步清理 `active_rules` / `toggle_states`，使该规则可被重新触发。
+pub(crate) type RuleExpiredCb = Arc<dyn Fn(&str) + Send + Sync>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RulePhase {
@@ -119,12 +123,17 @@ pub(crate) struct SchedulerStatsSnapshot {
 }
 
 impl SchedulerHandle {
-    pub fn start(physical_keys: PhysicalKeys, simulated_keys: SimulatedKeys) -> Self {
+    pub fn start(
+        physical_keys: PhysicalKeys,
+        simulated_keys: SimulatedKeys,
+        on_expired: RuleExpiredCb,
+    ) -> Self {
         Self::start_with_dispatcher(
             Arc::new(WinInputDispatcher),
             None,
             physical_keys,
             simulated_keys,
+            on_expired,
         )
     }
 
@@ -133,22 +142,33 @@ impl SchedulerHandle {
         stats: Option<Arc<SchedulerStats>>,
         physical_keys: PhysicalKeys,
         simulated_keys: SimulatedKeys,
+        on_expired: RuleExpiredCb,
     ) -> Self {
         let (tx, rx) = mpsc::channel();
         let hp_degraded = Arc::new(AtomicBool::new(false));
         let worker_degraded = hp_degraded.clone();
         let command_waker = platform_wait::CommandWaker::new(&hp_degraded);
         let worker_waker = command_waker.clone();
+        // panic 兜底：worker 栈一旦展开，target_holds 随之丢失，靠 simulated_keys 账本
+        // 释放所有已按下的模拟键，避免按键卡死（连发工具最差故障）。
+        let panic_fallback = simulated_keys.clone();
         let join = thread::spawn(move || {
-            worker_loop(
-                rx,
-                worker_degraded,
-                worker_waker,
-                dispatcher,
-                stats,
-                physical_keys,
-                simulated_keys,
-            )
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                worker_loop(
+                    rx,
+                    worker_degraded,
+                    worker_waker,
+                    dispatcher,
+                    stats,
+                    physical_keys,
+                    simulated_keys,
+                    on_expired,
+                )
+            }));
+            if outcome.is_err() {
+                release_simulated_keys(&panic_fallback);
+                error!("调度器 worker 线程 panic，已按账本兜底释放模拟按键");
+            }
         });
         Self {
             tx,
@@ -222,6 +242,7 @@ impl Drop for SchedulerHandle {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn worker_loop(
     rx: Receiver<SchedulerCommand>,
     hp_degraded: Arc<AtomicBool>,
@@ -230,6 +251,7 @@ fn worker_loop(
     stats: Option<Arc<SchedulerStats>>,
     physical_keys: PhysicalKeys,
     simulated_keys: SimulatedKeys,
+    on_expired: RuleExpiredCb,
 ) {
     let mut worker = SchedulerWorker {
         rules: HashMap::new(),
@@ -240,6 +262,7 @@ fn worker_loop(
         physical_keys,
         simulated_keys,
         physical_down_probe: key_physically_down,
+        on_expired,
     };
     let mut wait = platform_wait::WaitContext::new(command_waker, hp_degraded);
 
@@ -270,7 +293,7 @@ fn worker_loop(
 }
 
 struct SchedulerWorker {
-    rules: HashMap<String, ScheduledRule>,
+    rules: HashMap<Arc<str>, ScheduledRule>,
     target_holds: HashMap<KeyId, TargetHold>,
     current_generation: u64,
     dispatcher: Arc<dyn EventDispatcher>,
@@ -280,11 +303,13 @@ struct SchedulerWorker {
     /// 物理按下状态探针，默认 [`key_physically_down`]（GetAsyncKeyState）。
     /// 抽成字段以便单元测试在无真实键盘输入时注入确定的物理状态。
     physical_down_probe: fn(KeyId) -> bool,
+    /// 规则被 liveness 兜底自停时通知引擎清理（见 [`RuleExpiredCb`]）。
+    on_expired: RuleExpiredCb,
 }
 
 #[derive(Default)]
 struct TargetHold {
-    owners: HashMap<String, bool>,
+    owners: HashMap<Arc<str>, bool>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -302,7 +327,8 @@ impl SchedulerWorker {
                     let allow_while_physical_down = rule.mode
                         == qzh_profile::profile::BurstMode::Hold
                         && rule.trigger_key == rule.target_key;
-                    self.rules.entry(rule.id.clone()).or_insert(ScheduledRule {
+                    let id: Arc<str> = Arc::from(rule.id.as_str());
+                    self.rules.entry(id).or_insert(ScheduledRule {
                         rule,
                         generation,
                         allow_while_physical_down,
@@ -393,6 +419,24 @@ impl SchedulerWorker {
                 continue;
             }
 
+            // liveness 兜底：DD 等驱动后端的注入回灌泄漏可能吞掉物理抬键，使
+            // allow_while_physical_down 的 Hold(trigger==target) 规则永不收到
+            // on_key_release 而失控——这是唯一没有 is_physically_blocked 自愈的路径。
+            // 仅在松开相位（is_down == false，此时 GetAsyncKeyState 反映用户真实状态而非
+            // 自身注入的下压）复核物理触发键；已抬起则自停并通知引擎清理，使规则可被重新触发。
+            if rule.allow_while_physical_down
+                && !rule.is_down
+                && !(self.physical_down_probe)(rule.rule.trigger_key)
+            {
+                self.physical_keys
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .remove(&rule.rule.trigger_key);
+                (self.on_expired)(&id);
+                warn!("Hold 触发键已抬起但未收到释放事件，自停规则: id={id}");
+                continue; // 不重新插入 → 规则停止；目标键此前已在 UpPhase 释放
+            }
+
             let interval = Duration::from_millis(rule.rule.interval_ms as u64);
             let hold = hold_duration(rule.rule.interval_ms);
             match rule.phase {
@@ -460,12 +504,11 @@ impl SchedulerWorker {
     fn acquire_owner(
         &mut self,
         key: KeyId,
-        owner: &str,
+        owner: &Arc<str>,
         allow_while_physical_down: bool,
     ) -> AcquireOutcome {
         if let Some(hold) = self.target_holds.get_mut(&key) {
-            hold.owners
-                .insert(owner.to_string(), allow_while_physical_down);
+            hold.owners.insert(owner.clone(), allow_while_physical_down);
             return AcquireOutcome::Shared;
         }
 
@@ -476,7 +519,7 @@ impl SchedulerWorker {
         let owners = self.target_holds.entry(key).or_default();
         owners
             .owners
-            .insert(owner.to_string(), allow_while_physical_down);
+            .insert(owner.clone(), allow_while_physical_down);
         AcquireOutcome::Acquired
     }
 
@@ -865,6 +908,7 @@ mod tests {
             simulated_keys: simulated_keys.clone(),
             // 默认信任真实探针；需要确定物理状态的用例自行覆盖 physical_down_probe。
             physical_down_probe: key_physically_down,
+            on_expired: Arc::new(|_| {}),
         };
         (worker, physical_keys, simulated_keys)
     }
@@ -928,11 +972,11 @@ mod tests {
         let key = KeyId::Keyboard(0x45);
 
         assert_eq!(
-            worker.acquire_owner(key, "a", false),
+            worker.acquire_owner(key, &Arc::from("a"), false),
             AcquireOutcome::Acquired
         );
         assert_eq!(
-            worker.acquire_owner(key, "b", false),
+            worker.acquire_owner(key, &Arc::from("b"), false),
             AcquireOutcome::Shared
         );
         assert_eq!(worker.release_owner(key, "a"), None);
@@ -949,7 +993,7 @@ mod tests {
         worker.physical_down_probe = |_| true;
 
         assert_eq!(
-            worker.acquire_owner(key, "different-trigger", false),
+            worker.acquire_owner(key, &Arc::from("different-trigger"), false),
             AcquireOutcome::BlockedByPhysical
         );
         assert!(worker.target_holds.is_empty());
@@ -962,7 +1006,7 @@ mod tests {
         physical_keys.lock().unwrap().insert(key);
 
         assert_eq!(
-            worker.acquire_owner(key, "same-trigger", true),
+            worker.acquire_owner(key, &Arc::from("same-trigger"), true),
             AcquireOutcome::Acquired
         );
         assert!(worker.target_holds.contains_key(&key));
@@ -978,5 +1022,61 @@ mod tests {
         worker.dispatch_events(vec![InputEvent::up(key)]);
 
         assert!(!simulated_keys.lock().unwrap().contains_key(&key));
+    }
+
+    fn hold_same_key_rule(id: &str, key: KeyId) -> Arc<BurstRule> {
+        Arc::new(BurstRule {
+            id: id.to_string(),
+            enabled: true,
+            trigger_key: key,
+            target_key: key,
+            mode: BurstMode::Hold,
+            stop_key: None,
+            interval_ms: 10,
+            group: None,
+        })
+    }
+
+    // liveness 兜底：Hold(trigger==target) 的物理触发键已抬起（注入回灌泄漏吞掉抬键事件）时，
+    // 调度器自停规则、清理物理集合并回调 on_expired，闭合唯一缺少 is_physically_blocked 的路径。
+    #[test]
+    fn hold_same_key_auto_stops_when_physical_key_released() {
+        let (mut worker, physical_keys, _) = test_worker();
+        let key = KeyId::Keyboard(0x51);
+        let expired = Arc::new(Mutex::new(Vec::<String>::new()));
+        let sink = expired.clone();
+        worker.on_expired = Arc::new(move |id: &str| {
+            sink.lock().unwrap().push(id.to_string());
+        });
+        physical_keys.lock().unwrap().insert(key);
+        // 探针报告键已抬起（物理抬键被吞）
+        worker.physical_down_probe = |_| false;
+        worker.handle_command(SchedulerCommand::Start {
+            rule: hold_same_key_rule("hold", key),
+            generation: 0,
+        });
+
+        worker.process_due(Instant::now());
+
+        assert!(worker.rules.is_empty());
+        assert!(!physical_keys.lock().unwrap().contains(&key));
+        assert_eq!(expired.lock().unwrap().as_slice(), &["hold".to_string()]);
+    }
+
+    // 物理触发键仍按住时，liveness 兜底不得误停规则。
+    #[test]
+    fn hold_same_key_keeps_running_while_physical_key_down() {
+        let (mut worker, physical_keys, _) = test_worker();
+        let key = KeyId::Keyboard(0x51);
+        physical_keys.lock().unwrap().insert(key);
+        worker.physical_down_probe = |_| true;
+        worker.handle_command(SchedulerCommand::Start {
+            rule: hold_same_key_rule("hold", key),
+            generation: 0,
+        });
+
+        worker.process_due(Instant::now());
+
+        assert!(worker.rules.contains_key("hold"));
     }
 }

@@ -63,6 +63,7 @@ pub fn run_stress(config: StressConfig) -> StressReport {
         Some(stats.clone()),
         Arc::new(Mutex::new(HashSet::new())),
         Arc::new(Mutex::new(HashMap::new())),
+        Arc::new(|_| {}),
     );
     let cpu_start = process_cpu_time_100ns();
     let started = Instant::now();
