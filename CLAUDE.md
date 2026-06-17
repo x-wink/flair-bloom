@@ -127,7 +127,7 @@ packages/win-driver/src/
 
 | 参数         | 范围           | 执行位置                                      |
 | ------------ | -------------- | --------------------------------------------- |
-| 连发间隔     | 10ms – 10000ms | `qzh-profile/src/profile.rs::validate()`      |
+| 连发间隔     | 1ms – 10000ms  | `qzh-profile/src/profile.rs::validate()`（默认 10ms） |
 | 单配置规则数 | ≤ 64           | `qzh-profile/src/profile.rs::validate()`      |
 | 宏序列步骤数 | ≤ 256          | `qzh-profile/src/macro_seq.rs::MAX_STEPS`     |
 
@@ -149,7 +149,11 @@ packages/win-driver/src/
 
 **发版步骤**：
 1. 在 `CHANGELOG.md` 的 `[Unreleased]` 节填写本次更新内容
-2. 同步更新 `README.md`（面向用户的使用说明书）：核对界面示意图、操作步骤、新增 / 变更功能的描述，确保与新版本实际行为一致
+2. **发版前更新文档**（强制）：发版前逐一核对以下文档，使其与本版本实际行为/代码一致，不得带着滞后文档发版——
+   - `README.md`：面向用户的使用说明书，核对界面示意图、操作步骤、新增 / 变更功能描述
+   - `docs/ROADMAP.md`：当前阶段（版本基线 / 日期）、`CURRENT_SCHEMA_VERSION` 与 schema 版本表、迭代计划勾选项（`[x]`/`[ ]`）
+   - `CLAUDE.md`（本文件）：关键架构决策、输入约束表、schema 版本、目录结构等若被本次改动影响，同步修订
+   - `THIRD_PARTY.md` / `EULA.md`：若引入 / 变更第三方组件或权限说明则同步
 3. 运行 `pnpm bump-version X.X.X`，自动同步三处版本号并将 `[Unreleased]` 重命名为 `[X.X.X] - 日期`（脚本：`scripts/bump-version.ts`）
 4. 提交：`chore(release): bump version to X.X.X`
 5. 打 tag：`git tag vX.X.X && git push origin main && git push origin vX.X.X`

@@ -179,6 +179,9 @@ impl DdFfi {
         let delta = dd_wheel_code(up);
         // SAFETY: dd_whl 已解析
         let ret = unsafe { dd_whl(delta) };
+        // 反汇编两个 DLL 确认：DD_whl 注入路径恒返回固定值（dd63330 与 ddhid.63340 的滚轮分支均
+        // 无失败回报，fire-and-forget），ret 不携带成功/失败信息，判 `ret == 1` 之类没有意义。
+        // 故 ret 仅用于首次诊断日志，滚轮一律视为已由 DD 通道处理（返回 true，不回退 SendInput）。
         if !self.wheel_diag_logged.swap(true, Ordering::SeqCst) {
             info!("DD 首次滚轮注入：up={} ret={}", up, ret);
         }

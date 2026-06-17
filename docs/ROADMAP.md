@@ -4,14 +4,15 @@
 
 面向游戏辅助的按键助手。核心功能免费开放，亲友专属功能通过兑换码离线激活使用时长。
 Monorepo 结构，Rust workspace + pnpm workspace 双层管理。
-目标支持面板、托盘、桌宠三种运行模式，均在单一 Tauri 进程内管理。当前主线为 Windows 桌面端，已实现面板窗口 + 系统托盘常驻运行，桌宠模式进入 v0.3 规划。
+目标支持面板、托盘、桌宠三种运行模式，均在单一 Tauri 进程内管理。当前主线为 Windows 桌面端，已实现面板窗口 + 系统托盘常驻运行，桌宠模式进入 v0.4 规划。
 
-## 当前阶段（2026-05-30）
+## 当前阶段（2026-06-17）
 
-- 当前基线：`v0.2.x`，以体验完善、稳定性和完整配置管理为主。
-- 已完成主能力：按压 / Toggle 连发、键盘全键位、鼠标 5 键、滚轮连发、多输入模式（SendInput / Interception / DD驱动；DD-HID 暂停）、多配置文件、全局热键、面板显隐热键、设置面板、声音反馈、诊断修复、外部配置导入、自动更新、系统托盘、开机自启。
-- 配置 schema：`CURRENT_SCHEMA_VERSION = 3`。v1→v2 将裸 VK 升级为 `KeyId`，v2→v3 增加滚轮上 / 下。
-- 后续主线：v0.3 桌宠、v0.4 许可证与亲友专属功能、v0.5 落地页与运营基础、v1.0 完整功能。
+- 当前基线：`v0.2.7`，已发布 0.2.0–0.2.7，主题为体验完善、稳定性与完整配置管理。
+- 已完成主能力：按压 / Toggle 连发、键盘全键位、鼠标 5 键、滚轮连发、Toggle 互斥分组（同组互斥切换）、规则拖拽排序与分组折叠/展开、多输入模式（通用 SendInput / 游戏 Interception / DD驱动 DdSimple；DDHID 暂停）、多配置文件、全局热键、面板显隐热键、设置面板、声音反馈、诊断修复、外部配置导入、自动更新、系统托盘、开机自启。
+- 配置 schema：`CURRENT_SCHEMA_VERSION = 4`。v1→v2 裸 VK 升级为 `KeyId`；v2→v3 增加滚轮上 / 下；v3→v4 `BurstRule` 新增可选 `group` 字段（Toggle 互斥分组）。
+- 用户协议：`v1.3`（补充 DD驱动模式、DDHID 暂停、驱动残留与卸载说明）。
+- 后续主线：v0.3 体验与稳定性收尾、v0.4 桌宠、v0.5 许可证与亲友专属功能、v0.6 落地页与运营基础、v1.0 完整功能。下一阶段聚焦体验打磨与遗留收尾，暂不开新大模块。
 - 进度标记：`[x]` 表示当前代码或发布流程已具备，`[ ]` 表示仍在规划或未完成。
 
 ---
@@ -132,7 +133,7 @@ std::panic::set_hook → 捕获 panic 信息
 
 ### 桌宠模式（Pet）
 
-v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明无边框、始终置顶的小窗口，通过动画反映连发状态；默认点击穿透，鼠标悬停时临时关闭穿透以支持拖拽和右键菜单。
+v0.4 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明无边框、始终置顶的小窗口，通过动画反映连发状态；默认点击穿透，鼠标悬停时临时关闭穿透以支持拖拽和右键菜单。
 
 ---
 
@@ -145,10 +146,10 @@ v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
 ├── package.json                        # 根脚本（dev / build / release）
 │
 ├── apps/
-│   ├── main/                           # 单一 Tauri 应用（面板 + 托盘；v0.3 加入桌宠）
+│   ├── main/                           # 单一 Tauri 应用（面板 + 托盘；v0.4 加入桌宠）
 │   │   ├── package.json
 │   │   ├── panel.html                  # 面板窗口入口（已实现）
-│   │   ├── pet.html                    # 桌宠窗口入口（v0.3 规划）
+│   │   ├── pet.html                    # 桌宠窗口入口（v0.4 规划）
 │   │   ├── src/
 │   │   │   ├── windows/
 │   │   │   │   ├── panel/              # 面板窗口 UI
@@ -156,7 +157,7 @@ v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
 │   │   │   │   │   ├── dialogs/        # 设置 / 关于 / 协议 / 更新公告 / 诊断修复 / 导入
 │   │   │   │   │   ├── main.tsx
 │   │   │   │   │   └── PanelApp.tsx
-│   │   │   │   └── pet/                # 桌宠窗口 UI（v0.3 规划）
+│   │   │   │   └── pet/                # 桌宠窗口 UI（v0.4 规划）
 │   │   │   │       ├── components/
 │   │   │   │       │   ├── PetCanvas/
 │   │   │   │       │   └── StatusBubble/
@@ -168,7 +169,7 @@ v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
 │   │   │       └── EULA.md             # 用户协议正文（内嵌构建）
 │   │   └── src-tauri/
 │   │       ├── Cargo.toml              # 依赖 qzh-profile、win-* 等 packages
-│   │       ├── tauri.conf.json         # 窗口配置（当前 panel；v0.3 加 pet）
+│   │       ├── tauri.conf.json         # 窗口配置（当前 panel；v0.4 加 pet）
 │   │       ├── tauri.windows.conf.json # Windows 打包资源与 NSIS hook
 │   │       └── src/
 │   │           ├── main.rs
@@ -179,20 +180,21 @@ v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
 │   │           │   └── mod.rs          # re-export burst-engine / win-input 公开 API
 │   │           └── commands/
 │   │               ├── app.rs          # 协议同意 / 检查更新 / 退出
-│   │               ├── ddhid_diagnostic.rs
+│   │               ├── ddhid_diagnostic.rs # DDHID 诊断报告（暂停模式残留排查）
 │   │               ├── driver.rs       # 驱动安装卸载 + 提权重启
 │   │               ├── engine.rs       # 规则 CRUD + 输入模式切换
 │   │               ├── import_profile.rs
+│   │               ├── log.rs          # 前端日志转发 + 打开日志目录
 │   │               ├── profile.rs      # 配置文件 CRUD
 │   │               ├── repair.rs       # 诊断修复
 │   │               ├── resource_integrity.rs
 │   │               └── status.rs       # 应用状态快照
 │   │
-│   ├── keygen/                         # 兑换码生成 CLI（v0.4 完整实现）
+│   ├── keygen/                         # 兑换码生成 CLI（v0.5 完整实现）
 │   │   ├── Cargo.toml
 │   │   └── src/main.rs
 │   │
-│   └── release-server/                 # 落地页服务（v0.5 规划，文件托管在 GitHub Releases）
+│   └── release-server/                 # 落地页服务（v0.6 规划，文件托管在 GitHub Releases）
 │       ├── Cargo.toml
 │       ├── config.toml                 # 端口、GitHub repo 信息、站点基础信息
 │       ├── content/
@@ -237,7 +239,7 @@ v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
     │       └── lib.rs                  # load_from_path / save_to_path
     │
     ├── win-sysinfo/                    # Windows 系统信息 + 注册表 + 安装前置检测
-    ├── win-input/                      # SendInput / Interception / DD-HID 输入注入
+    ├── win-input/                      # SendInput / Interception / DD驱动(DdSimple) / DDHID 输入注入
     ├── burst-engine/                   # BurstEngine + LL keyboard/mouse hook
     ├── win-driver/                     # 驱动安装卸载 + ShellExecuteExW + PowerShell
     └── resource-integrity/             # 打包资源完整性校验
@@ -269,7 +271,7 @@ v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
        └────────────────┘
 ```
 
-进度：面板窗口、托盘、更新检查、驱动诊断已落地；桌宠窗口、许可证激活和 release-server 分别进入 v0.3 / v0.4 / v0.5。
+进度：面板窗口、托盘、更新检查、驱动诊断已落地；桌宠窗口、许可证激活和 release-server 分别进入 v0.4 / v0.5 / v0.6。
 
 ### 发布基础设施
 
@@ -280,7 +282,7 @@ v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
 | 私钥存储           | GitHub Actions Secrets   | Tauri 签名私钥、Ed25519 许可证私钥，构建 / 签发时注入 |
 | CI/CD 构建         | GitHub Actions           | 推 tag 触发 Windows x64 构建，发布 Draft       |
 | Release 正文       | `CHANGELOG.md`           | `scripts/extract-changelog.ts` 自动提取版本节  |
-| 落地页             | release-server（自托管） | v0.5 规划；仅渲染 HTML，下载链接指向 GitHub Releases |
+| 落地页             | release-server（自托管） | v0.6 规划；仅渲染 HTML，下载链接指向 GitHub Releases |
 
 ### Tauri updater 配置
 
@@ -318,7 +320,7 @@ v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
 
 注：当前 release workflow 只构建 Windows x64；v1.0 前评估 macOS / Linux 构建矩阵。
 
-### release-server 路由（v0.5 规划）
+### release-server 路由（v0.6 规划）
 
 | 路由             | 用途                                                      |
 | ---------------- | --------------------------------------------------------- |
@@ -329,7 +331,7 @@ v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
 
 ---
 
-**单进程多窗口**：面板和桌宠是同一 Tauri 应用的两个独立 WebView 窗口，各自有独立的 HTML 入口（`panel.html` / `pet.html`），通过 Tauri 事件系统通信。当前进度为 `panel` 已实现，`pet` 在 v0.3 加入。
+**单进程多窗口**：面板和桌宠是同一 Tauri 应用的两个独立 WebView 窗口，各自有独立的 HTML 入口（`panel.html` / `pet.html`），通过 Tauri 事件系统通信。当前进度为 `panel` 已实现，`pet` 在 v0.4 加入。
 
 **窗口配置（tauri.conf.json）：**
 
@@ -370,7 +372,7 @@ v0.3 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
   → app.emit("app-status-changed", payload)
   → app.emit("update-*", payload)
   → 面板窗口更新状态显示；激活态规则当前由前端轮询 `get_active_rules`
-  → v0.3 桌宠窗口再抽象统一状态事件源
+  → v0.4 桌宠窗口再抽象统一状态事件源
 ```
 
 ### Crate 依赖图
@@ -387,7 +389,7 @@ packages/crypto      packages/migrate
 packages/win-input  ← packages/burst-engine ← apps/main/src-tauri
 packages/win-driver / win-sysinfo / resource-integrity ← apps/main/src-tauri
 
-apps/release-server（v0.5：axum / tokio / rust-embed）
+apps/release-server（v0.6：axum / tokio / rust-embed）
 ```
 
 ### 数据存储路径约定
@@ -426,7 +428,7 @@ apps/release-server（v0.5：axum / tokio / rust-embed）
 
 ## 桌宠模式设计
 
-本节是 v0.3 设计稿，当前代码库尚未包含桌宠窗口入口。
+本节是 v0.4 设计稿，当前代码库尚未包含桌宠窗口入口。
 
 ### 点击穿透
 
@@ -470,7 +472,7 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 | GamepadButton | 手柄按键                |
 | GamepadStick  | 摇杆偏移（身体倾斜）    |
 
-手柄监听通过 `gilrs` crate 实现，阶段三末尾实现，需配套美术资源。
+手柄监听通过 `gilrs` crate 实现，列入「待定（最低优先级）」，需配套美术资源后再评估。
 
 ---
 
@@ -525,7 +527,9 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 | 按压连发                 | packages/burst-engine                           |
 | 一键连发（热键 Toggle）  | packages/burst-engine                           |
 | 键盘 / 鼠标 / 滚轮连发   | packages/burst-engine + packages/win-input      |
-| 多输入模式               | packages/win-input + apps/main/src-tauri/commands/engine.rs |
+| Toggle 互斥分组          | packages/qzh-profile（`BurstRule.group`）+ packages/burst-engine |
+| 规则拖拽排序 / 分组折叠  | 面板 UI（规则列表 + 分组容器）                  |
+| 多输入模式（通用 / 游戏 / DD驱动；DDHID 暂停） | packages/win-input + apps/main/src-tauri/commands/engine.rs |
 | 配置文件 CRUD            | apps/main — commands/profile.rs                 |
 | 外部配置导入             | apps/main — commands/import_profile.rs + ImportDialog |
 | `.qzh` 加密格式          | packages/qzh-format + packages/qzh-profile      |
@@ -546,7 +550,7 @@ MVP 阶段用 CSS 动画 + SVG，后期视美术资源情况升级为 Sprite She
 | 回放速度调节   | apps/main/src-tauri — engine/macro_play.rs      |
 | 桌宠扩展动画包 | apps/main — pet/（激活后解锁）                  |
 
-注：鼠标连点当前已作为核心体验开放；v0.4 可按 `MOUSE_BURST` feature bit 收敛为亲友专属或保留开放策略。
+注：鼠标连点当前已作为核心体验开放；v0.5 可按 `MOUSE_BURST` feature bit 收敛为亲友专属或保留开放策略。
 
 ---
 
@@ -628,6 +632,7 @@ pub fn migrate(mut data: Value, from: u32, to: u32) -> Result<Value> {
 | 1              | 初始 schema                                           | v0.1     |
 | 2              | 按键字段 `u32` VK → `KeyId`（键盘 + 鼠标 5 键统一）   | v0.2     |
 | 3              | `MouseButton` 新增 `WheelUp` / `WheelDown`，支持滚轮连发 | v0.2.4 |
+| 4              | `BurstRule` 新增可选 `group` 字段（Toggle 互斥分组），旧文件向后兼容 | v0.2.5 |
 
 ---
 
@@ -713,7 +718,6 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 - [x] `tracing` + `tracing-appender`，按天滚动日志（保留 7 天，`cleanup_old_logs` 负责清理）
 - [x] `std::panic::set_hook` 捕获崩溃，写独立崩溃日志（`crash-{ts}.log`）
-- [ ] 崩溃提示窗口（打开日志文件夹 / 复制路径 / 关闭）— 当前仅写日志，未弹窗
 - [x] 前端 JS 错误转发到 Rust logger（`log_from_frontend` command）
 - [x] 关于 / 诊断入口可打开日志、数据、安装、驱动目录（`open_app_dir` 白名单）
 
@@ -725,23 +729,16 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] 声音分区：全局开关播报、语句、语音、语速、音调、音量、试听
 - [x] 配置文件分区：配置卡片、新建、切换、重命名、删除、导入入口
 
-**首次引导**
-
-- [ ] 协议同意后展示简短引导流程（步骤提示 + 创建第一条规则向导）
-
 **完整配置管理**
 
 - [x] 后端命令：`save_profile` / `load_profile` / `list_profiles` / `init_default_profile` / `get_active_profile_path` / `rename_profile` / `delete_profile` / `fork_active_profile`
 - [x] 多配置文件 UI：新建 / 切换 / 重命名 / 删除
 - [x] 默认配置保护：修改默认配置自动 fork
 - [x] 外部配置导入：支持丐帮高手 `config.json` 扫描、预览、导入
-- [ ] 导入 / 导出原生 `.qzh` 文件
-- [ ] `notify` 监听配置文件变更自动 reload；失效时定时轮询兜底
 
 **托盘完善**
 
 - [x] 开机自启选项（`tauri-plugin-autostart` 已挂载）
-- [ ] 托盘菜单：切换配置文件（动态菜单项）
 - [x] 托盘菜单：打开面板 / 退出
 
 **面板完善**
@@ -750,7 +747,6 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] 热键冲突检测与提示
 - [x] 规则启用/禁用开关（`BurstRule.enabled` 字段已就位）
 - [x] 连发间隔数值输入（1ms–10000ms，默认 10ms）
-- [ ] 连发间隔滑块 / 步进器优化
 
 **连发引擎稳定性**
 
@@ -779,11 +775,72 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [x] schema v2→v3：新增滚轮上 / 下，SendInput、Interception、DD-HID 三通道支持滚轮注入
 - [x] 面板显隐热键使用最小化 / 恢复语义；托盘打开、托盘双击、再次启动统一唤回面板
 
+**互斥分组与规则编排（0.2.5–0.2.7）**
+
+- [x] schema v3→v4：`BurstRule` 新增可选 `group` 字段；Toggle 规则同组互斥，激活一条自动停止同组其他活跃规则
+- [x] 互斥分组语音播报修正：同组切换时只播报「新规则开始」，不误播「停止 N」
+- [x] 分组容器折叠 / 展开（chevron 指示）、分组标题铅笔图标编辑、解散二次确认
+- [x] 按压连发规则支持拖拽排序
+- [x] 配置卡片简略信息展示互斥组数量（有分组时）
+
+**输入后端迭代（0.2.5–0.2.7）**
+
+- [x] DDHID 临时屏蔽：加载旧配置或状态同步命中 DDHID 自动回退通用模式并提示；用户主动切换被阻止；诊断修复保留卸载入口
+- [x] 恢复 DD驱动通道（DdSimple，基于 `dd63330.dll`）：独立于 DDHID 安装链路，支持键盘 / 鼠标 / 滚轮 / 侧键注入，非管理员运行时引导提权重启
+- [x] DD驱动滚轮 / 侧键映射修正：滚轮用 DD SDK 上滚 / 下滚编码，侧键按 `MOUSE_INPUT_DATA.ButtonFlags` 发 X1 / X2
+- [x] `dd63330.dll` 纳入打包资源、运行时完整性校验与发版前资源检查
+- [x] 禁止 DD 系列（DdSimple / DdHid）同键 Toggle（无法过滤自身注入）
+- [x] 用户协议升级至 v1.3（补充 DD驱动模式、DDHID 暂停、驱动残留与卸载说明）
+
+**界面优化（0.2.5–0.2.7）**
+
+- [x] 全局关闭态面板背景改为品牌色去饱和薰衣草渐变；规则激活脉冲动画加速
+- [x] 全局统一 3px 细滚动条（全局开启态切换为白色半透明）
+- [x] 纯告知型弹窗合并为单「知道了」按钮
+
 **发布 v0.2**
 
 ---
 
-### v0.3｜桌宠模式
+### v0.3｜体验与稳定性收尾
+
+**目标：** 不开新大模块，补齐 v0.2 遗留的体验细节与稳健性收尾，巩固第一批用户口碑。以 0.2.x / 0.3.x 补丁形式滚动发布。
+
+**崩溃与诊断**
+
+- [ ] 崩溃提示窗口（打开日志文件夹 / 复制路径 / 关闭）— 当前仅写日志，未弹窗
+- [ ] 托盘启用 / 禁用动态图标切换（当前仅菜单文字区分状态）
+
+**首次引导**
+
+- [ ] 协议同意后展示简短引导流程（步骤提示 + 创建第一条规则向导）
+- [ ] 内置常用规则模板（FPS 快速连发、MOBA 技能连按等），一键导入当前配置
+
+**配置管理收尾**
+
+- [ ] 导入 / 导出原生 `.qzh` 文件（跨设备迁移、社区分享）
+- [ ] `notify` 监听配置文件变更自动 reload；失效时定时轮询兜底
+- [ ] 托盘菜单：切换配置文件（动态菜单项）
+
+**交互优化**
+
+- [ ] 连发间隔滑块 / 步进器优化（数值输入之外的快速调节）
+
+**发版应急与回退（预案 + 护栏，文档级先行）**
+
+> 前提：Tauri updater 只升不降——已升级用户无法被「降级」拉回，紧急回退实质是「向前滚一个修复版」。详见下文路径。
+
+- [ ] 应急回退 runbook（`docs/RELEASE_ROLLBACK.md`）：
+  - ① **止血（分钟级）**：GitHub 把坏 Release 转 Draft / 把上个好版本「Set as latest」，使 `latest.json` 不再分发坏版本，拦住尚未升级的用户（已静默下载暂存 `pending_update` 的无法召回）
+  - ② **向前滚修复**：`git revert` 坏改动 → bump 更高 patch 号 → 打 tag → CI 出包 → 自动更新带走已中招用户（修复已升级用户的唯一路径）
+- [ ] 发版护栏写入 `CLAUDE.md` 发版流程：高风险版本**禁止裸 bump `CURRENT_SCHEMA_VERSION`**（新字段一律 `#[serde(default)]` 走兼容；否则回退到旧 schema 会 `TooNew` 拒载、砸用户配置）；风险改动尽量挂运行时开关，先关开关而非全量回退
+- [ ] 保留上个稳定版安装包 + `.sig`（旧 GitHub Release 不删除），确保向前滚 / 手动回退有可用且已签名的产物
+
+**发布 v0.3**
+
+---
+
+### v0.4｜桌宠模式
 
 **目标：** 上线桌宠，提升产品差异化和趣味性。
 
@@ -800,11 +857,11 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [ ] 托盘菜单新增：打开/关闭桌宠
 - [ ] 补充 Alert / Sleep 动画状态
 
-**发布 v0.3**
+**发布 v0.4**
 
 ---
 
-### v0.4｜许可证系统 + 亲友专属功能
+### v0.5｜许可证系统 + 亲友专属功能
 
 **目标：** 上线付费通道和高价值功能，开始商业化。
 
@@ -818,22 +875,18 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [ ] 到期后亲友专属功能自动降级（不崩溃，不锁死）
 - [ ] 许可证状态面板：剩余天数、激活时间、已授权功能列表
 
-**规则模板**
-
-- [ ] 内置常用规则模板（FPS 快速连发、MOBA 技能连按等），一键导入当前配置
-
 **亲友专属功能**
 
-- [ ] 鼠标连点限制策略（当前开放，v0.4 决定是否按 `MOUSE_BURST` 收敛）
+- [ ] 鼠标连点限制策略（当前开放，v0.5 决定是否按 `MOUSE_BURST` 收敛）
 - [ ] 随机抖动（间隔 ± 可配置随机偏差）
 - [ ] 宏录制（事件流 + 时间戳，存为 `.qzh`）
 - [ ] 宏回放（原速 / 倍速）+ 热键绑定
 
-**发布 v0.4**
+**发布 v0.5**
 
 ---
 
-### v0.5｜落地页 + 运营基础
+### v0.6｜落地页 + 运营基础
 
 **目标：** 有对外展示的门面，支撑用户增长。
 
@@ -843,8 +896,12 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 - [ ] 更新日志页 `/changelog`（读取 / 转换 `CHANGELOG.md`，避免维护第二份内容源）
 - [ ] 健康检查 `/health`
 - [ ] 桌宠激活后解锁扩展动画状态
+- [ ] 更新分发降险（缩小坏版本「即时全量铺开」的爆炸半径，让回退预案更从容）：
+  - [ ] min-version / kill-switch：远端清单可声明「最低可用版本」或强制下线某版本，客户端启动时校验
+  - [ ] 分批灰度发布：按比例 / 分批放量，先小范围验证再全量
+  - [ ] 静默更新延迟自动安装：暂存 `pending_update` 后延迟 N 小时再装，留出发现问题与止血的窗口
 
-**发布 v0.5**
+**发布 v0.6**
 
 ---
 
@@ -887,7 +944,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 | 开机自启          | `tauri-plugin-autostart`                                   |
 | 前端动画          | CSS 关键帧 + SVG（MVP）/ Lottie（后期）                    |
 | 前端 UI           | React + TypeScript + 原生 CSS                              |
-| 前端构建          | Vite（当前 `panel.html` 单入口，`pet.html` 待 v0.3）       |
+| 前端构建          | Vite（当前 `panel.html` 单入口，`pet.html` 待 v0.4）       |
 | Monorepo 管理     | Cargo workspace + pnpm workspaces                          |
 
 ---
@@ -909,3 +966,5 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 | ⑪   | 模拟 KeyRelease 未过滤 | 同上，所有 SendInput（含 key_up）均带 SIM_MARKER，hook 不再区分 press/release 统一跳过 | 消除 |
 | ⑫   | DD-HID / Interception 驱动残留 | 诊断修复提供安装前置检查、残留识别、深度清理与重启提示 | 缓解 |
 | ⑬   | WebView 聚焦吞掉热键 / 默认快捷键抢占 | 前端中继键盘事件到后端，并阻止非编辑区默认快捷键 | 缓解 |
+| ⑭   | DDHID 驱动在部分环境不稳定 | 临时屏蔽 DDHID：命中自动回退通用模式并提示，阻止主动切换，保留卸载入口；改用 DD驱动（DdSimple）覆盖同类场景 | 缓解 |
+| ⑮   | 坏版本经静默自动更新即时全量铺开，且 Tauri updater 不可降级 | v0.3 应急回退 runbook（转 Draft 止血 + 向前滚修复）+ 发版护栏（高风险版本禁止裸 bump schema，防回退砸配置）；v0.6 评估 kill-switch / 灰度 / 延迟自动安装 | 规划 |
