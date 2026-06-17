@@ -830,7 +830,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 > 前提：Tauri updater 只升不降——已升级用户无法被「降级」拉回，紧急回退实质是「向前滚一个修复版」。详见下文路径。
 
-- [ ] 应急回退 runbook（`docs/RELEASE_ROLLBACK.md`）：
+- [x] 应急回退 runbook（`docs/RELEASE_ROLLBACK.md`）：含两条路径的真实命令——
   - ① **止血（分钟级）**：GitHub 把坏 Release 转 Draft / 把上个好版本「Set as latest」，使 `latest.json` 不再分发坏版本，拦住尚未升级的用户（已静默下载暂存 `pending_update` 的无法召回）
   - ② **向前滚修复**：`git revert` 坏改动 → bump 更高 patch 号 → 打 tag → CI 出包 → 自动更新带走已中招用户（修复已升级用户的唯一路径）
 - [ ] 发版护栏写入 `CLAUDE.md` 发版流程：高风险版本**禁止裸 bump `CURRENT_SCHEMA_VERSION`**（新字段一律 `#[serde(default)]` 走兼容；否则回退到旧 schema 会 `TooNew` 拒载、砸用户配置）；风险改动尽量挂运行时开关，先关开关而非全量回退
