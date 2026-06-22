@@ -7,9 +7,7 @@ use qzh_profile::key_id::KeyId;
 use qzh_profile::key_id::MouseButton;
 use qzh_profile::profile::{BurstMode, BurstRule, Hotkeys};
 use rules::RuleSnapshot;
-use scheduler::{
-    release_simulated_keys, PhysicalKeys, RuleExpiredCb, SchedulerHandle, SimulatedKeys,
-};
+use scheduler::{release_simulated_keys, PhysicalKeys, SchedulerHandle, SimulatedKeys};
 #[cfg(windows)]
 use std::sync::{atomic::AtomicU32, RwLock, Weak};
 #[cfg(windows)]
@@ -115,7 +113,7 @@ pub struct BurstEngine {
     hotkeys: Arc<Mutex<Hotkeys>>,
     /// 专用全局停止键（`global_stop` 已设且与 `global_toggle` 不同）的无锁缓存，
     /// `0` 表示未设置。物理输入热路径据此免锁判定停止键，保证紧急停止 100% 触发
-    /// 又不在每次按键时加 `hotkeys` 锁。由 [`BurstEngine::set_hotkeys`] 维护。
+    /// 又不在每次按键时加 `hotkeys` 锁。由 [`set_hotkeys`] 维护。
     dedicated_stop: AtomicU64,
     /// 全局开关状态被热键改变时调用（由 app 层注册，用于同步托盘与前端）。
     on_global_changed: GlobalChangedCb,
@@ -139,31 +137,19 @@ impl Default for BurstEngine {
 
 impl BurstEngine {
     pub fn new() -> Self {
-        let physical_pressed: PhysicalKeys = Arc::new(Mutex::new(HashSet::new()));
-        let simulated_keys: SimulatedKeys = Arc::new(Mutex::new(HashMap::new()));
-        let runtime = Arc::new(Mutex::new(RuntimeState {
-            lifecycle: EngineLifecycle::Paused,
-            active_rules: HashMap::new(),
-            toggle_states: HashMap::new(),
-            stop_generation: 0,
-        }));
-        // 调度器 liveness 兜底自停某规则时，同步清理引擎侧运行态，使该规则可被重新触发；
-        // 否则 active_rules 残留会让 start_rule 误判规则仍活跃而拒绝重启。
-        let runtime_for_expiry = runtime.clone();
-        let on_expired: RuleExpiredCb = Arc::new(move |id: &str| {
-            let mut rt = revive(runtime_for_expiry.lock());
-            rt.active_rules.remove(id);
-            rt.toggle_states.remove(id);
-        });
-        let scheduler =
-            SchedulerHandle::start(physical_pressed.clone(), simulated_keys.clone(), on_expired);
+        let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
         Self {
             global_enabled: Arc::new(AtomicBool::new(false)),
             rules: Arc::new(Mutex::new(RuleSnapshot::default())),
-            runtime,
-            physical_pressed,
-            simulated_keys,
-            scheduler,
+            runtime: Arc::new(Mutex::new(RuntimeState {
+                lifecycle: EngineLifecycle::Paused,
+                active_rules: HashMap::new(),
+                toggle_states: HashMap::new(),
+                stop_generation: 0,
+            })),
+            physical_pressed: Arc::new(Mutex::new(HashSet::new())),
+            simulated_keys: simulated_keys.clone(),
+            scheduler: SchedulerHandle::start(simulated_keys),
             hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
             dedicated_stop: AtomicU64::new(0),
             on_global_changed: Arc::new(Mutex::new(None)),
@@ -333,13 +319,6 @@ impl BurstEngine {
         revive(self.runtime.lock()).lifecycle = EngineLifecycle::Shutdown;
     }
 
-    /// 复位 hook 维护的物理按键账本。仅在停止 / 暂停 / 切模式 / 退出等低频复位点调用，
-    /// 清掉注入回灌偶发漏过过滤而残留的「幻影按下」，避免之后真实物理按键被
-    /// `on_key_press_event` 的去重逻辑误吞。引擎维护自身不变量的安全底线。
-    fn reset_physical_ledger(&self) {
-        revive(self.physical_pressed.lock()).clear();
-    }
-
     pub fn scheduler_hp_degraded(&self) -> bool {
         self.scheduler.hp_degraded()
     }
@@ -495,6 +474,14 @@ impl BurstEngine {
     fn pause_runtime(&self, wait: bool) {
         self.global_enabled.store(false, Ordering::SeqCst);
         self.stop_runtime_activity(wait);
+    }
+
+    /// 复位 hook 维护的物理按键账本。仅在停止 / 暂停 / 切模式 / 退出等低频复位点调用，
+    /// 清掉注入回灌偶发漏过过滤而残留的「幻影按下」，避免之后真实物理按键被
+    /// `on_key_press_event` 的去重逻辑误吞。引擎维护自身不变量的安全底线，不依赖
+    /// 调度器跨线程兜底（调度器绝不触碰该集合，物理输入热路径因此无跨线程锁争用）。
+    fn reset_physical_ledger(&self) {
+        revive(self.physical_pressed.lock()).clear();
     }
 
     fn stop_runtime_activity(&self, wait: bool) {
@@ -949,10 +936,13 @@ mod tests {
         let key = KeyId::Keyboard(0x60);
 
         assert!(engine.on_key_press_event(key).accepted_physical);
+        // 未释放再次按下：去重判定为按住中，不接受为新物理按下。
         assert!(!engine.on_key_press_event(key).accepted_physical);
 
+        // 停止活动会复位物理账本。
         engine.set_global_enabled(false, false);
 
+        // 账本已复位：同一键再次按下重新被接受为首次物理按下。
         assert!(engine.on_key_press_event(key).accepted_physical);
     }
 
@@ -977,8 +967,8 @@ mod tests {
 
         // 按下停止键：is_new=false（幻影命中去重），但停止必须 100% 触发。
         let result = engine.on_key_press_event(stop);
-        assert!(!result.accepted_physical);
-        assert!(result.handled);
+        assert!(!result.accepted_physical); // 去重命中：账本里已有该键
+        assert!(result.handled); // 但停止照常触发
         assert!(!engine.global_enabled.load(Ordering::SeqCst));
     }
 }
