@@ -127,7 +127,7 @@ packages/win-driver/src/
 
 | 参数         | 范围           | 执行位置                                      |
 | ------------ | -------------- | --------------------------------------------- |
-| 连发间隔     | 10ms – 10000ms | `qzh-profile/src/profile.rs::validate()`      |
+| 连发间隔     | 1ms – 10000ms（默认 10ms） | `qzh-profile/src/profile.rs::validate()`      |
 | 单配置规则数 | ≤ 64           | `qzh-profile/src/profile.rs::validate()`      |
 | 宏序列步骤数 | ≤ 256          | `qzh-profile/src/macro_seq.rs::MAX_STEPS`     |
 

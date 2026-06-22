@@ -15,7 +15,7 @@ use std::thread;
 use std::{
     collections::{HashMap, HashSet},
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex,
     },
 };
@@ -111,10 +111,22 @@ pub struct BurstEngine {
     simulated_keys: SimulatedKeys,
     scheduler: SchedulerHandle,
     hotkeys: Arc<Mutex<Hotkeys>>,
+    /// 专用全局停止键（`global_stop` 已设且与 `global_toggle` 不同）的无锁缓存，
+    /// `0` 表示未设置。物理输入热路径据此免锁判定停止键，保证紧急停止 100% 触发
+    /// 又不在每次按键时加 `hotkeys` 锁。由 [`set_hotkeys`] 维护。
+    dedicated_stop: AtomicU64,
     /// 全局开关状态被热键改变时调用（由 app 层注册，用于同步托盘与前端）。
     on_global_changed: GlobalChangedCb,
     /// 面板显隐热键触发时调用。
     on_panel_toggle: PanelToggleCb,
+}
+
+/// 把 [`KeyId`] 编码为非零 `u64`，供 `dedicated_stop` 无锁缓存比较。`0` 保留给「未设置」。
+fn encode_key_id(key: KeyId) -> u64 {
+    match key {
+        KeyId::Keyboard(vk) => (1u64 << 40) | u64::from(vk),
+        KeyId::Mouse(button) => (2u64 << 40) | (button as u64),
+    }
 }
 
 impl Default for BurstEngine {
@@ -125,7 +137,6 @@ impl Default for BurstEngine {
 
 impl BurstEngine {
     pub fn new() -> Self {
-        let physical_pressed = Arc::new(Mutex::new(HashSet::new()));
         let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
         Self {
             global_enabled: Arc::new(AtomicBool::new(false)),
@@ -136,16 +147,23 @@ impl BurstEngine {
                 toggle_states: HashMap::new(),
                 stop_generation: 0,
             })),
-            physical_pressed: physical_pressed.clone(),
+            physical_pressed: Arc::new(Mutex::new(HashSet::new())),
             simulated_keys: simulated_keys.clone(),
-            scheduler: SchedulerHandle::start(physical_pressed, simulated_keys),
+            scheduler: SchedulerHandle::start(simulated_keys),
             hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
+            dedicated_stop: AtomicU64::new(0),
             on_global_changed: Arc::new(Mutex::new(None)),
             on_panel_toggle: Arc::new(Mutex::new(None)),
         }
     }
 
     pub fn set_hotkeys(&self, hotkeys: Hotkeys) {
+        // 缓存专用停止键（已设 global_stop 且与 global_toggle 不同）供热路径免锁判定。
+        let dedicated = match hotkeys.global_stop {
+            Some(stop) if hotkeys.global_toggle != Some(stop) => encode_key_id(stop),
+            _ => 0,
+        };
+        self.dedicated_stop.store(dedicated, Ordering::Relaxed);
         *revive(self.hotkeys.lock()) = hotkeys;
     }
 
@@ -196,14 +214,29 @@ impl BurstEngine {
     }
 
     pub fn on_key_press_event(&self, key: KeyId) -> KeyProcessResult {
+        let is_new_physical = revive(self.physical_pressed.lock()).insert(key);
+
+        // 安全底线：专用全局停止键 100% 可触发。用无锁原子缓存判定，物理输入热路径不新增
+        // 跨线程锁；先于去重——即便 physical_pressed 因注入回灌残留幻影项导致
+        // is_new_physical=false，停止仍会触发。停止幂等且受 `enabled` 拦截重复，专用停止键
+        // 不是 start 键，无 enable/disable 抖动。
+        let stop_cache = self.dedicated_stop.load(Ordering::Relaxed);
+        if stop_cache != 0
+            && stop_cache == encode_key_id(key)
+            && self.global_enabled.load(Ordering::SeqCst)
         {
-            let mut pressed = revive(self.physical_pressed.lock());
-            if !pressed.insert(key) {
-                return KeyProcessResult {
-                    accepted_physical: false,
-                    handled: false,
-                };
-            }
+            self.set_global_enabled_and_notify(false);
+            return KeyProcessResult {
+                accepted_physical: is_new_physical,
+                handled: true,
+            };
+        }
+
+        if !is_new_physical {
+            return KeyProcessResult {
+                accepted_physical: false,
+                handled: false,
+            };
         }
 
         if self.handle_hotkey_press(key) {
@@ -282,6 +315,7 @@ impl BurstEngine {
         }
         clear_pending_injections();
         clear_relay_injections();
+        self.reset_physical_ledger();
         revive(self.runtime.lock()).lifecycle = EngineLifecycle::Shutdown;
     }
 
@@ -291,6 +325,14 @@ impl BurstEngine {
 
     pub fn lifecycle(&self) -> EngineLifecycle {
         revive(self.runtime.lock()).lifecycle
+    }
+
+    /// 切换全局开关并通知 app 层（同步托盘与前端）。热键改变开关状态的统一出口。
+    fn set_global_enabled_and_notify(&self, enabled: bool) {
+        self.set_global_enabled(enabled, false);
+        if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
+            cb(enabled);
+        }
     }
 
     fn handle_hotkey_press(&self, key: KeyId) -> bool {
@@ -308,17 +350,11 @@ impl BurstEngine {
             return true;
         }
         if start == Some(key) && !enabled {
-            self.set_global_enabled(true, false);
-            if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
-                cb(true);
-            }
+            self.set_global_enabled_and_notify(true);
             return true;
         }
         if stop == Some(key) && enabled {
-            self.set_global_enabled(false, false);
-            if let Some(cb) = revive(self.on_global_changed.lock()).as_ref() {
-                cb(false);
-            }
+            self.set_global_enabled_and_notify(false);
             return true;
         }
         false
@@ -440,6 +476,14 @@ impl BurstEngine {
         self.stop_runtime_activity(wait);
     }
 
+    /// 复位 hook 维护的物理按键账本。仅在停止 / 暂停 / 切模式 / 退出等低频复位点调用，
+    /// 清掉注入回灌偶发漏过过滤而残留的「幻影按下」，避免之后真实物理按键被
+    /// `on_key_press_event` 的去重逻辑误吞。引擎维护自身不变量的安全底线，不依赖
+    /// 调度器跨线程兜底（调度器绝不触碰该集合，物理输入热路径因此无跨线程锁争用）。
+    fn reset_physical_ledger(&self) {
+        revive(self.physical_pressed.lock()).clear();
+    }
+
     fn stop_runtime_activity(&self, wait: bool) {
         let generation = {
             let mut runtime = revive(self.runtime.lock());
@@ -465,6 +509,7 @@ impl BurstEngine {
         }
         clear_pending_injections();
         clear_relay_injections();
+        self.reset_physical_ledger();
 
         let mut runtime = revive(self.runtime.lock());
         if runtime.lifecycle != EngineLifecycle::Shutdown {
@@ -881,5 +926,49 @@ mod tests {
         engine.on_key_press(KeyId::Keyboard(0x45));
 
         assert_eq!(engine.get_active_ids(), vec!["toggle-b".to_string()]);
+    }
+
+    #[test]
+    fn stop_resets_physical_ledger_so_next_press_is_accepted() {
+        // 安全底线：停止/暂停时复位物理账本，清掉可能残留的幻影按下，
+        // 使之后真实按键不会被去重逻辑误吞。
+        let engine = BurstEngine::new();
+        let key = KeyId::Keyboard(0x60);
+
+        assert!(engine.on_key_press_event(key).accepted_physical);
+        // 未释放再次按下：去重判定为按住中，不接受为新物理按下。
+        assert!(!engine.on_key_press_event(key).accepted_physical);
+
+        // 停止活动会复位物理账本。
+        engine.set_global_enabled(false, false);
+
+        // 账本已复位：同一键再次按下重新被接受为首次物理按下。
+        assert!(engine.on_key_press_event(key).accepted_physical);
+    }
+
+    #[test]
+    fn dedicated_stop_hotkey_fires_even_when_physical_ledger_retains_key() {
+        // 安全底线：专用全局停止键 100% 可触发，即便停止键残留在 physical_pressed
+        // （注入回灌泄漏 / 未配对释放）导致去重命中，也必须照常停止。
+        let engine = BurstEngine::new();
+        let toggle = KeyId::Keyboard(0x70);
+        let stop = KeyId::Keyboard(0x71);
+        engine.set_hotkeys(Hotkeys {
+            global_toggle: Some(toggle),
+            global_stop: Some(stop),
+            ..Default::default()
+        });
+
+        engine.set_global_enabled(true, false);
+        assert!(engine.global_enabled.load(Ordering::SeqCst));
+
+        // 直接注入幻影项：停止键残留在 physical_pressed（模拟注入回灌泄漏）。
+        revive(engine.physical_pressed.lock()).insert(stop);
+
+        // 按下停止键：is_new=false（幻影命中去重），但停止必须 100% 触发。
+        let result = engine.on_key_press_event(stop);
+        assert!(!result.accepted_physical); // 去重命中：账本里已有该键
+        assert!(result.handled); // 但停止照常触发
+        assert!(!engine.global_enabled.load(Ordering::SeqCst));
     }
 }

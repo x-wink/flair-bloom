@@ -1,6 +1,6 @@
 use qzh_profile::key_id::KeyId;
 use qzh_profile::profile::BurstRule;
-use std::collections::{HashMap, HashSet};
+use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -21,7 +21,6 @@ enum RulePhase {
 struct ScheduledRule {
     rule: Arc<BurstRule>,
     generation: u64,
-    allow_while_physical_down: bool,
     phase: RulePhase,
     next_at: Instant,
     is_down: bool,
@@ -119,19 +118,13 @@ pub(crate) struct SchedulerStatsSnapshot {
 }
 
 impl SchedulerHandle {
-    pub fn start(physical_keys: PhysicalKeys, simulated_keys: SimulatedKeys) -> Self {
-        Self::start_with_dispatcher(
-            Arc::new(WinInputDispatcher),
-            None,
-            physical_keys,
-            simulated_keys,
-        )
+    pub fn start(simulated_keys: SimulatedKeys) -> Self {
+        Self::start_with_dispatcher(Arc::new(WinInputDispatcher), None, simulated_keys)
     }
 
     pub(crate) fn start_with_dispatcher(
         dispatcher: Arc<dyn EventDispatcher>,
         stats: Option<Arc<SchedulerStats>>,
-        physical_keys: PhysicalKeys,
         simulated_keys: SimulatedKeys,
     ) -> Self {
         let (tx, rx) = mpsc::channel();
@@ -146,7 +139,6 @@ impl SchedulerHandle {
                 worker_waker,
                 dispatcher,
                 stats,
-                physical_keys,
                 simulated_keys,
             )
         });
@@ -228,7 +220,6 @@ fn worker_loop(
     command_waker: platform_wait::CommandWaker,
     dispatcher: Arc<dyn EventDispatcher>,
     stats: Option<Arc<SchedulerStats>>,
-    physical_keys: PhysicalKeys,
     simulated_keys: SimulatedKeys,
 ) {
     let mut worker = SchedulerWorker {
@@ -237,8 +228,8 @@ fn worker_loop(
         current_generation: 0,
         dispatcher,
         stats,
-        physical_keys,
         simulated_keys,
+        throttle: Throttle::new(hp_degraded.clone()),
     };
     let mut wait = platform_wait::WaitContext::new(command_waker, hp_degraded);
 
@@ -270,24 +261,75 @@ fn worker_loop(
 
 struct SchedulerWorker {
     rules: HashMap<String, ScheduledRule>,
-    target_holds: HashMap<KeyId, TargetHold>,
+    /// 目标键 -> 当前持有它的规则 ID 集合。集合非空即该键处于注入按下态，
+    /// 多条规则共享同一目标键时只发一次 down，最后一个 owner 释放时才发 up。
+    target_holds: HashMap<KeyId, HashSet<String>>,
     current_generation: u64,
     dispatcher: Arc<dyn EventDispatcher>,
     stats: Option<Arc<SchedulerStats>>,
-    physical_keys: PhysicalKeys,
     simulated_keys: SimulatedKeys,
-}
-
-#[derive(Default)]
-struct TargetHold {
-    owners: HashMap<String, bool>,
+    throttle: Throttle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AcquireOutcome {
     Acquired,
     Shared,
-    BlockedByPhysical,
+}
+
+/// 智能降频下限范围：1ms 表示不降频，最高放宽到 50ms。
+const THROTTLE_FLOOR_MIN_MS: u32 = 1;
+const THROTTLE_FLOOR_MAX_MS: u32 = 50;
+/// 无高精度定时器（hp_degraded）时亚 ~15ms 周期无法稳定达成，硬钳到此可持续下限（信号 C）。
+const HP_DEGRADED_FLOOR_MS: u32 = 8;
+/// 承压时每批升高的步长，健康时每批衰减的步长。升快降慢形成迟滞，避免临界点抖动。
+const THROTTLE_RAISE_STEP_MS: u32 = 2;
+const THROTTLE_DECAY_STEP_MS: u32 = 1;
+/// 调度迟到超过此阈值视作线程跟不上节奏（信号 B）。
+const THROTTLE_LATE_THRESHOLD: Duration = Duration::from_millis(4);
+
+/// 智能降频：引擎自我调节，用让步注入效率（优先级③）守住物理输入优先 + 连发稳定
+/// （优先级①②）——CPU 因温控/电量降频同理。`dynamic_floor_ms` 是当前允许的最快注入
+/// 周期下限，仅会放慢、绝不快过规则请求的 interval；健康时缓慢衰减、停止时复位回 1ms。
+struct Throttle {
+    dynamic_floor_ms: u32,
+    hp_degraded: Arc<AtomicBool>,
+}
+
+impl Throttle {
+    fn new(hp_degraded: Arc<AtomicBool>) -> Self {
+        Self {
+            dynamic_floor_ms: THROTTLE_FLOOR_MIN_MS,
+            hp_degraded,
+        }
+    }
+
+    /// 当前有效注入周期下限：自适应下限与 hp_degraded 硬底（信号 C）取较大者。
+    fn floor_ms(&self) -> u32 {
+        let degraded_floor = if self.hp_degraded.load(Ordering::Relaxed) {
+            HP_DEGRADED_FLOOR_MS
+        } else {
+            THROTTLE_FLOOR_MIN_MS
+        };
+        self.dynamic_floor_ms.max(degraded_floor)
+    }
+
+    /// 按本轮是否承压（信号 B 调度迟到）调整下限：承压升高、健康衰减。
+    fn observe(&mut self, stressed: bool) {
+        self.dynamic_floor_ms = if stressed {
+            (self.dynamic_floor_ms + THROTTLE_RAISE_STEP_MS).min(THROTTLE_FLOOR_MAX_MS)
+        } else {
+            self.dynamic_floor_ms
+                .saturating_sub(THROTTLE_DECAY_STEP_MS)
+                .max(THROTTLE_FLOOR_MIN_MS)
+        };
+    }
+
+    /// 复位到不降频。停止 / 切代 / 退出等会话边界调用，避免一次瞬时承压把下限
+    /// 顶高后跨会话残留、把下一轮连发长期钳慢。
+    fn reset(&mut self) {
+        self.dynamic_floor_ms = THROTTLE_FLOOR_MIN_MS;
+    }
 }
 
 impl SchedulerWorker {
@@ -295,13 +337,9 @@ impl SchedulerWorker {
         match command {
             SchedulerCommand::Start { rule, generation } => {
                 if generation == self.current_generation {
-                    let allow_while_physical_down = rule.mode
-                        == qzh_profile::profile::BurstMode::Hold
-                        && rule.trigger_key == rule.target_key;
                     self.rules.entry(rule.id.clone()).or_insert(ScheduledRule {
                         rule,
                         generation,
-                        allow_while_physical_down,
                         phase: RulePhase::DownPhase,
                         next_at: Instant::now(),
                         is_down: false,
@@ -346,7 +384,7 @@ impl SchedulerWorker {
             return;
         };
         if rule.is_down {
-            let event = self.release_owner(rule.rule.target_key, rule_id);
+            let event = Self::release_owner(&mut self.target_holds, rule.rule.target_key, rule_id);
             self.dispatch_events(event.into_iter().collect());
         }
     }
@@ -356,6 +394,8 @@ impl SchedulerWorker {
         let events = self.release_all_target_holds();
         self.target_holds.clear();
         self.dispatch_events(events);
+        // 会话结束：复位降频，下一轮连发从不降频开始，避免上次的瞬时承压残留拖慢。
+        self.throttle.reset();
     }
 
     fn next_deadline(&self) -> Option<Instant> {
@@ -363,82 +403,81 @@ impl SchedulerWorker {
     }
 
     fn process_due(&mut self, now: Instant) {
-        let due_ids = self
-            .rules
-            .iter()
-            .filter_map(|(id, rule)| (rule.next_at <= now).then_some(id.clone()))
-            .collect::<Vec<_>>();
-        if due_ids.is_empty() {
-            return;
-        }
+        // 智能降频：effective interval = max(请求 interval, floor)，只拉长「下一拍的间隔」，
+        // 绝不快过规则请求；floor>=1ms 保证 next_at 单调推进。
+        let floor_ms = self.throttle.floor_ms();
+        let current_generation = self.current_generation;
+        let stats = self.stats.as_deref();
+        // 与 rules.iter_mut() 拆分借用，原地处理到期规则，避免每 tick 的 id 克隆与 remove/insert。
+        let target_holds = &mut self.target_holds;
 
+        let mut any_due = false;
+        let mut max_late = Duration::ZERO;
         let mut events = Vec::new();
-        for id in due_ids {
-            let Some(mut rule) = self.rules.remove(&id) else {
+        let mut expired: Vec<String> = Vec::new();
+
+        for (id, rule) in self.rules.iter_mut() {
+            if rule.next_at > now {
                 continue;
-            };
-            if let Some(stats) = &self.stats {
-                stats.record_delay(now.saturating_duration_since(rule.next_at));
             }
-            if rule.generation != self.current_generation {
+            any_due = true;
+
+            // 过期 generation 规则只做惰性释放，不参与降频度量：其 next_at 早已过期，
+            // 计入会把信号 B 误顶满（快速启停 / 切代后常见）。
+            if rule.generation != current_generation {
                 if rule.is_down {
-                    if let Some(event) = self.release_owner(rule.rule.target_key, &id) {
+                    if let Some(event) = Self::release_owner(target_holds, rule.rule.target_key, id)
+                    {
                         events.push(event);
                     }
                 }
+                expired.push(id.clone());
                 continue;
             }
 
-            let interval = Duration::from_millis(rule.rule.interval_ms as u64);
+            // 信号 B：仅统计当前 generation、真正参与注入的规则的调度迟到。
+            let late = now.saturating_duration_since(rule.next_at);
+            max_late = max_late.max(late);
+            if let Some(stats) = stats {
+                stats.record_delay(late);
+            }
+
+            // hold（按下时长）按规则请求的 interval 计算，降频不拉长按下、保持点按特性；
+            // 仅把拍与拍之间的「间隔」放慢。
+            let interval = Duration::from_millis(rule.rule.interval_ms.max(floor_ms) as u64);
             let hold = hold_duration(rule.rule.interval_ms);
             match rule.phase {
                 RulePhase::DownPhase if hold.is_zero() => {
-                    match self.acquire_owner(
-                        rule.rule.target_key,
-                        &id,
-                        rule.allow_while_physical_down,
-                    ) {
+                    match Self::acquire_owner(target_holds, rule.rule.target_key, id) {
                         AcquireOutcome::Acquired => {
                             events.push(InputEvent::down(rule.rule.target_key));
-                            if let Some(event) = self.release_owner(rule.rule.target_key, &id) {
+                            if let Some(event) =
+                                Self::release_owner(target_holds, rule.rule.target_key, id)
+                            {
                                 events.push(event);
                             }
                         }
                         AcquireOutcome::Shared => {
-                            let _ = self.release_owner(rule.rule.target_key, &id);
+                            let _ = Self::release_owner(target_holds, rule.rule.target_key, id);
                         }
-                        AcquireOutcome::BlockedByPhysical => {}
                     }
                     rule.is_down = false;
                     rule.phase = RulePhase::DownPhase;
-                    rule.next_at = now + interval.max(Duration::from_millis(1));
+                    rule.next_at = now + interval;
                 }
                 RulePhase::DownPhase => {
-                    match self.acquire_owner(
-                        rule.rule.target_key,
-                        &id,
-                        rule.allow_while_physical_down,
-                    ) {
-                        AcquireOutcome::Acquired => {
-                            events.push(InputEvent::down(rule.rule.target_key));
-                            rule.is_down = true;
-                            rule.phase = RulePhase::UpPhase;
-                            rule.next_at = now + hold;
-                        }
-                        AcquireOutcome::Shared => {
-                            rule.is_down = true;
-                            rule.phase = RulePhase::UpPhase;
-                            rule.next_at = now + hold;
-                        }
-                        AcquireOutcome::BlockedByPhysical => {
-                            rule.is_down = false;
-                            rule.phase = RulePhase::DownPhase;
-                            rule.next_at = now + interval.max(Duration::from_millis(1));
-                        }
+                    if let AcquireOutcome::Acquired =
+                        Self::acquire_owner(target_holds, rule.rule.target_key, id)
+                    {
+                        events.push(InputEvent::down(rule.rule.target_key));
                     }
+                    rule.is_down = true;
+                    rule.phase = RulePhase::UpPhase;
+                    rule.next_at = now + hold;
                 }
                 RulePhase::UpPhase => {
-                    if let Some(event) = self.release_owner(rule.rule.target_key, &id) {
+                    if let Some(event) = Self::release_owner(target_holds, rule.rule.target_key, id)
+                    {
                         events.push(event);
                     }
                     rule.is_down = false;
@@ -447,59 +486,54 @@ impl SchedulerWorker {
                     rule.next_at = now + rest;
                 }
             }
-            self.rules.insert(id, rule);
+        }
+
+        for id in expired {
+            self.rules.remove(&id);
+        }
+        if !any_due {
+            return;
         }
 
         self.dispatch_events(events);
+        // 信号 B/C：调度持续迟到（线程跟不上节奏）则升高下限，否则衰减恢复。
+        // 不用注入失败率作信号——失败几乎都是单键/单后端问题，不该全局降速。
+        self.throttle.observe(max_late > THROTTLE_LATE_THRESHOLD);
     }
 
+    /// 申请目标键的注入所有权。引擎不为业务取舍兜底：不判断该键是否被用户物理按住
+    /// （把某键设为连发 target 即声明它会被不断按下弹起，是业务层取舍）。同一目标键被多条
+    /// 规则共享时只发一次 down，避免相互打断。单次 entry 查找区分首占用与共享。
+    /// 取 `&mut target_holds` 而非 `&mut self`，使 `process_due` 能与 `rules.iter_mut()`
+    /// 拆分借用、原地处理规则，省掉每 tick 的 id 克隆与 remove/insert。
     fn acquire_owner(
-        &mut self,
+        target_holds: &mut HashMap<KeyId, HashSet<String>>,
         key: KeyId,
         owner: &str,
-        allow_while_physical_down: bool,
     ) -> AcquireOutcome {
-        if let Some(hold) = self.target_holds.get_mut(&key) {
-            hold.owners
-                .insert(owner.to_string(), allow_while_physical_down);
-            return AcquireOutcome::Shared;
+        match target_holds.entry(key) {
+            Entry::Occupied(mut e) => {
+                e.get_mut().insert(owner.to_string());
+                AcquireOutcome::Shared
+            }
+            Entry::Vacant(e) => {
+                e.insert(HashSet::new()).insert(owner.to_string());
+                AcquireOutcome::Acquired
+            }
         }
-
-        if !allow_while_physical_down && self.is_physically_blocked(key) {
-            return AcquireOutcome::BlockedByPhysical;
-        }
-
-        let owners = self.target_holds.entry(key).or_default();
-        owners
-            .owners
-            .insert(owner.to_string(), allow_while_physical_down);
-        AcquireOutcome::Acquired
     }
 
-    /// 目标键是否真的被物理按住。`physical_keys` 由 hook 维护，但 DD 等后端的注入回灌
-    /// 仅靠启发式队列过滤（非 SIM_MARKER 精确过滤），偶尔漏过会把自身注入误记为物理按下，
-    /// 且该集合从不整体清空 → 目标键被永久误判为"按住"而停止注入。命中拦截前用
-    /// `GetAsyncKeyState` 复核真实物理状态，发现陈旧泄漏就地清除并放行。
-    fn is_physically_blocked(&self, key: KeyId) -> bool {
-        let mut pressed = self.physical_keys.lock().unwrap_or_else(|e| e.into_inner());
-        if !pressed.contains(&key) {
-            return false;
-        }
-        if key_physically_down(key) {
-            return true;
-        }
-        pressed.remove(&key);
-        warn!("清除陈旧物理按键记录（疑似注入回灌泄漏）: key={key:?}");
-        false
-    }
-
-    fn release_owner(&mut self, key: KeyId, owner: &str) -> Option<InputEvent> {
-        let hold = self.target_holds.get_mut(&key)?;
-        hold.owners.remove(owner);
-        if !hold.owners.is_empty() {
+    fn release_owner(
+        target_holds: &mut HashMap<KeyId, HashSet<String>>,
+        key: KeyId,
+        owner: &str,
+    ) -> Option<InputEvent> {
+        let owners = target_holds.get_mut(&key)?;
+        owners.remove(owner);
+        if !owners.is_empty() {
             None
         } else {
-            self.target_holds.remove(&key);
+            target_holds.remove(&key);
             Some(InputEvent::up(key))
         }
     }
@@ -555,33 +589,6 @@ pub(crate) fn release_simulated_keys(simulated_keys: &SimulatedKeys) {
     if !events.is_empty() {
         let _ = key_events(&events);
     }
-}
-
-/// 查询某个键当前是否处于物理按下状态。高位 `0x8000` 表示按下。
-/// 非 Windows 平台无法查询，保守地信任 `physical_keys` 记录（返回 `true`），
-/// 使既有单元测试与跨平台行为保持不变。
-#[cfg(windows)]
-fn key_physically_down(key: KeyId) -> bool {
-    use qzh_profile::key_id::MouseButton;
-    use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
-    let vk: i32 = match key {
-        KeyId::Keyboard(vk) => vk as i32,
-        KeyId::Mouse(MouseButton::Left) => 0x01, // VK_LBUTTON
-        KeyId::Mouse(MouseButton::Right) => 0x02, // VK_RBUTTON
-        KeyId::Mouse(MouseButton::Middle) => 0x04, // VK_MBUTTON
-        KeyId::Mouse(MouseButton::X1) => 0x05,   // VK_XBUTTON1
-        KeyId::Mouse(MouseButton::X2) => 0x06,   // VK_XBUTTON2
-        // 滚轮是瞬发事件，不存在"按住"状态，一律视为未按下（陈旧记录即清除）。
-        KeyId::Mouse(MouseButton::WheelUp | MouseButton::WheelDown) => return false,
-    };
-    // SAFETY: GetAsyncKeyState 对任意 vKey 取值安全，无副作用
-    let state = unsafe { GetAsyncKeyState(vk) };
-    (state as u16 & 0x8000) != 0
-}
-
-#[cfg(not(windows))]
-fn key_physically_down(_key: KeyId) -> bool {
-    true
 }
 
 fn decrement_simulated_key(simulated: &mut HashMap<KeyId, usize>, key: KeyId) {
@@ -848,8 +855,7 @@ mod tests {
         }
     }
 
-    fn test_worker() -> (SchedulerWorker, PhysicalKeys, SimulatedKeys) {
-        let physical_keys = Arc::new(Mutex::new(HashSet::new()));
+    fn test_worker() -> (SchedulerWorker, SimulatedKeys) {
         let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
         let worker = SchedulerWorker {
             rules: HashMap::new(),
@@ -857,10 +863,10 @@ mod tests {
             current_generation: 0,
             dispatcher: Arc::new(TestDispatcher),
             stats: None,
-            physical_keys: physical_keys.clone(),
             simulated_keys: simulated_keys.clone(),
+            throttle: Throttle::new(Arc::new(AtomicBool::new(false))),
         };
-        (worker, physical_keys, simulated_keys)
+        (worker, simulated_keys)
     }
 
     fn rule(id: &str, target_key: KeyId) -> Arc<BurstRule> {
@@ -882,8 +888,57 @@ mod tests {
     }
 
     #[test]
+    fn throttle_raises_floor_under_stress_and_decays_when_healthy() {
+        let mut t = Throttle::new(Arc::new(AtomicBool::new(false)));
+        assert_eq!(t.floor_ms(), THROTTLE_FLOOR_MIN_MS);
+
+        // 持续承压：下限单调升高并封顶。
+        for _ in 0..100 {
+            t.observe(true);
+        }
+        assert_eq!(t.floor_ms(), THROTTLE_FLOOR_MAX_MS);
+
+        // 恢复健康：缓慢衰减回不降频。
+        for _ in 0..(THROTTLE_FLOOR_MAX_MS as usize) {
+            t.observe(false);
+        }
+        assert_eq!(t.floor_ms(), THROTTLE_FLOOR_MIN_MS);
+    }
+
+    #[test]
+    fn throttle_raise_is_faster_than_decay() {
+        let mut t = Throttle::new(Arc::new(AtomicBool::new(false)));
+        t.observe(true); // +RAISE
+        let raised = t.floor_ms();
+        t.observe(false); // -DECAY
+                          // 升快降慢：一升一降后仍高于初始，形成迟滞。
+        assert!(t.floor_ms() > THROTTLE_FLOOR_MIN_MS);
+        assert!(raised - t.floor_ms() == THROTTLE_DECAY_STEP_MS);
+    }
+
+    #[test]
+    fn throttle_hp_degraded_enforces_min_floor() {
+        let t = Throttle::new(Arc::new(AtomicBool::new(true)));
+        // 无高精度定时器时即便未承压也钳到可持续下限（信号 C）。
+        assert!(t.floor_ms() >= HP_DEGRADED_FLOOR_MS);
+    }
+
+    #[test]
+    fn cleanup_all_resets_throttle_so_next_session_starts_unthrottled() {
+        let (mut worker, _) = test_worker();
+        for _ in 0..100 {
+            worker.throttle.observe(true);
+        }
+        assert!(worker.throttle.floor_ms() > THROTTLE_FLOOR_MIN_MS);
+
+        // 停止 / 切代 / 退出都经 cleanup_all：复位降频，避免瞬时承压跨会话残留。
+        worker.cleanup_all();
+        assert_eq!(worker.throttle.floor_ms(), THROTTLE_FLOOR_MIN_MS);
+    }
+
+    #[test]
     fn old_generation_start_is_discarded_after_stop_all() {
-        let (mut worker, _, _) = test_worker();
+        let (mut worker, _) = test_worker();
         worker.handle_command(SchedulerCommand::StopAll {
             generation: 1,
             ack: None,
@@ -898,7 +953,7 @@ mod tests {
 
     #[test]
     fn stale_stop_all_does_not_cleanup_newer_generation_rules() {
-        let (mut worker, _, _) = test_worker();
+        let (mut worker, _) = test_worker();
         worker.current_generation = 2;
         worker.handle_command(SchedulerCommand::Start {
             rule: rule("new", KeyId::Keyboard(0x45)),
@@ -918,52 +973,42 @@ mod tests {
 
     #[test]
     fn same_target_owners_share_single_down() {
-        let (mut worker, _, _) = test_worker();
+        let (mut worker, _) = test_worker();
         let key = KeyId::Keyboard(0x45);
+        let th = &mut worker.target_holds;
 
         assert_eq!(
-            worker.acquire_owner(key, "a", false),
+            SchedulerWorker::acquire_owner(th, key, "a"),
             AcquireOutcome::Acquired
         );
         assert_eq!(
-            worker.acquire_owner(key, "b", false),
+            SchedulerWorker::acquire_owner(th, key, "b"),
             AcquireOutcome::Shared
         );
-        assert_eq!(worker.release_owner(key, "a"), None);
-        assert_eq!(worker.release_owner(key, "b"), Some(InputEvent::up(key)));
-    }
-
-    #[test]
-    fn physical_target_down_blocks_different_trigger_injection() {
-        let (mut worker, physical_keys, _) = test_worker();
-        let key = KeyId::Keyboard(0x45);
-        physical_keys.lock().unwrap().insert(key);
-
+        assert_eq!(SchedulerWorker::release_owner(th, key, "a"), None);
         assert_eq!(
-            worker.acquire_owner(key, "different-trigger", false),
-            AcquireOutcome::BlockedByPhysical
+            SchedulerWorker::release_owner(th, key, "b"),
+            Some(InputEvent::up(key))
         );
-        assert!(worker.target_holds.is_empty());
     }
 
     #[test]
-    fn hold_target_equals_trigger_can_inject_while_physical_down() {
-        let (mut worker, physical_keys, _) = test_worker();
+    fn acquire_owner_no_longer_gates_on_physical_state() {
+        // 引擎不为业务取舍兜底：target 键即便被物理按住也照常注入（由业务层声明风险）。
+        let (mut worker, _) = test_worker();
         let key = KeyId::Keyboard(0x45);
-        physical_keys.lock().unwrap().insert(key);
 
         assert_eq!(
-            worker.acquire_owner(key, "same-trigger", true),
+            SchedulerWorker::acquire_owner(&mut worker.target_holds, key, "different-trigger"),
             AcquireOutcome::Acquired
         );
         assert!(worker.target_holds.contains_key(&key));
     }
 
     #[test]
-    fn key_up_releases_simulated_down_even_when_physical_key_is_down() {
-        let (worker, physical_keys, simulated_keys) = test_worker();
+    fn key_up_releases_simulated_down() {
+        let (worker, simulated_keys) = test_worker();
         let key = KeyId::Keyboard(0x45);
-        physical_keys.lock().unwrap().insert(key);
         simulated_keys.lock().unwrap().insert(key, 1);
 
         worker.dispatch_events(vec![InputEvent::up(key)]);

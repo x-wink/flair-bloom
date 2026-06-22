@@ -1,7 +1,7 @@
 use crate::scheduler::{EventDispatcher, SchedulerHandle, SchedulerStats};
 use qzh_profile::key_id::KeyId;
 use qzh_profile::profile::{BurstMode, BurstRule};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
@@ -61,7 +61,6 @@ pub fn run_stress(config: StressConfig) -> StressReport {
     let scheduler = SchedulerHandle::start_with_dispatcher(
         Arc::new(DryRunDispatcher),
         Some(stats.clone()),
-        Arc::new(Mutex::new(HashSet::new())),
         Arc::new(Mutex::new(HashMap::new())),
     );
     let cpu_start = process_cpu_time_100ns();
