@@ -124,6 +124,19 @@ fn record_injection_in(map: &'static Mutex<PendingMap>, key: KeyId, is_up: bool,
     queue.push_back(now);
 }
 
+/// DD 系列（DD-HID / DDSimple）注入的**唯一**自注入过滤依据：注入前登记 `(key, is_up)`，
+/// hook 回灌时 `try_consume_injection` 配平消费。
+///
+/// 坑（务必知悉，勿重蹈）：DD 驱动把 `ExtraInformation` 写死为 0，注入事件回到 LL hook 时
+/// `dwExtraInfo` 恒为 0，`SIM_MARKER` **无法幸存**——故 DD 路径既不设置也不依赖 SIM。
+/// 不要再为 DD 加任何「直写 SIM」的旁路（历史上的 `dd_direct` DeviceIoControl 旁路已移除，
+/// 缘由见 `ddsimple.rs` 顶部注释）。
+///
+/// 这套时间窗口队列是**尽力而为、不保证 100%**：对同键规则（`trigger == target`）无法可靠
+/// 区分「用户真实按键」与「自身注入回灌」，高负载 / 丢事件时会偶发误判（连发自停或停不掉）。
+/// 这是 DD 驱动的固有缺陷，已决定**不再强行修复**——同键 Toggle 由
+/// `requires_distinct_target_for_toggle` 在配置层拦截，同键 Hold 则接受该不可靠性。
+/// 彻底消除需 Raw Input 按来源区分 DD 虚拟设备与物理设备，非当前范围。
 #[cfg(any(test, windows))]
 fn record_injection(key: KeyId, is_up: bool) {
     record_injection_in(pending_map(), key, is_up, SIM_TTL);
