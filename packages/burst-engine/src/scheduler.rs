@@ -214,6 +214,39 @@ impl Drop for SchedulerHandle {
     }
 }
 
+/// 引擎依赖的调度器命令接口。抽成 trait 是为了在测试里注入「命令录制替身」，
+/// 对「合成物理按键 → 引擎 → 调度命令（含 generation）」整条管线做确定性断言——
+/// 真实 [`SchedulerHandle`] 跑在真线程 + waitable timer 上，无法直接确定性测命令时序。
+pub(crate) trait Scheduler: Send + Sync {
+    fn start_rule(&self, rule: Arc<BurstRule>, generation: u64);
+    fn stop_rule(&self, rule_id: String, generation: u64);
+    fn stop_all_async(&self, generation: u64);
+    fn stop_all_blocking(&self, generation: u64) -> bool;
+    fn shutdown_blocking(&self, generation: u64) -> bool;
+    fn hp_degraded(&self) -> bool;
+}
+
+impl Scheduler for SchedulerHandle {
+    fn start_rule(&self, rule: Arc<BurstRule>, generation: u64) {
+        SchedulerHandle::start_rule(self, rule, generation);
+    }
+    fn stop_rule(&self, rule_id: String, generation: u64) {
+        SchedulerHandle::stop_rule(self, rule_id, generation);
+    }
+    fn stop_all_async(&self, generation: u64) {
+        SchedulerHandle::stop_all_async(self, generation);
+    }
+    fn stop_all_blocking(&self, generation: u64) -> bool {
+        SchedulerHandle::stop_all_blocking(self, generation)
+    }
+    fn shutdown_blocking(&self, generation: u64) -> bool {
+        SchedulerHandle::shutdown_blocking(self, generation)
+    }
+    fn hp_degraded(&self) -> bool {
+        SchedulerHandle::hp_degraded(self)
+    }
+}
+
 fn worker_loop(
     rx: Receiver<SchedulerCommand>,
     hp_degraded: Arc<AtomicBool>,
@@ -841,6 +874,9 @@ mod platform_wait {
         -ticks
     }
 }
+
+#[cfg(test)]
+mod sim_tests;
 
 #[cfg(test)]
 mod tests {

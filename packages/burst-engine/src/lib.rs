@@ -2,12 +2,18 @@ mod rules;
 mod scheduler;
 pub mod stress;
 
+#[cfg(test)]
+mod pipeline_tests;
+
+#[cfg(all(test, windows))]
+mod smoke_tests;
+
 use qzh_profile::key_id::KeyId;
 #[cfg(any(test, windows))]
 use qzh_profile::key_id::MouseButton;
 use qzh_profile::profile::{BurstMode, BurstRule, Hotkeys};
 use rules::RuleSnapshot;
-use scheduler::{release_simulated_keys, PhysicalKeys, SchedulerHandle, SimulatedKeys};
+use scheduler::{release_simulated_keys, PhysicalKeys, Scheduler, SchedulerHandle, SimulatedKeys};
 #[cfg(windows)]
 use std::sync::{atomic::AtomicU32, RwLock, Weak};
 #[cfg(windows)]
@@ -109,7 +115,7 @@ pub struct BurstEngine {
     runtime: Arc<Mutex<RuntimeState>>,
     physical_pressed: PhysicalKeys,
     simulated_keys: SimulatedKeys,
-    scheduler: SchedulerHandle,
+    scheduler: Arc<dyn Scheduler>,
     hotkeys: Arc<Mutex<Hotkeys>>,
     /// 专用全局停止键（`global_stop` 已设且与 `global_toggle` 不同）的无锁缓存，
     /// `0` 表示未设置。物理输入热路径据此免锁判定停止键，保证紧急停止 100% 触发
@@ -138,6 +144,12 @@ impl Default for BurstEngine {
 impl BurstEngine {
     pub fn new() -> Self {
         let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
+        let scheduler: Arc<dyn Scheduler> =
+            Arc::new(SchedulerHandle::start(simulated_keys.clone()));
+        Self::from_parts(scheduler, simulated_keys)
+    }
+
+    fn from_parts(scheduler: Arc<dyn Scheduler>, simulated_keys: SimulatedKeys) -> Self {
         Self {
             global_enabled: Arc::new(AtomicBool::new(false)),
             rules: Arc::new(Mutex::new(RuleSnapshot::default())),
@@ -148,13 +160,19 @@ impl BurstEngine {
                 stop_generation: 0,
             })),
             physical_pressed: Arc::new(Mutex::new(HashSet::new())),
-            simulated_keys: simulated_keys.clone(),
-            scheduler: SchedulerHandle::start(simulated_keys),
+            simulated_keys,
+            scheduler,
             hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
             dedicated_stop: AtomicU64::new(0),
             on_global_changed: Arc::new(Mutex::new(None)),
             on_panel_toggle: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// 测试构造：注入自定义调度器（如命令录制替身），对引擎→调度命令做确定性断言。
+    #[cfg(test)]
+    pub(crate) fn new_with_scheduler(scheduler: Arc<dyn Scheduler>) -> Self {
+        Self::from_parts(scheduler, Arc::new(Mutex::new(HashMap::new())))
     }
 
     pub fn set_hotkeys(&self, hotkeys: Hotkeys) {
@@ -970,5 +988,80 @@ mod tests {
         assert!(!result.accepted_physical); // 去重命中：账本里已有该键
         assert!(result.handled); // 但停止照常触发
         assert!(!engine.global_enabled.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn toggle_with_separate_stop_key_only_stops_on_stop_key() {
+        // 边界：Toggle 配独立停止键时，再按触发键不停止，只有按停止键才停。
+        let engine = BurstEngine::new();
+        let trigger = KeyId::Keyboard(0x51); // Q
+        let stop = KeyId::Keyboard(0x58); // X
+        let mut r = rule("t", BurstMode::Toggle, trigger, KeyId::Keyboard(0x45));
+        r.stop_key = Some(stop);
+        engine.set_rules(vec![r]);
+        engine.set_global_enabled(true, false);
+
+        engine.on_key_press(trigger);
+        assert_eq!(engine.get_active_ids(), vec!["t".to_string()]);
+
+        // 再按触发键：停止键是独立的 X，不停止。
+        engine.on_key_release(trigger);
+        engine.on_key_press(trigger);
+        assert_eq!(engine.get_active_ids(), vec!["t".to_string()]);
+
+        // 按下独立停止键才停止。
+        engine.on_key_release(trigger);
+        engine.on_key_press(stop);
+        assert!(engine.get_active_ids().is_empty());
+    }
+
+    #[test]
+    fn toggle_group_displacement_resets_state_so_old_rule_can_restart() {
+        // 边界（对应历史 toggle 双状态竞态）：A 被同组 B 顶替后，其 toggle 状态必须复位，
+        // 之后再按 A 的触发键能重新开启 A（并反过来顶替 B）。
+        let engine = BurstEngine::new();
+        let mut a = rule(
+            "a",
+            BurstMode::Toggle,
+            KeyId::Keyboard(0x51),
+            KeyId::Keyboard(0x41),
+        );
+        let mut b = rule(
+            "b",
+            BurstMode::Toggle,
+            KeyId::Keyboard(0x45),
+            KeyId::Keyboard(0x42),
+        );
+        a.group = Some("g".to_string());
+        b.group = Some("g".to_string());
+        engine.set_rules(vec![a, b]);
+        engine.set_global_enabled(true, false);
+
+        engine.on_key_press(KeyId::Keyboard(0x51)); // a 开
+        assert_eq!(engine.get_active_ids(), vec!["a".to_string()]);
+        engine.on_key_release(KeyId::Keyboard(0x51));
+
+        engine.on_key_press(KeyId::Keyboard(0x45)); // b 开，a 被顶替
+        assert_eq!(engine.get_active_ids(), vec!["b".to_string()]);
+        engine.on_key_release(KeyId::Keyboard(0x45));
+
+        engine.on_key_press(KeyId::Keyboard(0x51)); // 再按 Q：a 重新开启并顶替 b
+        assert_eq!(engine.get_active_ids(), vec!["a".to_string()]);
+    }
+
+    #[test]
+    fn rule_does_not_start_while_global_disabled() {
+        // 边界：全局开关未启用时，按下触发键不应启动任何连发。
+        let engine = BurstEngine::new();
+        let trigger = KeyId::Keyboard(0x51);
+        engine.set_rules(vec![rule(
+            "h",
+            BurstMode::Hold,
+            trigger,
+            KeyId::Keyboard(0x45),
+        )]);
+        // 故意不调用 set_global_enabled(true)
+        engine.on_key_press(trigger);
+        assert!(engine.get_active_ids().is_empty());
     }
 }
