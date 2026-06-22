@@ -25,7 +25,9 @@ enum RulePhase {
 struct ScheduledRule {
     rule: Arc<BurstRule>,
     generation: u64,
-    allow_while_physical_down: bool,
+    /// 该规则是 Hold(trigger==target) 连发：物理触发键被按住期间持续注入同一键。
+    /// 这类规则的物理松开事件可能被注入回灌吞掉而收不到 on_key_release，需 liveness 兜底自停。
+    hold_same_key: bool,
     phase: RulePhase,
     next_at: Instant,
     is_down: bool,
@@ -263,6 +265,7 @@ fn worker_loop(
         simulated_keys,
         physical_down_probe: key_physically_down,
         on_expired,
+        throttle: Throttle::new(hp_degraded.clone()),
     };
     let mut wait = platform_wait::WaitContext::new(command_waker, hp_degraded);
 
@@ -294,10 +297,14 @@ fn worker_loop(
 
 struct SchedulerWorker {
     rules: HashMap<Arc<str>, ScheduledRule>,
-    target_holds: HashMap<KeyId, TargetHold>,
+    /// 目标键 -> 当前持有它的规则 ID 集合。集合非空即该键处于注入按下态，
+    /// 多条规则共享同一目标键时只发一次 down，最后一个 owner 释放时才发 up。
+    target_holds: HashMap<KeyId, HashSet<Arc<str>>>,
     current_generation: u64,
     dispatcher: Arc<dyn EventDispatcher>,
     stats: Option<Arc<SchedulerStats>>,
+    /// hook 维护的物理按键集合。引擎不为业务取舍兜底，已删除高频注入门控
+    /// （is_physically_blocked）；这里仅在 liveness 兜底自停时低频清理陈旧触发键记录。
     physical_keys: PhysicalKeys,
     simulated_keys: SimulatedKeys,
     /// 物理按下状态探针，默认 [`key_physically_down`]（GetAsyncKeyState）。
@@ -305,18 +312,68 @@ struct SchedulerWorker {
     physical_down_probe: fn(KeyId) -> bool,
     /// 规则被 liveness 兜底自停时通知引擎清理（见 [`RuleExpiredCb`]）。
     on_expired: RuleExpiredCb,
-}
-
-#[derive(Default)]
-struct TargetHold {
-    owners: HashMap<Arc<str>, bool>,
+    /// 智能降频状态：注入持续迟到时自动放慢，守住物理输入优先与连发稳定。
+    throttle: Throttle,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AcquireOutcome {
     Acquired,
     Shared,
-    BlockedByPhysical,
+}
+
+/// 智能降频下限范围：1ms 表示不降频，最高放宽到 50ms。
+const THROTTLE_FLOOR_MIN_MS: u32 = 1;
+const THROTTLE_FLOOR_MAX_MS: u32 = 50;
+/// 无高精度定时器（hp_degraded）时亚 ~15ms 周期无法稳定达成，硬钳到此可持续下限（信号 C）。
+const HP_DEGRADED_FLOOR_MS: u32 = 8;
+/// 承压时每批升高的步长，健康时每批衰减的步长。升快降慢形成迟滞，避免临界点抖动。
+const THROTTLE_RAISE_STEP_MS: u32 = 2;
+const THROTTLE_DECAY_STEP_MS: u32 = 1;
+/// 调度迟到超过此阈值视作线程跟不上节奏（信号 B）。
+const THROTTLE_LATE_THRESHOLD: Duration = Duration::from_millis(4);
+
+/// 智能降频：引擎自我调节，用让步注入效率（优先级③）守住物理输入优先 + 连发稳定
+/// （优先级①②）——CPU 因温控/电量降频同理。`dynamic_floor_ms` 是当前允许的最快注入
+/// 周期下限，仅会放慢、绝不快过规则请求的 interval；健康时缓慢衰减、停止时复位回 1ms。
+struct Throttle {
+    dynamic_floor_ms: u32,
+    hp_degraded: Arc<AtomicBool>,
+}
+
+impl Throttle {
+    fn new(hp_degraded: Arc<AtomicBool>) -> Self {
+        Self {
+            dynamic_floor_ms: THROTTLE_FLOOR_MIN_MS,
+            hp_degraded,
+        }
+    }
+
+    /// 当前有效注入周期下限：自适应下限与 hp_degraded 硬底（信号 C）取较大者。
+    fn floor_ms(&self) -> u32 {
+        let degraded_floor = if self.hp_degraded.load(Ordering::Relaxed) {
+            HP_DEGRADED_FLOOR_MS
+        } else {
+            THROTTLE_FLOOR_MIN_MS
+        };
+        self.dynamic_floor_ms.max(degraded_floor)
+    }
+
+    /// 按本轮是否承压（信号 B 调度迟到）调整下限：承压升高、健康衰减。
+    fn observe(&mut self, stressed: bool) {
+        self.dynamic_floor_ms = if stressed {
+            (self.dynamic_floor_ms + THROTTLE_RAISE_STEP_MS).min(THROTTLE_FLOOR_MAX_MS)
+        } else {
+            self.dynamic_floor_ms
+                .saturating_sub(THROTTLE_DECAY_STEP_MS)
+                .max(THROTTLE_FLOOR_MIN_MS)
+        };
+    }
+
+    /// 复位到不降频。停止 / 切代 / 退出等会话边界调用，避免瞬时承压跨会话残留拖慢。
+    fn reset(&mut self) {
+        self.dynamic_floor_ms = THROTTLE_FLOOR_MIN_MS;
+    }
 }
 
 impl SchedulerWorker {
@@ -324,14 +381,13 @@ impl SchedulerWorker {
         match command {
             SchedulerCommand::Start { rule, generation } => {
                 if generation == self.current_generation {
-                    let allow_while_physical_down = rule.mode
-                        == qzh_profile::profile::BurstMode::Hold
+                    let hold_same_key = rule.mode == qzh_profile::profile::BurstMode::Hold
                         && rule.trigger_key == rule.target_key;
                     let id: Arc<str> = Arc::from(rule.id.as_str());
                     self.rules.entry(id).or_insert(ScheduledRule {
                         rule,
                         generation,
-                        allow_while_physical_down,
+                        hold_same_key,
                         phase: RulePhase::DownPhase,
                         next_at: Instant::now(),
                         is_down: false,
@@ -386,6 +442,8 @@ impl SchedulerWorker {
         let events = self.release_all_target_holds();
         self.target_holds.clear();
         self.dispatch_events(events);
+        // 会话结束：复位降频，下一轮连发从不降频开始，避免上次瞬时承压残留拖慢。
+        self.throttle.reset();
     }
 
     fn next_deadline(&self) -> Option<Instant> {
@@ -402,13 +460,18 @@ impl SchedulerWorker {
             return;
         }
 
+        // 智能降频：effective interval = max(请求 interval, floor)，只拉长「下一拍的间隔」，
+        // 绝不快过规则请求；floor>=1ms 保证 next_at 单调推进。
+        let floor_ms = self.throttle.floor_ms();
+        let mut max_late = Duration::ZERO;
         let mut events = Vec::new();
         for id in due_ids {
             let Some(mut rule) = self.rules.remove(&id) else {
                 continue;
             };
+            let late = now.saturating_duration_since(rule.next_at);
             if let Some(stats) = &self.stats {
-                stats.record_delay(now.saturating_duration_since(rule.next_at));
+                stats.record_delay(late);
             }
             if rule.generation != self.current_generation {
                 if rule.is_down {
@@ -420,11 +483,11 @@ impl SchedulerWorker {
             }
 
             // liveness 兜底：DD 等驱动后端的注入回灌泄漏可能吞掉物理抬键，使
-            // allow_while_physical_down 的 Hold(trigger==target) 规则永不收到
-            // on_key_release 而失控——这是唯一没有 is_physically_blocked 自愈的路径。
-            // 仅在松开相位（is_down == false，此时 GetAsyncKeyState 反映用户真实状态而非
-            // 自身注入的下压）复核物理触发键；已抬起则自停并通知引擎清理，使规则可被重新触发。
-            if rule.allow_while_physical_down
+            // Hold(trigger==target) 规则永不收到 on_key_release 而失控。仅在松开相位
+            // （is_down == false，此时 GetAsyncKeyState 反映用户真实状态而非自身注入的下压）
+            // 复核物理触发键；已抬起则自停并通知引擎清理，使规则可被重新触发。这是 stop
+            // 安全网（守住「不卡死」安全底线），非注入门控——不在高频路径持锁。
+            if rule.hold_same_key
                 && !rule.is_down
                 && !(self.physical_down_probe)(rule.rule.trigger_key)
             {
@@ -437,15 +500,16 @@ impl SchedulerWorker {
                 continue; // 不重新插入 → 规则停止；目标键此前已在 UpPhase 释放
             }
 
-            let interval = Duration::from_millis(rule.rule.interval_ms as u64);
+            // 信号 B：仅统计真正参与注入的规则的调度迟到。
+            max_late = max_late.max(late);
+
+            // hold（按下时长）按规则请求的 interval 计算，降频不拉长按下、保持点按特性；
+            // 仅把拍与拍之间的「间隔」放慢。
+            let interval = Duration::from_millis(rule.rule.interval_ms.max(floor_ms) as u64);
             let hold = hold_duration(rule.rule.interval_ms);
             match rule.phase {
                 RulePhase::DownPhase if hold.is_zero() => {
-                    match self.acquire_owner(
-                        rule.rule.target_key,
-                        &id,
-                        rule.allow_while_physical_down,
-                    ) {
+                    match self.acquire_owner(rule.rule.target_key, &id) {
                         AcquireOutcome::Acquired => {
                             events.push(InputEvent::down(rule.rule.target_key));
                             if let Some(event) = self.release_owner(rule.rule.target_key, &id) {
@@ -455,35 +519,19 @@ impl SchedulerWorker {
                         AcquireOutcome::Shared => {
                             let _ = self.release_owner(rule.rule.target_key, &id);
                         }
-                        AcquireOutcome::BlockedByPhysical => {}
                     }
                     rule.is_down = false;
                     rule.phase = RulePhase::DownPhase;
-                    rule.next_at = now + interval.max(Duration::from_millis(1));
+                    rule.next_at = now + interval;
                 }
                 RulePhase::DownPhase => {
-                    match self.acquire_owner(
-                        rule.rule.target_key,
-                        &id,
-                        rule.allow_while_physical_down,
-                    ) {
-                        AcquireOutcome::Acquired => {
-                            events.push(InputEvent::down(rule.rule.target_key));
-                            rule.is_down = true;
-                            rule.phase = RulePhase::UpPhase;
-                            rule.next_at = now + hold;
-                        }
-                        AcquireOutcome::Shared => {
-                            rule.is_down = true;
-                            rule.phase = RulePhase::UpPhase;
-                            rule.next_at = now + hold;
-                        }
-                        AcquireOutcome::BlockedByPhysical => {
-                            rule.is_down = false;
-                            rule.phase = RulePhase::DownPhase;
-                            rule.next_at = now + interval.max(Duration::from_millis(1));
-                        }
+                    if let AcquireOutcome::Acquired = self.acquire_owner(rule.rule.target_key, &id)
+                    {
+                        events.push(InputEvent::down(rule.rule.target_key));
                     }
+                    rule.is_down = true;
+                    rule.phase = RulePhase::UpPhase;
+                    rule.next_at = now + hold;
                 }
                 RulePhase::UpPhase => {
                     if let Some(event) = self.release_owner(rule.rule.target_key, &id) {
@@ -499,51 +547,29 @@ impl SchedulerWorker {
         }
 
         self.dispatch_events(events);
+        // 信号 B/C：调度持续迟到（线程跟不上节奏）则升高下限，否则衰减恢复。
+        self.throttle.observe(max_late > THROTTLE_LATE_THRESHOLD);
     }
 
-    fn acquire_owner(
-        &mut self,
-        key: KeyId,
-        owner: &Arc<str>,
-        allow_while_physical_down: bool,
-    ) -> AcquireOutcome {
-        if let Some(hold) = self.target_holds.get_mut(&key) {
-            hold.owners.insert(owner.clone(), allow_while_physical_down);
+    /// 申请目标键的注入所有权。引擎不为业务取舍兜底：不判断该键是否被用户物理按住
+    /// （把某键设为连发 target 即声明它会被不断按下弹起，是业务层取舍）。同一目标键被多条
+    /// 规则共享时只发一次 down，避免相互打断。
+    fn acquire_owner(&mut self, key: KeyId, owner: &Arc<str>) -> AcquireOutcome {
+        if let Some(owners) = self.target_holds.get_mut(&key) {
+            owners.insert(owner.clone());
             return AcquireOutcome::Shared;
         }
-
-        if !allow_while_physical_down && self.is_physically_blocked(key) {
-            return AcquireOutcome::BlockedByPhysical;
-        }
-
-        let owners = self.target_holds.entry(key).or_default();
-        owners
-            .owners
-            .insert(owner.clone(), allow_while_physical_down);
+        self.target_holds
+            .entry(key)
+            .or_default()
+            .insert(owner.clone());
         AcquireOutcome::Acquired
     }
 
-    /// 目标键是否真的被物理按住。`physical_keys` 由 hook 维护，但 DD 等后端的注入回灌
-    /// 仅靠启发式队列过滤（非 SIM_MARKER 精确过滤），偶尔漏过会把自身注入误记为物理按下，
-    /// 且该集合从不整体清空 → 目标键被永久误判为"按住"而停止注入。命中拦截前用
-    /// `GetAsyncKeyState` 复核真实物理状态，发现陈旧泄漏就地清除并放行。
-    fn is_physically_blocked(&self, key: KeyId) -> bool {
-        let mut pressed = self.physical_keys.lock().unwrap_or_else(|e| e.into_inner());
-        if !pressed.contains(&key) {
-            return false;
-        }
-        if (self.physical_down_probe)(key) {
-            return true;
-        }
-        pressed.remove(&key);
-        warn!("清除陈旧物理按键记录（疑似注入回灌泄漏）: key={key:?}");
-        false
-    }
-
     fn release_owner(&mut self, key: KeyId, owner: &str) -> Option<InputEvent> {
-        let hold = self.target_holds.get_mut(&key)?;
-        hold.owners.remove(owner);
-        if !hold.owners.is_empty() {
+        let owners = self.target_holds.get_mut(&key)?;
+        owners.remove(owner);
+        if !owners.is_empty() {
             None
         } else {
             self.target_holds.remove(&key);
@@ -909,6 +935,7 @@ mod tests {
             // 默认信任真实探针；需要确定物理状态的用例自行覆盖 physical_down_probe。
             physical_down_probe: key_physically_down,
             on_expired: Arc::new(|_| {}),
+            throttle: Throttle::new(Arc::new(AtomicBool::new(false))),
         };
         (worker, physical_keys, simulated_keys)
     }
@@ -929,6 +956,37 @@ mod tests {
     #[test]
     fn hold_duration_for_one_ms_uses_tap_mode() {
         assert_eq!(hold_duration(1), Duration::ZERO);
+    }
+
+    #[test]
+    fn throttle_raises_floor_under_stress_and_decays_when_healthy() {
+        let mut t = Throttle::new(Arc::new(AtomicBool::new(false)));
+        assert_eq!(t.floor_ms(), THROTTLE_FLOOR_MIN_MS);
+        for _ in 0..100 {
+            t.observe(true);
+        }
+        assert_eq!(t.floor_ms(), THROTTLE_FLOOR_MAX_MS);
+        for _ in 0..(THROTTLE_FLOOR_MAX_MS as usize) {
+            t.observe(false);
+        }
+        assert_eq!(t.floor_ms(), THROTTLE_FLOOR_MIN_MS);
+    }
+
+    #[test]
+    fn throttle_hp_degraded_enforces_min_floor() {
+        let t = Throttle::new(Arc::new(AtomicBool::new(true)));
+        assert!(t.floor_ms() >= HP_DEGRADED_FLOOR_MS);
+    }
+
+    #[test]
+    fn cleanup_all_resets_throttle() {
+        let (mut worker, _, _) = test_worker();
+        for _ in 0..100 {
+            worker.throttle.observe(true);
+        }
+        assert!(worker.throttle.floor_ms() > THROTTLE_FLOOR_MIN_MS);
+        worker.cleanup_all();
+        assert_eq!(worker.throttle.floor_ms(), THROTTLE_FLOOR_MIN_MS);
     }
 
     #[test]
@@ -972,11 +1030,11 @@ mod tests {
         let key = KeyId::Keyboard(0x45);
 
         assert_eq!(
-            worker.acquire_owner(key, &Arc::from("a"), false),
+            worker.acquire_owner(key, &Arc::from("a")),
             AcquireOutcome::Acquired
         );
         assert_eq!(
-            worker.acquire_owner(key, &Arc::from("b"), false),
+            worker.acquire_owner(key, &Arc::from("b")),
             AcquireOutcome::Shared
         );
         assert_eq!(worker.release_owner(key, "a"), None);
@@ -984,29 +1042,15 @@ mod tests {
     }
 
     #[test]
-    fn physical_target_down_blocks_different_trigger_injection() {
+    fn acquire_owner_no_longer_gates_on_physical_state() {
+        // 引擎不为业务取舍兜底：target 键即便被物理按住也照常注入（由业务层声明风险）。
         let (mut worker, physical_keys, _) = test_worker();
         let key = KeyId::Keyboard(0x45);
         physical_keys.lock().unwrap().insert(key);
-        // 模拟该键确实被物理按住（GetAsyncKeyState 在测试环境无法真按键，注入确定探针），
-        // 否则 is_physically_blocked 的自愈逻辑会把集合记录当作陈旧泄漏清除。
         worker.physical_down_probe = |_| true;
 
         assert_eq!(
-            worker.acquire_owner(key, &Arc::from("different-trigger"), false),
-            AcquireOutcome::BlockedByPhysical
-        );
-        assert!(worker.target_holds.is_empty());
-    }
-
-    #[test]
-    fn hold_target_equals_trigger_can_inject_while_physical_down() {
-        let (mut worker, physical_keys, _) = test_worker();
-        let key = KeyId::Keyboard(0x45);
-        physical_keys.lock().unwrap().insert(key);
-
-        assert_eq!(
-            worker.acquire_owner(key, &Arc::from("same-trigger"), true),
+            worker.acquire_owner(key, &Arc::from("different-trigger")),
             AcquireOutcome::Acquired
         );
         assert!(worker.target_holds.contains_key(&key));
