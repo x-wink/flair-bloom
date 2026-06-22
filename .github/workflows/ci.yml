@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  rust:
+    name: Rust 门禁（fmt + clippy + 测试）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: . -> target
+
+      # 格式：全 workspace 源码（含 Tauri app 的 Rust，仅检查格式不构建）
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
+
+      # clippy / 测试排除 flair-bloom（Tauri app）：其构建依赖前端 dist，
+      # 业务逻辑都在各 crate 里，已被下列命令覆盖。
+      - name: cargo clippy
+        run: cargo clippy --workspace --exclude flair-bloom --all-targets --all-features -- -D warnings
+
+      # 跑单元 + 调度器模拟(L1) + 引擎管线(L1.5) + 边界用例。
+      # L2 真 OS 冒烟为 #[ignore]，不在此跑（需交互式桌面会话）。
+      - name: cargo test
+        run: cargo test --workspace --exclude flair-bloom
