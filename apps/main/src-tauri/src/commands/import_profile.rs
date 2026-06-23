@@ -10,7 +10,7 @@ use tauri::{AppHandle, State};
 
 use qzh_profile::{
     Advanced, BurstMode, BurstRule, Hotkeys, KeyId, MouseButton, Profile, ProfileMeta,
-    CURRENT_SCHEMA_VERSION, MAX_INTERVAL_MS, MAX_RULES, MIN_INTERVAL_MS,
+    CURRENT_SCHEMA_VERSION, MAX_INTERVAL_MS, MAX_RULES, MIN_EFFECTIVE_INTERVAL_MS, MIN_INTERVAL_MS,
 };
 
 use super::engine::EngineState;
@@ -152,7 +152,9 @@ fn gaibang_active_vks(cfg: &GaibangConfig) -> Vec<u32> {
 }
 
 fn gaibang_interval(cfg: &GaibangConfig) -> u32 {
-    ((cfg.delay_us / 1000) as u32).clamp(MIN_INTERVAL_MS, MAX_INTERVAL_MS)
+    // 钳到有效操作下限（16ms）而非结构下限（1ms）：管线可持续注入上限，
+    // 更快会在下游输入队列堆积、停止后才排空。预览与实际导入一致。
+    ((cfg.delay_us / 1000) as u32).clamp(MIN_EFFECTIVE_INTERVAL_MS, MAX_INTERVAL_MS)
 }
 
 fn gaibang_parse_preview(data: &str, dir_name: &str) -> ImportPreview {
@@ -395,7 +397,7 @@ pub fn import_external_config(
 
     let (final_name, final_path) = pick_unique_name(&dir, trimmed);
 
-    let profile = Profile {
+    let mut profile = Profile {
         schema_version: CURRENT_SCHEMA_VERSION,
         meta: ProfileMeta {
             name: final_name,
@@ -403,14 +405,17 @@ pub fn import_external_config(
             updated_at: now,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
         },
-        rules: rules.clone(),
+        rules,
         hotkeys: hotkeys.clone(),
         advanced: Advanced::default(),
     };
+    // 兜底适配有效操作下限：任何解析器产出的 <16ms 间隔在落盘前钳到 16ms，
+    // 与加载旧配置（read_profile_from_file）行为一致。
+    profile.clamp_intervals();
 
     let saved_path = write_profile_file_to_path(&final_path, &profile)?;
     set_active_path(&app, &saved_path);
-    state.0.set_rules(rules);
+    state.0.set_rules(profile.rules.clone());
     state.0.set_hotkeys(hotkeys);
 
     Ok(profile)

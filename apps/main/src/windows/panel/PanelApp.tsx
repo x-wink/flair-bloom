@@ -46,7 +46,10 @@ const DEFAULT_SOUND: SoundSettings = {
   globalOnly: false,
 };
 const DEFAULT_PROFILE_NAME = 'defults';
-const MIN_INTERVAL_MS = 1;
+// 注入周期基础下限 10ms（≈100 taps/s）：管线每事件过路税决定可持续「总」注入速率。单规则用
+// 此值；多条规则同时连发时后端按活跃规则数等分总速率（见 burst-engine process_due），避免叠加
+// 超发导致停止「收不住」。与后端 MIN_EFFECTIVE_INTERVAL_MS 对齐。
+const MIN_INTERVAL_MS = 10;
 const DEFAULT_INTERVAL_MS = 10;
 const MAX_INTERVAL_MS = 10000;
 
@@ -101,10 +104,12 @@ function inputModeRequiresAdmin(mode: InputMode): boolean {
 
 const DD_HID_BLOCKED_NOTICE = (
   <>
-    经测试DDHID驱动不稳定，可能导致电脑蓝屏死机问题，建议以管理员模式运行APP使用游戏模式。
+    经测试 DDHID
+    驱动不稳定，可能导致电脑蓝屏死机，现已禁用。需待新版本发布并通过内测验证稳定后，才可能重新开放。
     <br />
     <br />
-    驱动问题正在拼命修复中，建议在诊断修复中卸载DDHID驱动避免造成不良影响。
+    建议以管理员模式运行本应用、改用「游戏模式」；并在「诊断修复」中卸载 DDHID
+    驱动，避免造成不良影响。
   </>
 );
 
@@ -331,7 +336,7 @@ export default function PanelApp() {
     ddHidNoticeOpenRef.current = true;
     try {
       await confirm({
-        title: 'DDHID 已暂停使用',
+        title: 'DDHID 已禁用',
         description: DD_HID_BLOCKED_NOTICE,
         confirmText: '知道了',
         cancelText: null,
@@ -2181,28 +2186,31 @@ export default function PanelApp() {
         onClose={() => setModePickerOpen(false)}
         target={modeBtnRef}
         location="bottom-left"
-        items={INPUT_MODE_LIST.map((m) => ({
+        items={(inputMode === 'dd_hid'
+          ? (['interception', 'sendinput', 'ddsimple', 'dd_hid'] as InputMode[])
+          : (['interception', 'sendinput', 'ddsimple'] as InputMode[])
+        ).map((m) => ({
           label: INPUT_MODE_LABELS[m],
           subtitle:
             m === 'sendinput'
-              ? '最稳定，但很多游戏不响应'
+              ? '最简单，但很多游戏不响应'
               : m === 'interception'
                 ? interceptionInstalled === 'installed'
                   ? elevated
-                    ? '老牌驱动，管理员已就绪'
-                    : '需要管理员'
+                    ? '推荐 · 管理员已就绪'
+                    : '推荐 · 需要管理员'
                   : interceptionInstalled === 'pending_reboot'
-                    ? '驱动待重启生效'
-                    : '点击安装驱动'
+                    ? '推荐 · 驱动待重启生效'
+                    : '推荐 · 点击安装驱动'
                 : m === 'ddsimple'
                   ? elevated
-                    ? '内置DD驱动，无需重启'
-                    : '需要管理员'
+                    ? '备用 · 内置DD驱动，无需重启'
+                    : '备用 · 需要管理员'
                   : ddHidInstalled === 'installed'
-                    ? '已屏蔽，建议卸载'
+                    ? '已禁用，建议卸载'
                     : ddHidInstalled === 'pending_reboot'
                       ? '驱动待重启清理'
-                      : '已屏蔽',
+                      : '已禁用',
           active: inputMode === m,
           onClick: () => void selectInputMode(m),
         }))}

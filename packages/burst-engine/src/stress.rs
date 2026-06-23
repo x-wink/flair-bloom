@@ -14,6 +14,12 @@ pub struct StressConfig {
     pub interval_ms: u32,
     pub duration: Duration,
     pub same_target: bool,
+    /// 每事件「模拟注入耗时」：>0 时 dispatcher 按此 sleep，复现下游背压（LL hook 链 /
+    /// 前台输入队列拥塞），用于验证自适应降频（信号 D）在真线程 + 真定时器上确实生效。
+    pub simulated_dispatch_cost: Duration,
+    /// 背压起始延迟：注入开始多久后才施加耗时。模拟「积压逐渐建立」的 ramp，使相对信号
+    /// 先建立健康基线再观测骤增。默认 0（从头拥塞，会被当作基线，演示不出降频）。
+    pub simulated_dispatch_cost_delay: Duration,
 }
 
 impl Default for StressConfig {
@@ -23,6 +29,8 @@ impl Default for StressConfig {
             interval_ms: 10,
             duration: Duration::from_secs(5),
             same_target: false,
+            simulated_dispatch_cost: Duration::ZERO,
+            simulated_dispatch_cost_delay: Duration::ZERO,
         }
     }
 }
@@ -44,14 +52,36 @@ pub struct StressReport {
     pub delay_p95_us: u128,
     pub delay_p99_us: u128,
     pub delay_max_us: u128,
+    pub dispatch_cost_p50_us: u128,
+    pub dispatch_cost_p99_us: u128,
+    pub dispatch_cost_max_us: u128,
     pub stop_ack_us: u128,
     pub process_cpu_ms: Option<u128>,
 }
 
-struct DryRunDispatcher;
+struct DryRunDispatcher {
+    cost_per_event: Duration,
+    /// 背压起始延迟：注入开始 `cost_start_after` 之后才施加耗时。模拟真实场景里
+    /// 「队列起初为空、注入很快，积压逐渐建立才变慢」的 ramp，让自适应降频先建立健康
+    /// 基线、再观测到骤增（否则 t0 即拥塞会被当成基线，永不判承压——这是相对信号的固有取舍）。
+    cost_start_after: Duration,
+    started_at: Mutex<Option<Instant>>,
+}
 
 impl EventDispatcher for DryRunDispatcher {
     fn dispatch(&self, events: &[InputEvent]) -> Vec<DispatchResult> {
+        // 模拟下游背压：注入是同步调用，拥塞时变慢。用真 sleep 让真线程 + 真定时器上的
+        // 自适应降频得到真实信号（非单测，可接受 wall-clock）。
+        if !self.cost_per_event.is_zero() {
+            let start = *self
+                .started_at
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .get_or_insert_with(Instant::now);
+            if start.elapsed() >= self.cost_start_after {
+                thread::sleep(self.cost_per_event * events.len() as u32);
+            }
+        }
         vec![DispatchResult::Sent; events.len()]
     }
 }
@@ -59,7 +89,11 @@ impl EventDispatcher for DryRunDispatcher {
 pub fn run_stress(config: StressConfig) -> StressReport {
     let stats = Arc::new(SchedulerStats::default());
     let scheduler = SchedulerHandle::start_with_dispatcher(
-        Arc::new(DryRunDispatcher),
+        Arc::new(DryRunDispatcher {
+            cost_per_event: config.simulated_dispatch_cost,
+            cost_start_after: config.simulated_dispatch_cost_delay,
+            started_at: Mutex::new(None),
+        }),
         Some(stats.clone()),
         Arc::new(Mutex::new(HashMap::new())),
     );
@@ -82,6 +116,7 @@ pub fn run_stress(config: StressConfig) -> StressReport {
     let _ = scheduler.shutdown_blocking(2);
     let snapshot = stats.snapshot();
     let delays = sorted(snapshot.delay_ns);
+    let dispatch_costs = sorted(snapshot.dispatch_cost_ns);
 
     StressReport {
         rules: config.rules,
@@ -99,6 +134,9 @@ pub fn run_stress(config: StressConfig) -> StressReport {
         delay_p95_us: percentile_us(&delays, 95),
         delay_p99_us: percentile_us(&delays, 99),
         delay_max_us: delays.last().copied().unwrap_or(0) / 1_000,
+        dispatch_cost_p50_us: percentile_us(&dispatch_costs, 50),
+        dispatch_cost_p99_us: percentile_us(&dispatch_costs, 99),
+        dispatch_cost_max_us: dispatch_costs.last().copied().unwrap_or(0) / 1_000,
         stop_ack_us: stop_ack.as_micros(),
         process_cpu_ms: cpu_start
             .zip(cpu_end)
@@ -109,7 +147,7 @@ pub fn run_stress(config: StressConfig) -> StressReport {
 impl StressReport {
     pub fn to_json_line(&self) -> String {
         format!(
-            "{{\"rules\":{},\"interval_ms\":{},\"duration_ms\":{},\"same_target\":{},\"scheduler_threads\":{},\"hp_degraded\":{},\"dispatch_batches\":{},\"sent_events\":{},\"failed_events\":{},\"injection_rate_per_sec\":{:.2},\"delay_samples\":{},\"delay_p50_us\":{},\"delay_p95_us\":{},\"delay_p99_us\":{},\"delay_max_us\":{},\"stop_ack_us\":{},\"process_cpu_ms\":{}}}",
+            "{{\"rules\":{},\"interval_ms\":{},\"duration_ms\":{},\"same_target\":{},\"scheduler_threads\":{},\"hp_degraded\":{},\"dispatch_batches\":{},\"sent_events\":{},\"failed_events\":{},\"injection_rate_per_sec\":{:.2},\"delay_samples\":{},\"delay_p50_us\":{},\"delay_p95_us\":{},\"delay_p99_us\":{},\"delay_max_us\":{},\"dispatch_cost_p50_us\":{},\"dispatch_cost_p99_us\":{},\"dispatch_cost_max_us\":{},\"stop_ack_us\":{},\"process_cpu_ms\":{}}}",
             self.rules,
             self.interval_ms,
             self.duration_ms,
@@ -125,6 +163,9 @@ impl StressReport {
             self.delay_p95_us,
             self.delay_p99_us,
             self.delay_max_us,
+            self.dispatch_cost_p50_us,
+            self.dispatch_cost_p99_us,
+            self.dispatch_cost_max_us,
             self.stop_ack_us,
             self.process_cpu_ms
                 .map(|v| v.to_string())
@@ -223,6 +264,9 @@ mod tests {
             delay_p95_us: 2,
             delay_p99_us: 2,
             delay_max_us: 2,
+            dispatch_cost_p50_us: 30,
+            dispatch_cost_p99_us: 80,
+            dispatch_cost_max_us: 120,
             stop_ack_us: 100,
             process_cpu_ms: Some(5),
         };
@@ -230,5 +274,6 @@ mod tests {
         let line = report.to_json_line();
         assert!(line.contains("\"rules\":1"));
         assert!(line.contains("\"process_cpu_ms\":5"));
+        assert!(line.contains("\"dispatch_cost_p99_us\":80"));
     }
 }

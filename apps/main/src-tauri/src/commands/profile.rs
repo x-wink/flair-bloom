@@ -106,8 +106,12 @@ fn read_profile_from_file(file_path: &Path) -> Result<Profile, String> {
     } else {
         value
     };
-    let profile: Profile =
+    let mut profile: Profile =
         serde_json::from_value(value).map_err(|e| format!("反序列化失败: {e}"))?;
+    // 加载即适配有效操作下限：旧配置 <16ms 的间隔静默钳到 16ms（管线可持续注入上限），
+    // 否则超发会导致停止后下游输入队列排空滞后（「收不住」）。所有读取入口（load/list/
+    // rename/delete/fork）都经此函数，故钳位只加这一处。
+    profile.clamp_intervals();
     profile.validate().map_err(|e| e.to_string())?;
     Ok(profile)
 }
@@ -179,35 +183,8 @@ pub fn load_profile(
         .to_string_lossy();
     let safe_path = dir.join(sanitize_filename(&file_name));
 
-    let data = std::fs::read(&safe_path).map_err(|e| format!("读取文件失败: {e}"))?;
-
-    let header = FileHeader::from_bytes(&data).ok_or("文件格式无效，可能已损坏")?;
-    let aad = header.aad();
-    let ciphertext = &data[FileHeader::SIZE..];
-
-    let plaintext = aes::decrypt(ciphertext, &header.nonce, &aad).map_err(|e| e.to_string())?;
-
-    let value: serde_json::Value =
-        serde_json::from_slice(&plaintext).map_err(|e| format!("解析失败: {e}"))?;
-
-    let version = value
-        .get("schema_version")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(1) as u32;
-
-    let value = if version < CURRENT_SCHEMA_VERSION {
-        migrate_profile(value, version).map_err(|e| format!("配置迁移失败: {e}"))?
-    } else if version > CURRENT_SCHEMA_VERSION {
-        return Err(format!(
-            "配置版本 {version} 高于当前支持的版本 {CURRENT_SCHEMA_VERSION}，请升级应用"
-        ));
-    } else {
-        value
-    };
-
-    let profile: Profile =
-        serde_json::from_value(value).map_err(|e| format!("反序列化失败: {e}"))?;
-    profile.validate().map_err(|e| e.to_string())?;
+    // 复用统一读取入口（含解密 / 迁移 / 间隔钳位 / 校验），避免重复解密逻辑漂移。
+    let profile = read_profile_from_file(&safe_path)?;
 
     state.0.set_rules(profile.rules.clone());
     state.0.set_hotkeys(profile.hotkeys.clone());

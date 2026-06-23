@@ -80,6 +80,36 @@
   white-space: nowrap;
 }
 
+.settings-mode-tag {
+  display: inline-block;
+  margin-left: var(--fb-space-3);
+  padding: 0 var(--fb-space-3);
+  border-radius: var(--fb-radius-sm);
+  font-size: var(--fb-fs-xs);
+  font-weight: var(--fb-fw-semibold);
+  vertical-align: middle;
+  line-height: 1.7;
+}
+
+.settings-mode-tag-recommend {
+  color: var(--fb-success-text, #1a7f5a);
+  background: var(--fb-success-soft, rgba(38, 166, 110, 0.16));
+}
+
+.settings-mode-tag-backup {
+  color: var(--fb-text-weak);
+  background: var(--fb-fill-soft, rgba(128, 128, 128, 0.16));
+}
+
+.settings-mode-tag-disabled {
+  color: var(--fb-text-faint);
+  background: var(--fb-fill-soft, rgba(128, 128, 128, 0.1));
+}
+
+.settings-note-warn {
+  color: var(--fb-danger-text, #b4540e);
+}
+
 .settings-mode-meta {
   color: var(--fb-text-weak);
   font-size: var(--fb-fs-xs);

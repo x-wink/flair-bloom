@@ -129,11 +129,29 @@ function modeDetail(mode: SettingsInputMode, props: Props): string {
     return props.elevated ? '管理员已就绪' : '需要管理员';
   }
   if (mode === 'dd_hid') {
-    if (props.ddHidInstalled === 'installed') return '已屏蔽，建议卸载';
+    if (props.ddHidInstalled === 'installed') return '已禁用，建议卸载';
     if (props.ddHidInstalled === 'pending_reboot') return '驱动待重启清理';
-    return '已屏蔽';
+    return '已禁用';
   }
   return '无需驱动';
+}
+
+/// 模式角标：游戏模式主推（推荐）、DD驱动降级（备用）、DDHID 已停用。通用模式无角标。
+function modeTag(
+  mode: SettingsInputMode,
+): { text: string; kind: 'recommend' | 'backup' | 'disabled' } | null {
+  if (mode === 'interception') return { text: '推荐', kind: 'recommend' };
+  if (mode === 'ddsimple') return { text: '备用', kind: 'backup' };
+  if (mode === 'dd_hid') return { text: '已禁用', kind: 'disabled' };
+  return null;
+}
+
+/// 可选输入模式：游戏模式置顶主推，通用模式次之，DD驱动仅作备用；DDHID 已禁用、不列出。
+/// 仅当用户当前仍停留在 DDHID 时附带显示该项（禁用态），便于切换到其他模式。
+const SELECTABLE_INPUT_MODES: SettingsInputMode[] = ['interception', 'sendinput', 'ddsimple'];
+
+function visibleInputModes(current: SettingsInputMode): SettingsInputMode[] {
+  return current === 'dd_hid' ? [...SELECTABLE_INPUT_MODES, 'dd_hid'] : SELECTABLE_INPUT_MODES;
 }
 
 function SliderRow({
@@ -225,23 +243,35 @@ export default function SettingsDialog(props: Props) {
 
             <SettingsSection title="输入模式">
               <CardList>
-                {(['sendinput', 'interception', 'ddsimple', 'dd_hid'] as SettingsInputMode[]).map(
-                  (mode) => (
+                {visibleInputModes(props.inputMode).map((mode) => {
+                  const tag = modeTag(mode);
+                  return (
                     <CardListButton
                       key={mode}
                       active={props.inputMode === mode}
                       className="settings-mode"
-                      disabled={props.switchingMode}
+                      disabled={props.switchingMode || mode === 'dd_hid'}
                       onClick={() => props.onSelectInputMode(mode)}
                     >
-                      <span className="settings-mode-name">{INPUT_MODE_LABELS[mode]}</span>
+                      <span className="settings-mode-name">
+                        {INPUT_MODE_LABELS[mode]}
+                        {tag && (
+                          <span className={`settings-mode-tag settings-mode-tag-${tag.kind}`}>
+                            {tag.text}
+                          </span>
+                        )}
+                      </span>
                       <span className="settings-mode-meta">
                         {INPUT_MODE_HINTS[mode]} · {modeDetail(mode, props)}
                       </span>
                     </CardListButton>
-                  ),
-                )}
+                  );
+                })}
               </CardList>
+              <p className="settings-note settings-note-warn">
+                ⚠️ DD 驱动（含 DDHID）可能无法正确停止连发、甚至自行停止连发，已不再推荐。DDHID
+                已禁用；DD驱动仅在「游戏模式」不可用时作为备用。优先使用游戏模式。
+              </p>
               <p className="settings-note">驱动安装与卸载操作请前往「诊断修复」。</p>
             </SettingsSection>
 

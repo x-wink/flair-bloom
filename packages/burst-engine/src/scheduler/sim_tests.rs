@@ -16,17 +16,15 @@
 //!
 //! 新增场景测试只需写一行脚本 + 期望串，见文件末尾各 `#[test]`。
 
-use super::{EventDispatcher, SchedulerCommand, SchedulerWorker, Throttle};
+use super::{EventDispatcher, SchedulerCommand, SchedulerWorker};
 use qzh_profile::key_id::{KeyId, MouseButton};
 use qzh_profile::profile::{BurstMode, BurstRule};
 use std::collections::HashMap;
-use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use win_input::{DispatchResult, InputEvent};
 
 /// 只把注入事件记进缓冲、不碰 OS 的测试 dispatcher。
-#[derive(Default)]
 struct RecordingDispatcher {
     events: Mutex<Vec<InputEvent>>,
 }
@@ -42,6 +40,12 @@ impl EventDispatcher for RecordingDispatcher {
 }
 
 impl RecordingDispatcher {
+    fn new() -> Self {
+        Self {
+            events: Mutex::new(Vec::new()),
+        }
+    }
+
     fn drain(&self) -> Vec<InputEvent> {
         std::mem::take(&mut self.events.lock().unwrap_or_else(|e| e.into_inner()))
     }
@@ -59,7 +63,7 @@ struct Sim {
 
 impl Sim {
     fn new(rules: Vec<BurstRule>) -> Self {
-        let recorder = Arc::new(RecordingDispatcher::default());
+        let recorder = Arc::new(RecordingDispatcher::new());
         let dispatcher: Arc<dyn EventDispatcher> = recorder.clone();
         let worker = SchedulerWorker {
             rules: HashMap::new(),
@@ -68,7 +72,8 @@ impl Sim {
             dispatcher,
             stats: None,
             simulated_keys: Arc::new(Mutex::new(HashMap::new())),
-            throttle: Throttle::new(Arc::new(AtomicBool::new(false))),
+            // 纯时序 golden 断言不限速；下限本身的行为单独由 min_interval_floor_* 测试覆盖。
+            min_interval_ms: 1,
         };
         let rules = rules
             .into_iter()
@@ -119,6 +124,11 @@ impl Sim {
             ack: None,
         });
         self.drain_now();
+    }
+
+    /// 设定注入周期基础下限（生产取 MIN_EFFECTIVE_INTERVAL_MS，纯时序测试默认 1ms 不限速）。
+    fn set_min_interval(&mut self, ms: u32) {
+        self.worker.min_interval_ms = ms;
     }
 
     /// 逐毫秒推进虚拟时间，每毫秒处理一次到期事件——确定性的关键。
@@ -307,4 +317,53 @@ fn stopping_one_of_two_rules_leaves_the_other_running() {
         "start:a start:b t:2 stop:a t:10",
     );
     assert_eq!(out, "1:dn:K45 1:dn:K52 2:up:K45 4:up:K52 11:dn:K52");
+}
+
+// ----- 有效注入周期硬下限（生产 16ms，防超发冲破管线天花板导致「收不住」）-----
+
+#[test]
+fn min_interval_floor_throttles_sub_floor_cadence() {
+    // interval=10ms 在 16ms 硬下限下被钳成 16ms 拍距：dn 落在 1 / 17 / 33，
+    // 但 hold（按下时长=hold_duration(10)=3ms）不受下限影响，保持点按手感（up 紧跟 3ms 后）。
+    let mut sim = Sim::new(vec![hold("r", E, 10)]);
+    sim.set_min_interval(16);
+    sim.start("r");
+    sim.advance(40);
+    assert_eq!(
+        sim.timeline_string(),
+        "1:dn:K45 4:up:K45 17:dn:K45 20:up:K45 33:dn:K45 36:up:K45"
+    );
+}
+
+#[test]
+fn interval_above_floor_is_unaffected() {
+    // 规则间隔已高于硬下限（20ms > 16ms）：下限不介入，拍距仍为 20ms（dn 落在 1 / 21）。
+    let mut sim = Sim::new(vec![hold("r", E, 20)]);
+    sim.set_min_interval(16);
+    sim.start("r");
+    sim.advance(25);
+    assert_eq!(sim.timeline_string(), "1:dn:K45 7:up:K45 21:dn:K45");
+}
+
+#[test]
+fn floor_scales_with_active_rule_count_to_cap_total_rate() {
+    // 总并发限速：3 条规则同时连发，每条有效下限 = 基础下限(10) × 3 = 30ms。
+    // 取规则 a（K45）的 dn 时刻应为 30ms 拍距（1 / 31 / 61），总 tap 速率仍 ≈ 1000/基础、与规则数无关。
+    let t = KeyId::Keyboard(0x54);
+    let mut sim = Sim::new(vec![
+        hold("a", E, 10),
+        hold("b", R_KEY, 10),
+        hold("c", t, 10),
+    ]);
+    sim.set_min_interval(10);
+    sim.start("a");
+    sim.start("b");
+    sim.start("c");
+    sim.advance(65);
+    let tl = sim.timeline_string();
+    let downs: Vec<&str> = tl
+        .split_whitespace()
+        .filter(|s| s.contains(":dn:K45"))
+        .collect();
+    assert_eq!(downs, vec!["1:dn:K45", "31:dn:K45", "61:dn:K45"]);
 }

@@ -19,9 +19,13 @@ fn main() {
 
 fn print_help() {
     println!(
-        "Usage: cargo run -p burst-engine --bin scheduler_stress --release -- [--rules N] [--interval-ms N] [--duration-ms N] [--same-target] [--matrix]"
+        "Usage: cargo run -p burst-engine --bin scheduler_stress --release -- [--rules N] [--interval-ms N] [--duration-ms N] [--same-target] [--dispatch-cost-us N] [--matrix]"
     );
     println!("Dry-run scheduler stress test. It does not inject real keyboard or mouse events.");
+    println!("--dispatch-cost-us N: 模拟每事件注入耗时（µs），>0 复现下游背压以验证自适应降频。");
+    println!(
+        "--dispatch-cost-delay-ms N: 背压起始延迟，注入 N ms 后才施加耗时，模拟积压逐渐建立的 ramp。"
+    );
 }
 
 fn run_matrix(args: &[String]) {
@@ -33,6 +37,8 @@ fn run_matrix(args: &[String]) {
                 interval_ms,
                 duration,
                 same_target: args.iter().any(|arg| arg == "--same-target"),
+                simulated_dispatch_cost: dispatch_cost_arg(args),
+                simulated_dispatch_cost_delay: dispatch_cost_delay_arg(args),
             };
             println!("{}", run_stress(config).to_json_line());
         }
@@ -45,11 +51,25 @@ fn parse_config(args: &[String]) -> StressConfig {
         interval_ms: u32_arg(args, "--interval-ms").unwrap_or(10),
         duration: duration_arg(args).unwrap_or(Duration::from_secs(5)),
         same_target: args.iter().any(|arg| arg == "--same-target"),
+        simulated_dispatch_cost: dispatch_cost_arg(args),
+        simulated_dispatch_cost_delay: dispatch_cost_delay_arg(args),
     }
 }
 
 fn duration_arg(args: &[String]) -> Option<Duration> {
     u64_arg(args, "--duration-ms").map(Duration::from_millis)
+}
+
+fn dispatch_cost_arg(args: &[String]) -> Duration {
+    u64_arg(args, "--dispatch-cost-us")
+        .map(Duration::from_micros)
+        .unwrap_or(Duration::ZERO)
+}
+
+fn dispatch_cost_delay_arg(args: &[String]) -> Duration {
+    u64_arg(args, "--dispatch-cost-delay-ms")
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::ZERO)
 }
 
 fn usize_arg(args: &[String], name: &str) -> Option<usize> {

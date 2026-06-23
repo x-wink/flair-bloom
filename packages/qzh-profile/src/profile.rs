@@ -19,7 +19,16 @@ use crate::key_id::KeyId;
 pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 /// 单个 [`Profile`] 允许的最大规则数量，超出会在 [`Profile::validate`] 阶段被拒绝。
 pub const MAX_RULES: usize = 64;
+/// 数据结构上的绝对下限。`validate` 据此判定结构合法性，不收紧到 [`MIN_EFFECTIVE_INTERVAL_MS`]，
+/// 旧配置 <16ms 在加载时由 [`Profile::clamp_intervals`] 钳位而非拒绝。
 pub const MIN_INTERVAL_MS: u32 = 1;
+/// 注入周期「基础」下限（ms）：全局 LL 钩子链 + RIT 对每个注入事件有固定「过路税」，管线
+/// 可持续的「总」注入速率有上限。单条规则用此基础下限（10ms ≈ 100 taps/s 仍可稳定收住）；
+/// 多条规则同时连发时，连发调度器（burst-engine `process_due`）把每条规则的有效下限放大为
+/// 「此值 × 活跃规则数」，使总速率与规则数无关、不叠加超发导致停止后「收不住」（实测早期
+/// 多规则齐发即收不住，根因是总速率而非单规则）。UI 默认/下限、加载钳位
+/// （[`Profile::clamp_intervals`]）都以此为准。
+pub const MIN_EFFECTIVE_INTERVAL_MS: u32 = 10;
 pub const DEFAULT_INTERVAL_MS: u32 = 10;
 pub const MAX_INTERVAL_MS: u32 = 10000;
 
@@ -152,6 +161,17 @@ pub enum ProfileError {
 }
 
 impl Profile {
+    /// 把所有规则的连发间隔钳进 \[[`MIN_EFFECTIVE_INTERVAL_MS`], [`MAX_INTERVAL_MS`]\]。
+    /// 加载旧配置时调用：低于有效操作下限的间隔静默抬到下限（管线可持续注入上限，
+    /// 详见 [`MIN_EFFECTIVE_INTERVAL_MS`]），而非拒绝加载。
+    pub fn clamp_intervals(&mut self) {
+        for rule in &mut self.rules {
+            rule.interval_ms = rule
+                .interval_ms
+                .clamp(MIN_EFFECTIVE_INTERVAL_MS, MAX_INTERVAL_MS);
+        }
+    }
+
     /// 通用校验：仅检查规则数与连发间隔范围，不做后端模式相关约束。
     pub fn validate(&self) -> Result<(), ProfileError> {
         self.validate_for_mode(false)

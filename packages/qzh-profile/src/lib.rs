@@ -13,7 +13,8 @@ pub mod schema_migrate;
 pub use key_id::{KeyId, MouseButton};
 pub use profile::{
     Advanced, BurstMode, BurstRule, Hotkeys, Profile, ProfileError, ProfileMeta,
-    CURRENT_SCHEMA_VERSION, DEFAULT_INTERVAL_MS, MAX_INTERVAL_MS, MAX_RULES, MIN_INTERVAL_MS,
+    CURRENT_SCHEMA_VERSION, DEFAULT_INTERVAL_MS, MAX_INTERVAL_MS, MAX_RULES,
+    MIN_EFFECTIVE_INTERVAL_MS, MIN_INTERVAL_MS,
 };
 pub use schema_migrate::migrate_profile;
 
@@ -40,7 +41,10 @@ pub fn load_from_path(path: &Path) -> Result<Profile, ProfileError> {
     } else {
         value
     };
-    let profile: Profile = serde_json::from_value(value)?;
+    let mut profile: Profile = serde_json::from_value(value)?;
+    // 加载即适配有效操作下限：旧配置 <16ms 的间隔静默钳到 16ms（管线可持续注入上限），
+    // 避免超发导致停止后下游输入队列排空滞后（「收不住」）。见 [`MIN_EFFECTIVE_INTERVAL_MS`]。
+    profile.clamp_intervals();
     profile.validate()?;
     Ok(profile)
 }
@@ -81,6 +85,32 @@ mod tests {
         let loaded = load_from_path(&path).unwrap();
         assert_eq!(loaded.meta.name, "test");
         assert_eq!(loaded.schema_version, CURRENT_SCHEMA_VERSION);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn load_clamps_sub_effective_interval_up_to_floor() {
+        use crate::key_id::KeyId;
+        use crate::profile::{BurstMode, BurstRule};
+        let dir = std::env::temp_dir();
+        let path = dir.join("qzh_profile_test_clamp.qzh");
+        let mut profile = minimal_profile();
+        // 旧配置存了一个低于有效下限的间隔（结构合法 ≥1，保存允许）。
+        profile.rules.push(BurstRule {
+            id: "r".into(),
+            enabled: true,
+            trigger_key: KeyId::Keyboard(0x51),
+            target_key: KeyId::Keyboard(0x45),
+            mode: BurstMode::Hold,
+            stop_key: None,
+            interval_ms: 5,
+            group: None,
+        });
+        save_to_path(&path, &profile).unwrap();
+
+        // 加载时被钳到有效下限。
+        let loaded = load_from_path(&path).unwrap();
+        assert_eq!(loaded.rules[0].interval_ms, MIN_EFFECTIVE_INTERVAL_MS);
         let _ = std::fs::remove_file(&path);
     }
 

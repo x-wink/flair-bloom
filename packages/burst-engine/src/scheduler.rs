@@ -1,5 +1,5 @@
 use qzh_profile::key_id::KeyId;
-use qzh_profile::profile::BurstRule;
+use qzh_profile::profile::{BurstRule, MIN_EFFECTIVE_INTERVAL_MS};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -71,6 +71,9 @@ impl EventDispatcher for WinInputDispatcher {
 #[derive(Default)]
 pub(crate) struct SchedulerStats {
     delay_ns: Mutex<Vec<u128>>,
+    /// 每批 dispatch 的「单事件平均注入耗时」（ns）。这是下游背压唯一可观测的代理：
+    /// LL hook 链 / RIT / 前台输入队列拥塞时 SendInput/驱动注入会变慢，此值随之上升。
+    dispatch_cost_ns: Mutex<Vec<u128>>,
     sent_events: AtomicU64,
     failed_events: AtomicU64,
     batches: AtomicU64,
@@ -82,6 +85,13 @@ impl SchedulerStats {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .push(delay.as_nanos());
+    }
+
+    fn record_dispatch_cost(&self, per_event: Duration) {
+        self.dispatch_cost_ns
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(per_event.as_nanos());
     }
 
     fn record_results(&self, results: &[DispatchResult]) {
@@ -101,8 +111,14 @@ impl SchedulerStats {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
+        let dispatch_cost = self
+            .dispatch_cost_ns
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
         SchedulerStatsSnapshot {
             delay_ns: delays,
+            dispatch_cost_ns: dispatch_cost,
             sent_events: self.sent_events.load(Ordering::Relaxed),
             failed_events: self.failed_events.load(Ordering::Relaxed),
             batches: self.batches.load(Ordering::Relaxed),
@@ -112,6 +128,7 @@ impl SchedulerStats {
 
 pub(crate) struct SchedulerStatsSnapshot {
     pub delay_ns: Vec<u128>,
+    pub dispatch_cost_ns: Vec<u128>,
     pub sent_events: u64,
     pub failed_events: u64,
     pub batches: u64,
@@ -262,7 +279,7 @@ fn worker_loop(
         dispatcher,
         stats,
         simulated_keys,
-        throttle: Throttle::new(hp_degraded.clone()),
+        min_interval_ms: MIN_EFFECTIVE_INTERVAL_MS,
     };
     let mut wait = platform_wait::WaitContext::new(command_waker, hp_degraded);
 
@@ -301,68 +318,17 @@ struct SchedulerWorker {
     dispatcher: Arc<dyn EventDispatcher>,
     stats: Option<Arc<SchedulerStats>>,
     simulated_keys: SimulatedKeys,
-    throttle: Throttle,
+    /// 注入周期「基础」下限（生产取 [`MIN_EFFECTIVE_INTERVAL_MS`]，测试构造器设 1 不限速）。
+    /// 每条规则的有效下限 = 此值 × 当前活跃规则数（总并发限速，详见 `process_due`）：管线可持续
+    /// 的「总」注入速率有上限，多条规则同时连发按规则数等分，避免叠加冲破天花板导致「收不住」。
+    /// 只拉长拍间间隔、不影响 `hold` 点按时长。
+    min_interval_ms: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AcquireOutcome {
     Acquired,
     Shared,
-}
-
-/// 智能降频下限范围：1ms 表示不降频，最高放宽到 50ms。
-const THROTTLE_FLOOR_MIN_MS: u32 = 1;
-const THROTTLE_FLOOR_MAX_MS: u32 = 50;
-/// 无高精度定时器（hp_degraded）时亚 ~15ms 周期无法稳定达成，硬钳到此可持续下限（信号 C）。
-const HP_DEGRADED_FLOOR_MS: u32 = 8;
-/// 承压时每批升高的步长，健康时每批衰减的步长。升快降慢形成迟滞，避免临界点抖动。
-const THROTTLE_RAISE_STEP_MS: u32 = 2;
-const THROTTLE_DECAY_STEP_MS: u32 = 1;
-/// 调度迟到超过此阈值视作线程跟不上节奏（信号 B）。
-const THROTTLE_LATE_THRESHOLD: Duration = Duration::from_millis(4);
-
-/// 智能降频：引擎自我调节，用让步注入效率（优先级③）守住物理输入优先 + 连发稳定
-/// （优先级①②）——CPU 因温控/电量降频同理。`dynamic_floor_ms` 是当前允许的最快注入
-/// 周期下限，仅会放慢、绝不快过规则请求的 interval；健康时缓慢衰减、停止时复位回 1ms。
-struct Throttle {
-    dynamic_floor_ms: u32,
-    hp_degraded: Arc<AtomicBool>,
-}
-
-impl Throttle {
-    fn new(hp_degraded: Arc<AtomicBool>) -> Self {
-        Self {
-            dynamic_floor_ms: THROTTLE_FLOOR_MIN_MS,
-            hp_degraded,
-        }
-    }
-
-    /// 当前有效注入周期下限：自适应下限与 hp_degraded 硬底（信号 C）取较大者。
-    fn floor_ms(&self) -> u32 {
-        let degraded_floor = if self.hp_degraded.load(Ordering::Relaxed) {
-            HP_DEGRADED_FLOOR_MS
-        } else {
-            THROTTLE_FLOOR_MIN_MS
-        };
-        self.dynamic_floor_ms.max(degraded_floor)
-    }
-
-    /// 按本轮是否承压（信号 B 调度迟到）调整下限：承压升高、健康衰减。
-    fn observe(&mut self, stressed: bool) {
-        self.dynamic_floor_ms = if stressed {
-            (self.dynamic_floor_ms + THROTTLE_RAISE_STEP_MS).min(THROTTLE_FLOOR_MAX_MS)
-        } else {
-            self.dynamic_floor_ms
-                .saturating_sub(THROTTLE_DECAY_STEP_MS)
-                .max(THROTTLE_FLOOR_MIN_MS)
-        };
-    }
-
-    /// 复位到不降频。停止 / 切代 / 退出等会话边界调用，避免一次瞬时承压把下限
-    /// 顶高后跨会话残留、把下一轮连发长期钳慢。
-    fn reset(&mut self) {
-        self.dynamic_floor_ms = THROTTLE_FLOOR_MIN_MS;
-    }
 }
 
 impl SchedulerWorker {
@@ -427,8 +393,6 @@ impl SchedulerWorker {
         let events = self.release_all_target_holds();
         self.target_holds.clear();
         self.dispatch_events(events);
-        // 会话结束：复位降频，下一轮连发从不降频开始，避免上次的瞬时承压残留拖慢。
-        self.throttle.reset();
     }
 
     fn next_deadline(&self) -> Option<Instant> {
@@ -436,16 +400,24 @@ impl SchedulerWorker {
     }
 
     fn process_due(&mut self, now: Instant) {
-        // 智能降频：effective interval = max(请求 interval, floor)，只拉长「下一拍的间隔」，
-        // 绝不快过规则请求；floor>=1ms 保证 next_at 单调推进。
-        let floor_ms = self.throttle.floor_ms();
+        // 总并发限速：管线可持续的「总」注入速率有上限——单条规则没问题，多条同时连发会叠加
+        // 冲破天花板（实测 2 toggle + 1 hold 即收不住）。故有效下限按活跃规则数等分：每条规则
+        // 的下限 = 基础下限(min_interval_ms) × 活跃规则数，使总 tap 速率 ≈ 1000/基础下限、与规则
+        // 数无关；单规则时退化为基础下限。effective interval = max(请求 interval, floor)，只拉长
+        // 拍间间隔、不改 hold 点按手感，绝不快过规则请求，且 >=1ms 保证 next_at 单调推进。
         let current_generation = self.current_generation;
+        let active_count = self
+            .rules
+            .values()
+            .filter(|r| r.generation == current_generation)
+            .count()
+            .max(1) as u32;
+        let floor_ms = self.min_interval_ms.saturating_mul(active_count);
         let stats = self.stats.as_deref();
         // 与 rules.iter_mut() 拆分借用，原地处理到期规则，避免每 tick 的 id 克隆与 remove/insert。
         let target_holds = &mut self.target_holds;
 
         let mut any_due = false;
-        let mut max_late = Duration::ZERO;
         let mut events = Vec::new();
         let mut expired: Vec<String> = Vec::new();
 
@@ -455,8 +427,7 @@ impl SchedulerWorker {
             }
             any_due = true;
 
-            // 过期 generation 规则只做惰性释放，不参与降频度量：其 next_at 早已过期，
-            // 计入会把信号 B 误顶满（快速启停 / 切代后常见）。
+            // 过期 generation 规则只做惰性释放（快速启停 / 切代后常见）。
             if rule.generation != current_generation {
                 if rule.is_down {
                     if let Some(event) = Self::release_owner(target_holds, rule.rule.target_key, id)
@@ -468,14 +439,12 @@ impl SchedulerWorker {
                 continue;
             }
 
-            // 信号 B：仅统计当前 generation、真正参与注入的规则的调度迟到。
-            let late = now.saturating_duration_since(rule.next_at);
-            max_late = max_late.max(late);
+            // 调度迟到采样，供 stress 诊断（不再驱动任何降频）。
             if let Some(stats) = stats {
-                stats.record_delay(late);
+                stats.record_delay(now.saturating_duration_since(rule.next_at));
             }
 
-            // hold（按下时长）按规则请求的 interval 计算，降频不拉长按下、保持点按特性；
+            // hold（按下时长）按规则请求的 interval 计算，硬下限不拉长按下、保持点按特性；
             // 仅把拍与拍之间的「间隔」放慢。
             let interval = Duration::from_millis(rule.rule.interval_ms.max(floor_ms) as u64);
             let hold = hold_duration(rule.rule.interval_ms);
@@ -528,10 +497,16 @@ impl SchedulerWorker {
             return;
         }
 
+        // 测量本批注入 wall-clock（归一到单事件）供 stress 诊断；仅在采样时测量，不驱动降频。
+        let event_count = events.len();
+        let t0 = stats.map(|_| Instant::now());
         self.dispatch_events(events);
-        // 信号 B/C：调度持续迟到（线程跟不上节奏）则升高下限，否则衰减恢复。
-        // 不用注入失败率作信号——失败几乎都是单键/单后端问题，不该全局降速。
-        self.throttle.observe(max_late > THROTTLE_LATE_THRESHOLD);
+        if let (Some(stats), Some(t0)) = (stats, t0) {
+            if event_count > 0 {
+                let cost = Instant::now().saturating_duration_since(t0);
+                stats.record_dispatch_cost(cost / event_count as u32);
+            }
+        }
     }
 
     /// 申请目标键的注入所有权。引擎不为业务取舍兜底：不判断该键是否被用户物理按住
@@ -900,7 +875,7 @@ mod tests {
             dispatcher: Arc::new(TestDispatcher),
             stats: None,
             simulated_keys: simulated_keys.clone(),
-            throttle: Throttle::new(Arc::new(AtomicBool::new(false))),
+            min_interval_ms: 1,
         };
         (worker, simulated_keys)
     }
@@ -921,55 +896,6 @@ mod tests {
     #[test]
     fn hold_duration_for_one_ms_uses_tap_mode() {
         assert_eq!(hold_duration(1), Duration::ZERO);
-    }
-
-    #[test]
-    fn throttle_raises_floor_under_stress_and_decays_when_healthy() {
-        let mut t = Throttle::new(Arc::new(AtomicBool::new(false)));
-        assert_eq!(t.floor_ms(), THROTTLE_FLOOR_MIN_MS);
-
-        // 持续承压：下限单调升高并封顶。
-        for _ in 0..100 {
-            t.observe(true);
-        }
-        assert_eq!(t.floor_ms(), THROTTLE_FLOOR_MAX_MS);
-
-        // 恢复健康：缓慢衰减回不降频。
-        for _ in 0..(THROTTLE_FLOOR_MAX_MS as usize) {
-            t.observe(false);
-        }
-        assert_eq!(t.floor_ms(), THROTTLE_FLOOR_MIN_MS);
-    }
-
-    #[test]
-    fn throttle_raise_is_faster_than_decay() {
-        let mut t = Throttle::new(Arc::new(AtomicBool::new(false)));
-        t.observe(true); // +RAISE
-        let raised = t.floor_ms();
-        t.observe(false); // -DECAY
-                          // 升快降慢：一升一降后仍高于初始，形成迟滞。
-        assert!(t.floor_ms() > THROTTLE_FLOOR_MIN_MS);
-        assert!(raised - t.floor_ms() == THROTTLE_DECAY_STEP_MS);
-    }
-
-    #[test]
-    fn throttle_hp_degraded_enforces_min_floor() {
-        let t = Throttle::new(Arc::new(AtomicBool::new(true)));
-        // 无高精度定时器时即便未承压也钳到可持续下限（信号 C）。
-        assert!(t.floor_ms() >= HP_DEGRADED_FLOOR_MS);
-    }
-
-    #[test]
-    fn cleanup_all_resets_throttle_so_next_session_starts_unthrottled() {
-        let (mut worker, _) = test_worker();
-        for _ in 0..100 {
-            worker.throttle.observe(true);
-        }
-        assert!(worker.throttle.floor_ms() > THROTTLE_FLOOR_MIN_MS);
-
-        // 停止 / 切代 / 退出都经 cleanup_all：复位降频，避免瞬时承压跨会话残留。
-        worker.cleanup_all();
-        assert_eq!(worker.throttle.floor_ms(), THROTTLE_FLOOR_MIN_MS);
     }
 
     #[test]
