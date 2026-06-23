@@ -117,7 +117,7 @@ packages/win-driver/src/
 
 `win_input::dispatch(KeyId, is_up)` 是统一入口，`(mode, KeyId)` 模式匹配分发到对应 backend，X1/X2 在 DD 模式 / 鼠标设备缺失时按 once 旗标 warn 一次后自动回退 SendInput。`burst-engine` 负责线程编排：用 `catch_unwind` 包裹引擎线程，并发连发用 `AtomicBool cancel + thread::park_timeout`，`Drop` 时先 signal 再 join 确保按键不卡住。非 Windows 平台提供空实现（`cfg(windows)` 隔离）。
 
-全局热键不走 `tauri-plugin-global-shortcut` 注册，而是与连发规则共用 `burst-engine` 低级 hook：热键检测优先于规则处理，且不受 `global_enabled` 当前状态限制。引擎用 `pressed_keys: HashSet<KeyId>` 记录已经按下的物理键，只让首次 down 进入 `on_key_press`，up 时移除；不要再依赖 `KBDLLHOOKSTRUCT.flags` 的保留位判断 key-repeat。注入事件仍先在 hook 层过滤：SendInput / Interception 用 `SIM_MARKER`，DD-HID 用 `PENDING_INJECTIONS`。
+全局热键（`global_toggle`/`global_stop`/`panel_toggle`）只允许绑定键盘实体键、且三者互不重复——在绑定 UI 拦截（`KeyCapture` 的 `keyboardOnly` + `SettingsDialog` 的去重校验），避免同一键被某个热键抢先处理导致其余功能失效。全局热键不走 `tauri-plugin-global-shortcut` 注册，而是与连发规则共用 `burst-engine` 低级 hook：热键检测优先于规则处理，且不受 `global_enabled` 当前状态限制。引擎用 `pressed_keys: HashSet<KeyId>` 记录已经按下的物理键，只让首次 down 进入 `on_key_press`，up 时移除；不要再依赖 `KBDLLHOOKSTRUCT.flags` 的保留位判断 key-repeat。注入事件仍先在 hook 层过滤：SendInput / Interception 用 `SIM_MARKER`，DD-HID 用 `PENDING_INJECTIONS`。
 
 **AppHandle 不进 packages**：`win-driver` / `win-input` / `win-sysinfo` / `burst-engine` 所有函数均不接受 `AppHandle` 参数。资源目录由 `commands/driver.rs` 从 `app.path().resource_dir()` 取得后传入，Tauri 状态管理留在 commands 层。
 
@@ -127,9 +127,12 @@ packages/win-driver/src/
 
 | 参数         | 范围           | 执行位置                                      |
 | ------------ | -------------- | --------------------------------------------- |
-| 连发间隔     | 1ms – 10000ms  | `qzh-profile/src/profile.rs::validate()`（默认 10ms） |
+| 连发间隔（结构下限） | 1ms – 10000ms  | `qzh-profile/src/profile.rs::validate()`（默认 10ms） |
+| 连发间隔（有效下限） | ≥ 10ms（`MIN_EFFECTIVE_INTERVAL_MS`） | 加载时 `Profile::clamp_intervals()` 钳位 + `burst-engine` 运行时 floor |
 | 单配置规则数 | ≤ 64           | `qzh-profile/src/profile.rs::validate()`      |
 | 宏序列步骤数 | ≤ 256          | `qzh-profile/src/macro_seq.rs::MAX_STEPS`     |
+
+**连发间隔有效下限与总并发限速**：`validate()` 仍以 1ms 为结构下限（旧配置兼容），但有效操作下限为 `MIN_EFFECTIVE_INTERVAL_MS = 10ms`——全局 LL 钩子链 + RIT 对每个注入事件有固定「过路税」，管线可持续的「总」注入速率有上限。加载旧配置时 `Profile::clamp_intervals()` 把 <10ms 的间隔静默钳到 10ms（所有读取入口经 `load_from_path` / `read_profile_from_file` 这一处）。运行时 `burst-engine` `process_due` 再按「基础下限 × 当前活跃规则数」放大每条规则的有效下限（总并发限速），使总 tap 速率 ≈ 1000/基础下限、与规则数无关，避免多规则叠加超发导致停止后「收不住」。只拉长拍间间隔、不改 `hold` 点按时长。
 
 ## 功能分层
 

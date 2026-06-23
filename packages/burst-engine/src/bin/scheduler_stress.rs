@@ -22,7 +22,9 @@ fn print_help() {
         "Usage: cargo run -p burst-engine --bin scheduler_stress --release -- [--rules N] [--interval-ms N] [--duration-ms N] [--same-target] [--dispatch-cost-us N] [--matrix]"
     );
     println!("Dry-run scheduler stress test. It does not inject real keyboard or mouse events.");
-    println!("--dispatch-cost-us N: 模拟每事件注入耗时（µs），>0 复现下游背压以验证自适应降频。");
+    println!(
+        "--dispatch-cost-us N: 模拟每事件注入耗时（µs），>0 复现下游背压以诊断观测注入速率/迟到。"
+    );
     println!(
         "--dispatch-cost-delay-ms N: 背压起始延迟，注入 N ms 后才施加耗时，模拟积压逐渐建立的 ramp。"
     );

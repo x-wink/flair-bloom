@@ -108,7 +108,7 @@ fn read_profile_from_file(file_path: &Path) -> Result<Profile, String> {
     };
     let mut profile: Profile =
         serde_json::from_value(value).map_err(|e| format!("反序列化失败: {e}"))?;
-    // 加载即适配有效操作下限：旧配置 <16ms 的间隔静默钳到 16ms（管线可持续注入上限），
+    // 加载即适配有效操作下限：旧配置 <10ms 的间隔静默钳到 10ms（管线可持续注入上限），
     // 否则超发会导致停止后下游输入队列排空滞后（「收不住」）。所有读取入口（load/list/
     // rename/delete/fork）都经此函数，故钳位只加这一处。
     profile.clamp_intervals();

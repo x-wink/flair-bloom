@@ -15,10 +15,11 @@ pub struct StressConfig {
     pub duration: Duration,
     pub same_target: bool,
     /// 每事件「模拟注入耗时」：>0 时 dispatcher 按此 sleep，复现下游背压（LL hook 链 /
-    /// 前台输入队列拥塞），用于验证自适应降频（信号 D）在真线程 + 真定时器上确实生效。
+    /// 前台输入队列拥塞），用于在真线程 + 真定时器上观测背压对注入速率/调度迟到的影响
+    /// （`dispatch_cost_*` 仅作诊断采样，不驱动任何降频）。
     pub simulated_dispatch_cost: Duration,
-    /// 背压起始延迟：注入开始多久后才施加耗时。模拟「积压逐渐建立」的 ramp，使相对信号
-    /// 先建立健康基线再观测骤增。默认 0（从头拥塞，会被当作基线，演示不出降频）。
+    /// 背压起始延迟：注入开始多久后才施加耗时。模拟「积压逐渐建立」的 ramp，使诊断信号
+    /// 先建立健康基线再观测骤增。默认 0（从头拥塞，会被当作基线）。
     pub simulated_dispatch_cost_delay: Duration,
 }
 
@@ -62,8 +63,8 @@ pub struct StressReport {
 struct DryRunDispatcher {
     cost_per_event: Duration,
     /// 背压起始延迟：注入开始 `cost_start_after` 之后才施加耗时。模拟真实场景里
-    /// 「队列起初为空、注入很快，积压逐渐建立才变慢」的 ramp，让自适应降频先建立健康
-    /// 基线、再观测到骤增（否则 t0 即拥塞会被当成基线，永不判承压——这是相对信号的固有取舍）。
+    /// 「队列起初为空、注入很快，积压逐渐建立才变慢」的 ramp，让诊断信号先建立健康
+    /// 基线、再观测到骤增（否则 t0 即拥塞会被当成基线，看不出相对变化）。
     cost_start_after: Duration,
     started_at: Mutex<Option<Instant>>,
 }
@@ -71,7 +72,7 @@ struct DryRunDispatcher {
 impl EventDispatcher for DryRunDispatcher {
     fn dispatch(&self, events: &[InputEvent]) -> Vec<DispatchResult> {
         // 模拟下游背压：注入是同步调用，拥塞时变慢。用真 sleep 让真线程 + 真定时器上的
-        // 自适应降频得到真实信号（非单测，可接受 wall-clock）。
+        // 诊断采样（dispatch_cost / delay）拿到真实信号（非单测，可接受 wall-clock）。
         if !self.cost_per_event.is_zero() {
             let start = *self
                 .started_at

@@ -6,7 +6,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use tracing::warn;
+use tracing::{error, warn};
 use win_input::{key_events, DispatchResult, InputEvent};
 
 const ACK_TIMEOUT: Duration = Duration::from_millis(500);
@@ -149,15 +149,24 @@ impl SchedulerHandle {
         let worker_degraded = hp_degraded.clone();
         let command_waker = platform_wait::CommandWaker::new(&hp_degraded);
         let worker_waker = command_waker.clone();
+        // panic 兜底：worker 栈一旦展开，target_holds 随之丢失，靠 simulated_keys 账本
+        // 释放所有已按下的模拟键，避免按键卡死（连发工具最差故障）。
+        let panic_fallback = simulated_keys.clone();
         let join = thread::spawn(move || {
-            worker_loop(
-                rx,
-                worker_degraded,
-                worker_waker,
-                dispatcher,
-                stats,
-                simulated_keys,
-            )
+            let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                worker_loop(
+                    rx,
+                    worker_degraded,
+                    worker_waker,
+                    dispatcher,
+                    stats,
+                    simulated_keys,
+                )
+            }));
+            if outcome.is_err() {
+                release_simulated_keys(&panic_fallback);
+                error!("调度器 worker 线程 panic，已按账本兜底释放模拟按键");
+            }
         });
         Self {
             tx,
@@ -310,10 +319,12 @@ fn worker_loop(
 }
 
 struct SchedulerWorker {
-    rules: HashMap<String, ScheduledRule>,
+    /// 规则 ID 用 `Arc<str>` 而非 `String`：owner 登记到 `target_holds` 时只做引用计数
+    /// 克隆，避免热路径（`process_due` 每拍 acquire/release）的 `String` 堆分配。
+    rules: HashMap<Arc<str>, ScheduledRule>,
     /// 目标键 -> 当前持有它的规则 ID 集合。集合非空即该键处于注入按下态，
     /// 多条规则共享同一目标键时只发一次 down，最后一个 owner 释放时才发 up。
-    target_holds: HashMap<KeyId, HashSet<String>>,
+    target_holds: HashMap<KeyId, HashSet<Arc<str>>>,
     current_generation: u64,
     dispatcher: Arc<dyn EventDispatcher>,
     stats: Option<Arc<SchedulerStats>>,
@@ -336,7 +347,8 @@ impl SchedulerWorker {
         match command {
             SchedulerCommand::Start { rule, generation } => {
                 if generation == self.current_generation {
-                    self.rules.entry(rule.id.clone()).or_insert(ScheduledRule {
+                    let id: Arc<str> = Arc::from(rule.id.as_str());
+                    self.rules.entry(id).or_insert(ScheduledRule {
                         rule,
                         generation,
                         phase: RulePhase::DownPhase,
@@ -405,6 +417,11 @@ impl SchedulerWorker {
         // 的下限 = 基础下限(min_interval_ms) × 活跃规则数，使总 tap 速率 ≈ 1000/基础下限、与规则
         // 数无关；单规则时退化为基础下限。effective interval = max(请求 interval, floor)，只拉长
         // 拍间间隔、不改 hold 点按手感，绝不快过规则请求，且 >=1ms 保证 next_at 单调推进。
+        //
+        // 暂不处理：floor 用「实时」active_count，已排程规则的 next_at 是按上一拍的 active_count
+        // 算好的、本拍不重算。故新规则切入的「那一拍」，既有规则会以旧（更小）间隔多发一拍才收敛到
+        // 新 floor——是单拍的瞬时轻微超发，下一拍即自愈，不构成持续「收不住」（限速针对的是稳态总
+        // 速率）。为此重排所有规则不值当，故意保留此瞬时窗口。
         let current_generation = self.current_generation;
         let active_count = self
             .rules
@@ -419,7 +436,7 @@ impl SchedulerWorker {
 
         let mut any_due = false;
         let mut events = Vec::new();
-        let mut expired: Vec<String> = Vec::new();
+        let mut expired: Vec<Arc<str>> = Vec::new();
 
         for (id, rule) in self.rules.iter_mut() {
             if rule.next_at > now {
@@ -515,24 +532,24 @@ impl SchedulerWorker {
     /// 取 `&mut target_holds` 而非 `&mut self`，使 `process_due` 能与 `rules.iter_mut()`
     /// 拆分借用、原地处理规则，省掉每 tick 的 id 克隆与 remove/insert。
     fn acquire_owner(
-        target_holds: &mut HashMap<KeyId, HashSet<String>>,
+        target_holds: &mut HashMap<KeyId, HashSet<Arc<str>>>,
         key: KeyId,
-        owner: &str,
+        owner: &Arc<str>,
     ) -> AcquireOutcome {
         match target_holds.entry(key) {
             Entry::Occupied(mut e) => {
-                e.get_mut().insert(owner.to_string());
+                e.get_mut().insert(owner.clone());
                 AcquireOutcome::Shared
             }
             Entry::Vacant(e) => {
-                e.insert(HashSet::new()).insert(owner.to_string());
+                e.insert(HashSet::new()).insert(owner.clone());
                 AcquireOutcome::Acquired
             }
         }
     }
 
     fn release_owner(
-        target_holds: &mut HashMap<KeyId, HashSet<String>>,
+        target_holds: &mut HashMap<KeyId, HashSet<Arc<str>>>,
         key: KeyId,
         owner: &str,
     ) -> Option<InputEvent> {
@@ -938,13 +955,15 @@ mod tests {
         let (mut worker, _) = test_worker();
         let key = KeyId::Keyboard(0x45);
         let th = &mut worker.target_holds;
+        let a: Arc<str> = Arc::from("a");
+        let b: Arc<str> = Arc::from("b");
 
         assert_eq!(
-            SchedulerWorker::acquire_owner(th, key, "a"),
+            SchedulerWorker::acquire_owner(th, key, &a),
             AcquireOutcome::Acquired
         );
         assert_eq!(
-            SchedulerWorker::acquire_owner(th, key, "b"),
+            SchedulerWorker::acquire_owner(th, key, &b),
             AcquireOutcome::Shared
         );
         assert_eq!(SchedulerWorker::release_owner(th, key, "a"), None);
@@ -959,9 +978,10 @@ mod tests {
         // 引擎不为业务取舍兜底：target 键即便被物理按住也照常注入（由业务层声明风险）。
         let (mut worker, _) = test_worker();
         let key = KeyId::Keyboard(0x45);
+        let owner: Arc<str> = Arc::from("different-trigger");
 
         assert_eq!(
-            SchedulerWorker::acquire_owner(&mut worker.target_holds, key, "different-trigger"),
+            SchedulerWorker::acquire_owner(&mut worker.target_holds, key, &owner),
             AcquireOutcome::Acquired
         );
         assert!(worker.target_holds.contains_key(&key));

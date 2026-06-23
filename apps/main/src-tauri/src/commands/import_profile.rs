@@ -152,7 +152,7 @@ fn gaibang_active_vks(cfg: &GaibangConfig) -> Vec<u32> {
 }
 
 fn gaibang_interval(cfg: &GaibangConfig) -> u32 {
-    // 钳到有效操作下限（16ms）而非结构下限（1ms）：管线可持续注入上限，
+    // 钳到有效操作下限（10ms）而非结构下限（1ms）：管线可持续注入上限，
     // 更快会在下游输入队列堆积、停止后才排空。预览与实际导入一致。
     ((cfg.delay_us / 1000) as u32).clamp(MIN_EFFECTIVE_INTERVAL_MS, MAX_INTERVAL_MS)
 }
@@ -409,7 +409,7 @@ pub fn import_external_config(
         hotkeys: hotkeys.clone(),
         advanced: Advanced::default(),
     };
-    // 兜底适配有效操作下限：任何解析器产出的 <16ms 间隔在落盘前钳到 16ms，
+    // 兜底适配有效操作下限：任何解析器产出的 <10ms 间隔在落盘前钳到 10ms，
     // 与加载旧配置（read_profile_from_file）行为一致。
     profile.clamp_intervals();
 

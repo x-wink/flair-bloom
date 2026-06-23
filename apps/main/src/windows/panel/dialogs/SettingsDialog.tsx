@@ -128,31 +128,19 @@ function modeDetail(mode: SettingsInputMode, props: Props): string {
   if (mode === 'ddsimple') {
     return props.elevated ? '管理员已就绪' : '需要管理员';
   }
-  if (mode === 'dd_hid') {
-    if (props.ddHidInstalled === 'installed') return '已禁用，建议卸载';
-    if (props.ddHidInstalled === 'pending_reboot') return '驱动待重启清理';
-    return '已禁用';
-  }
   return '无需驱动';
 }
 
-/// 模式角标：游戏模式主推（推荐）、DD驱动降级（备用）、DDHID 已停用。通用模式无角标。
-function modeTag(
-  mode: SettingsInputMode,
-): { text: string; kind: 'recommend' | 'backup' | 'disabled' } | null {
+/// 模式角标：游戏模式主推（推荐）、DD驱动降级（备用）。通用模式无角标。
+function modeTag(mode: SettingsInputMode): { text: string; kind: 'recommend' | 'backup' } | null {
   if (mode === 'interception') return { text: '推荐', kind: 'recommend' };
   if (mode === 'ddsimple') return { text: '备用', kind: 'backup' };
-  if (mode === 'dd_hid') return { text: '已禁用', kind: 'disabled' };
   return null;
 }
 
-/// 可选输入模式：游戏模式置顶主推，通用模式次之，DD驱动仅作备用；DDHID 已禁用、不列出。
-/// 仅当用户当前仍停留在 DDHID 时附带显示该项（禁用态），便于切换到其他模式。
+/// 可选输入模式：游戏模式置顶主推，通用模式次之，DD驱动仅作备用。DDHID 已禁用、不列出
+/// （后端上报 dd_hid 会被自动回退为通用模式，故界面永不停留在 DDHID）。
 const SELECTABLE_INPUT_MODES: SettingsInputMode[] = ['interception', 'sendinput', 'ddsimple'];
-
-function visibleInputModes(current: SettingsInputMode): SettingsInputMode[] {
-  return current === 'dd_hid' ? [...SELECTABLE_INPUT_MODES, 'dd_hid'] : SELECTABLE_INPUT_MODES;
-}
 
 function SliderRow({
   label,
@@ -189,9 +177,42 @@ function SliderRow({
   );
 }
 
+function hotkeyKeyEq(a: KeyId | null, b: KeyId | null): boolean {
+  return !!a && !!b && a.kind === b.kind && a.code === b.code;
+}
+
 export default function SettingsDialog(props: Props) {
   const [tab, setTab] = useState<SettingsTab>(props.initialTab ?? 'general');
+  const [hotkeyDupNote, setHotkeyDupNote] = useState<string | null>(null);
   const { sound } = props;
+
+  // 全局热键只能绑定键盘实体键（KeyCapture keyboardOnly），且三者互不重复——重复会让该键被
+  // 某个热键抢先处理、其余功能失效，行为不可预期。绑定前若与另一全局热键相同则拒绝并提示。
+  const setGlobalHotkey = (
+    field: 'global_toggle' | 'global_stop' | 'panel_toggle',
+    key: KeyId | null,
+  ) => {
+    if (key) {
+      const others = (['global_toggle', 'global_stop', 'panel_toggle'] as const).filter(
+        (f) => f !== field,
+      );
+      if (others.some((f) => hotkeyKeyEq(props.hotkeys[f], key))) {
+        setHotkeyDupNote('该按键已被其它全局热键占用，请换一个');
+        return;
+      }
+    }
+    setHotkeyDupNote(null);
+    if (field === 'global_toggle') {
+      props.onHotkeyChange({
+        global_toggle: key,
+        global_stop: key === null ? null : props.hotkeys.global_stop,
+      });
+    } else if (field === 'global_stop') {
+      props.onHotkeyChange({ global_stop: key });
+    } else {
+      props.onHotkeyChange({ panel_toggle: key });
+    }
+  };
 
   const tabsNode = <Tabs tabs={TABS} active={tab} onChange={setTab} variant="pill" grow />;
 
@@ -243,14 +264,14 @@ export default function SettingsDialog(props: Props) {
 
             <SettingsSection title="输入模式">
               <CardList>
-                {visibleInputModes(props.inputMode).map((mode) => {
+                {SELECTABLE_INPUT_MODES.map((mode) => {
                   const tag = modeTag(mode);
                   return (
                     <CardListButton
                       key={mode}
                       active={props.inputMode === mode}
                       className="settings-mode"
-                      disabled={props.switchingMode || mode === 'dd_hid'}
+                      disabled={props.switchingMode}
                       onClick={() => props.onSelectInputMode(mode)}
                     >
                       <span className="settings-mode-name">
@@ -304,14 +325,10 @@ export default function SettingsDialog(props: Props) {
                   <KeyCapture
                     value={props.hotkeys.global_toggle}
                     nullable
+                    keyboardOnly
                     placeholder="未设置"
                     conflict={props.hotkeyConflicts.global_toggle}
-                    onChange={(k) =>
-                      props.onHotkeyChange({
-                        global_toggle: k,
-                        global_stop: k === null ? null : props.hotkeys.global_stop,
-                      })
-                    }
+                    onChange={(k) => setGlobalHotkey('global_toggle', k)}
                   />
                   {props.hotkeys.global_toggle && (
                     <>
@@ -319,9 +336,10 @@ export default function SettingsDialog(props: Props) {
                       <KeyCapture
                         value={props.hotkeys.global_stop}
                         nullable
+                        keyboardOnly
                         placeholder="同开启键"
                         conflict={props.hotkeyConflicts.global_stop}
-                        onChange={(k) => props.onHotkeyChange({ global_stop: k })}
+                        onChange={(k) => setGlobalHotkey('global_stop', k)}
                       />
                     </>
                   )}
@@ -333,14 +351,18 @@ export default function SettingsDialog(props: Props) {
                   <KeyCapture
                     value={props.hotkeys.panel_toggle}
                     nullable
+                    keyboardOnly
                     placeholder="未设置"
                     conflict={props.hotkeyConflicts.panel_toggle}
-                    onChange={(k) => props.onHotkeyChange({ panel_toggle: k })}
+                    onChange={(k) => setGlobalHotkey('panel_toggle', k)}
                   />
                 </div>
               </div>
             </div>
-            <p className="settings-note">热键随当前配置文件保存。</p>
+            {hotkeyDupNote && <p className="settings-note settings-note-warn">{hotkeyDupNote}</p>}
+            <p className="settings-note">
+              全局热键仅支持键盘按键，三个热键不能重复；热键随当前配置文件保存。
+            </p>
           </SettingsSection>
         )}
 

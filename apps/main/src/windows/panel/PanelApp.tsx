@@ -2186,10 +2186,7 @@ export default function PanelApp() {
         onClose={() => setModePickerOpen(false)}
         target={modeBtnRef}
         location="bottom-left"
-        items={(inputMode === 'dd_hid'
-          ? (['interception', 'sendinput', 'ddsimple', 'dd_hid'] as InputMode[])
-          : (['interception', 'sendinput', 'ddsimple'] as InputMode[])
-        ).map((m) => ({
+        items={(['interception', 'sendinput', 'ddsimple'] as InputMode[]).map((m) => ({
           label: INPUT_MODE_LABELS[m],
           subtitle:
             m === 'sendinput'
@@ -2202,15 +2199,9 @@ export default function PanelApp() {
                   : interceptionInstalled === 'pending_reboot'
                     ? '推荐 · 驱动待重启生效'
                     : '推荐 · 点击安装驱动'
-                : m === 'ddsimple'
-                  ? elevated
-                    ? '备用 · 内置DD驱动，无需重启'
-                    : '备用 · 需要管理员'
-                  : ddHidInstalled === 'installed'
-                    ? '已禁用，建议卸载'
-                    : ddHidInstalled === 'pending_reboot'
-                      ? '驱动待重启清理'
-                      : '已禁用',
+                : elevated
+                  ? '备用 · 内置DD驱动，无需重启'
+                  : '备用 · 需要管理员',
           active: inputMode === m,
           onClick: () => void selectInputMode(m),
         }))}

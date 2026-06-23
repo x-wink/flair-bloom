@@ -319,11 +319,12 @@ fn stopping_one_of_two_rules_leaves_the_other_running() {
     assert_eq!(out, "1:dn:K45 1:dn:K52 2:up:K45 4:up:K52 11:dn:K52");
 }
 
-// ----- 有效注入周期硬下限（生产 16ms，防超发冲破管线天花板导致「收不住」）-----
+// ----- 有效注入周期硬下限（防超发冲破管线天花板导致「收不住」；生产基础下限见
+// MIN_EFFECTIVE_INTERVAL_MS=10ms，本节用 set_min_interval 注入任意测试值以验证钳位机制）-----
 
 #[test]
 fn min_interval_floor_throttles_sub_floor_cadence() {
-    // interval=10ms 在 16ms 硬下限下被钳成 16ms 拍距：dn 落在 1 / 17 / 33，
+    // 注入 16ms 测试下限：interval=10ms 被钳成 16ms 拍距，dn 落在 1 / 17 / 33，
     // 但 hold（按下时长=hold_duration(10)=3ms）不受下限影响，保持点按手感（up 紧跟 3ms 后）。
     let mut sim = Sim::new(vec![hold("r", E, 10)]);
     sim.set_min_interval(16);
@@ -337,7 +338,7 @@ fn min_interval_floor_throttles_sub_floor_cadence() {
 
 #[test]
 fn interval_above_floor_is_unaffected() {
-    // 规则间隔已高于硬下限（20ms > 16ms）：下限不介入，拍距仍为 20ms（dn 落在 1 / 21）。
+    // 规则间隔已高于测试下限（20ms > 16ms）：下限不介入，拍距仍为 20ms（dn 落在 1 / 21）。
     let mut sim = Sim::new(vec![hold("r", E, 20)]);
     sim.set_min_interval(16);
     sim.start("r");

@@ -101,11 +101,6 @@
   background: var(--fb-fill-soft, rgba(128, 128, 128, 0.16));
 }
 
-.settings-mode-tag-disabled {
-  color: var(--fb-text-faint);
-  background: var(--fb-fill-soft, rgba(128, 128, 128, 0.1));
-}
-
 .settings-note-warn {
   color: var(--fb-danger-text, #b4540e);
 }

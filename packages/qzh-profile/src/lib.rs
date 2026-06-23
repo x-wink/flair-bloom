@@ -42,7 +42,7 @@ pub fn load_from_path(path: &Path) -> Result<Profile, ProfileError> {
         value
     };
     let mut profile: Profile = serde_json::from_value(value)?;
-    // 加载即适配有效操作下限：旧配置 <16ms 的间隔静默钳到 16ms（管线可持续注入上限），
+    // 加载即适配有效操作下限：旧配置 <10ms 的间隔静默钳到 10ms（管线可持续注入上限），
     // 避免超发导致停止后下游输入队列排空滞后（「收不住」）。见 [`MIN_EFFECTIVE_INTERVAL_MS`]。
     profile.clamp_intervals();
     profile.validate()?;

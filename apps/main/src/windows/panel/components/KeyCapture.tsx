@@ -255,6 +255,8 @@ interface Props {
   onChange: (key: KeyId | null) => void;
   /** 为 true 时，允许右键清空已绑定按键。 */
   nullable?: boolean;
+  /** 为 true 时只接受键盘键，忽略鼠标按键 / 滚轮（全局热键只允许绑定实体键）。 */
+  keyboardOnly?: boolean;
   placeholder?: string;
   /** 冲突级别，用于着色提示。 */
   conflict?: 'error' | 'warning' | null;
@@ -268,7 +270,14 @@ const MOUSE_BUTTON_MAP: Record<number, MouseButton> = {
   4: 'x2',
 };
 
-export default function KeyCapture({ value, onChange, nullable, placeholder, conflict }: Props) {
+export default function KeyCapture({
+  value,
+  onChange,
+  nullable,
+  keyboardOnly,
+  placeholder,
+  conflict,
+}: Props) {
   const [capturing, setCapturing] = useState(false);
 
   useEffect(() => {
@@ -295,6 +304,8 @@ export default function KeyCapture({ value, onChange, nullable, placeholder, con
     const mouseHandler = (e: MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      // 只允许实体键时忽略鼠标按键，但仍吞掉事件、保持捕获态等待键盘输入。
+      if (keyboardOnly) return;
       const btn = MOUSE_BUTTON_MAP[e.button];
       if (btn !== undefined) {
         onChange(mouseKey(btn));
@@ -305,6 +316,7 @@ export default function KeyCapture({ value, onChange, nullable, placeholder, con
     const wheelHandler = (e: WheelEvent) => {
       e.preventDefault();
       e.stopPropagation();
+      if (keyboardOnly) return;
       onChange(mouseKey(e.deltaY < 0 ? 'wheel_up' : 'wheel_down'));
       setCapturing(false);
     };
@@ -322,7 +334,7 @@ export default function KeyCapture({ value, onChange, nullable, placeholder, con
       window.removeEventListener('wheel', wheelHandler, { capture: true });
       window.removeEventListener('contextmenu', contextMenuHandler, { capture: true });
     };
-  }, [capturing, onChange]);
+  }, [capturing, onChange, keyboardOnly]);
 
   return (
     <button
