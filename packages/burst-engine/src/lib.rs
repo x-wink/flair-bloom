@@ -80,6 +80,18 @@ fn revive<T>(r: std::sync::LockResult<T>) -> T {
     r.unwrap_or_else(|e| e.into_inner())
 }
 
+/// 从 hook 静态弱引用取出存活的引擎，**容忍 RwLock 中毒**。与 [`revive`] 同一安全立场：
+/// 按键工具最差故障是卡键，绝不能因锁中毒在 `extern "system"` 回调里 panic——跨 FFI 边界
+/// 展开是 abort/UB。读锁只在内部短暂持有，中毒后取 `into_inner` 继续是安全的。
+#[cfg(windows)]
+fn engine_from_hook() -> Option<Arc<BurstEngine>> {
+    ENGINE_HOOK
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+        .and_then(|w| w.upgrade())
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EngineLifecycle {
     Paused,
@@ -104,8 +116,9 @@ struct ActiveRule {
 #[derive(Debug)]
 struct RuntimeState {
     lifecycle: EngineLifecycle,
+    /// 当前活跃规则。Toggle 是否「已开启」直接由此派生（含且 `mode == Toggle`），
+    /// 不再单独维护 `toggle_states`——双表同步是历史「toggle 双状态竞态」的根源。
     active_rules: HashMap<String, ActiveRule>,
-    toggle_states: HashMap<String, bool>,
     stop_generation: u64,
 }
 
@@ -156,7 +169,6 @@ impl BurstEngine {
             runtime: Arc::new(Mutex::new(RuntimeState {
                 lifecycle: EngineLifecycle::Paused,
                 active_rules: HashMap::new(),
-                toggle_states: HashMap::new(),
                 stop_generation: 0,
             })),
             physical_pressed: Arc::new(Mutex::new(HashSet::new())),
@@ -201,8 +213,11 @@ impl BurstEngine {
     }
 
     pub fn set_rules(&self, rules: Vec<BurstRule>) {
-        self.stop_runtime_activity(true);
+        // 先换快照、再停活动。停止会自增 generation 并向调度器发 StopAll，扫掉任何「在换快照前用
+        // 旧快照已经启动」的规则；若顺序反过来（先停后换），换快照后到来的物理触发会用旧快照在新
+        // generation 上启动一条已删除的规则，而其释放查的是新快照（找不到）→ 永不停止、持续连发。
         *revive(self.rules.lock()) = RuleSnapshot::new(rules);
+        self.stop_runtime_activity(true);
     }
 
     pub fn get_rules(&self) -> Vec<BurstRule> {
@@ -304,11 +319,18 @@ impl BurstEngine {
 
     pub fn set_global_enabled(&self, enabled: bool, wait: bool) {
         if enabled {
-            self.global_enabled.store(true, Ordering::SeqCst);
+            // 在同一把 runtime 锁内判定关停态并落定 global_enabled + lifecycle，避免两类割裂：
+            // (1) 关停期间被热键开启复活成 Running、且 global_enabled 残留 true（调度器已拆，状态割裂）；
+            // (2) global_enabled 先 true、lifecycle 后 Running 的窗口里物理触发被 runtime_can_start 误丢。
             let mut runtime = revive(self.runtime.lock());
-            if runtime.lifecycle != EngineLifecycle::Shutdown {
-                runtime.lifecycle = EngineLifecycle::Running;
+            if matches!(
+                runtime.lifecycle,
+                EngineLifecycle::ShuttingDown | EngineLifecycle::Shutdown
+            ) {
+                return;
             }
+            self.global_enabled.store(true, Ordering::SeqCst);
+            runtime.lifecycle = EngineLifecycle::Running;
         } else {
             self.global_enabled.store(false, Ordering::SeqCst);
             self.pause_runtime(wait);
@@ -324,7 +346,6 @@ impl BurstEngine {
             runtime.lifecycle = EngineLifecycle::ShuttingDown;
             runtime.stop_generation = runtime.stop_generation.saturating_add(1);
             runtime.active_rules.clear();
-            runtime.toggle_states.clear();
             runtime.stop_generation
         };
         self.global_enabled.store(false, Ordering::SeqCst);
@@ -384,7 +405,13 @@ impl BurstEngine {
                 if rule.trigger_key != key {
                     return false;
                 }
-                self.start_rule(rule)
+                // 滚轮触发键无法「按住」：每格作为一次瞬发点按——委派调度器一次性点按，
+                // 不进 active_rules、不靠 release 停止（详见 tap_once_rule 与 rules.rs 索引排除）。
+                if key.is_wheel() {
+                    self.tap_once_rule(rule)
+                } else {
+                    self.start_rule(rule)
+                }
             }
             BurstMode::Toggle => self.handle_toggle_press(key, rule),
         }
@@ -401,15 +428,13 @@ impl BurstEngine {
                 return false;
             }
             let started = runtime
-                .toggle_states
+                .active_rules
                 .get(&rule.id)
-                .copied()
-                .unwrap_or(false);
+                .is_some_and(|a| a.mode == BurstMode::Toggle);
             if started {
                 if stop != key {
                     return false;
                 }
-                runtime.toggle_states.insert(rule.id.clone(), false);
                 runtime.active_rules.remove(&rule.id);
                 stop_ids.push(rule.id.clone());
             } else {
@@ -428,12 +453,10 @@ impl BurstEngine {
                         })
                         .collect::<Vec<_>>();
                     for id in displaced {
-                        runtime.toggle_states.insert(id.clone(), false);
                         runtime.active_rules.remove(&id);
                         stop_ids.push(id);
                     }
                 }
-                runtime.toggle_states.insert(rule.id.clone(), true);
                 runtime.active_rules.insert(
                     rule.id.clone(),
                     ActiveRule {
@@ -474,14 +497,25 @@ impl BurstEngine {
         true
     }
 
+    /// 滚轮 Hold 的一次性点按：仅校验 lifecycle、捕获 generation 后委派调度器点按一次。
+    /// 不登记 `active_rules`——瞬发且可重复，登记会被去重/释放逻辑误吞后续滚轮格。
+    fn tap_once_rule(&self, rule: Arc<BurstRule>) -> bool {
+        let generation = {
+            let runtime = revive(self.runtime.lock());
+            if !runtime_can_start(&runtime) {
+                return false;
+            }
+            runtime.stop_generation
+        };
+        self.scheduler.tap_once(rule, generation);
+        true
+    }
+
     fn stop_rule(&self, rule_id: &str) -> bool {
         let generation = {
             let mut runtime = revive(self.runtime.lock());
-            let Some(active) = runtime.active_rules.remove(rule_id) else {
+            if runtime.active_rules.remove(rule_id).is_none() {
                 return false;
-            };
-            if active.mode == BurstMode::Toggle {
-                runtime.toggle_states.insert(rule_id.to_string(), false);
             }
             runtime.stop_generation
         };
@@ -514,7 +548,6 @@ impl BurstEngine {
             runtime.lifecycle = EngineLifecycle::Stopping;
             runtime.stop_generation = runtime.stop_generation.saturating_add(1);
             runtime.active_rules.clear();
-            runtime.toggle_states.clear();
             runtime.stop_generation
         };
 
@@ -579,11 +612,7 @@ unsafe extern "system" fn keyboard_hook_proc(ncode: i32, wparam: WPARAM, lparam:
                 return CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam);
             }
 
-            let engine = ENGINE_HOOK
-                .read()
-                .unwrap()
-                .as_ref()
-                .and_then(|w| w.upgrade());
+            let engine = engine_from_hook();
             if let Some(engine) = engine {
                 match wparam as u32 {
                     WM_KEYDOWN | WM_SYSKEYDOWN => {
@@ -645,12 +674,7 @@ unsafe extern "system" fn mouse_hook_proc(ncode: i32, wparam: WPARAM, lparam: LP
                     // SAFETY: 文档允许 null hhk
                     return CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam);
                 }
-                let engine = ENGINE_HOOK
-                    .read()
-                    .unwrap()
-                    .as_ref()
-                    .and_then(|w| w.upgrade());
-                if let Some(engine) = engine {
+                if let Some(engine) = engine_from_hook() {
                     if is_up {
                         engine.on_key_release(key);
                     } else {
@@ -673,16 +697,9 @@ unsafe extern "system" fn mouse_hook_proc(ncode: i32, wparam: WPARAM, lparam: LP
                 if try_consume_injection(key, false) {
                     return CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam);
                 }
-                {
-                    let engine = ENGINE_HOOK
-                        .read()
-                        .unwrap()
-                        .as_ref()
-                        .and_then(|w| w.upgrade());
-                    if let Some(engine) = engine {
-                        engine.on_key_press(key);
-                        engine.on_key_release(key);
-                    }
+                if let Some(engine) = engine_from_hook() {
+                    engine.on_key_press(key);
+                    engine.on_key_release(key);
                 }
             }
         }
@@ -694,7 +711,7 @@ unsafe extern "system" fn mouse_hook_proc(ncode: i32, wparam: WPARAM, lparam: LP
 #[cfg(windows)]
 pub fn start_listener(engine: Arc<BurstEngine>) {
     {
-        let mut guard = ENGINE_HOOK.write().unwrap();
+        let mut guard = ENGINE_HOOK.write().unwrap_or_else(|e| e.into_inner());
         if guard.as_ref().and_then(|w| w.upgrade()).is_some() {
             error!("start_listener 重复调用：旧引擎仍存活，忽略以防双重 hook");
             return;
@@ -1063,5 +1080,49 @@ mod tests {
         // 故意不调用 set_global_enabled(true)
         engine.on_key_press(trigger);
         assert!(engine.get_active_ids().is_empty());
+    }
+
+    #[test]
+    fn enabling_after_shutdown_is_rejected() {
+        // 边界（A2）：关停后再 set_global_enabled(true)（等价于关停期热键开启）必须被拒绝，
+        // 不得把 lifecycle 复活成 Running、也不得把 global_enabled 残留为 true（调度器已拆，避免割裂态）。
+        let engine = BurstEngine::new();
+        engine.shutdown();
+        assert_eq!(engine.lifecycle(), EngineLifecycle::Shutdown);
+
+        engine.set_global_enabled(true, false);
+
+        assert!(!engine.global_enabled.load(Ordering::SeqCst));
+        assert_eq!(engine.lifecycle(), EngineLifecycle::Shutdown);
+    }
+
+    #[test]
+    fn set_rules_swaps_snapshot_so_removed_rule_no_longer_triggers() {
+        // 边界（C3）：set_rules 换规则后，旧规则触发键不再启动连发（快照已换）；新规则触发键正常启动。
+        // 配合「先换快照后停活动」的顺序，杜绝已删规则在新 generation 上被旧快照启动、释放却查不到而残留连发。
+        let engine = BurstEngine::new();
+        let old_trigger = KeyId::Keyboard(0x51);
+        let new_trigger = KeyId::Keyboard(0x45);
+        engine.set_rules(vec![rule(
+            "old",
+            BurstMode::Hold,
+            old_trigger,
+            KeyId::Keyboard(0x41),
+        )]);
+        engine.set_global_enabled(true, false);
+
+        // 换成只含 new 规则的集合；global 仍为 on，lifecycle 经 stop_runtime_activity 恢复 Running。
+        engine.set_rules(vec![rule(
+            "new",
+            BurstMode::Hold,
+            new_trigger,
+            KeyId::Keyboard(0x42),
+        )]);
+
+        engine.on_key_press(old_trigger);
+        assert!(engine.get_active_ids().is_empty());
+
+        engine.on_key_press(new_trigger);
+        assert_eq!(engine.get_active_ids(), vec!["new".to_string()]);
     }
 }

@@ -731,7 +731,11 @@ async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
     use tauri_plugin_store::StoreExt;
     use win_input::{init_backend, InputMode};
 
-    // 修复前先切回 SendInput，避免修复进行时 DLL 仍持有 sys 句柄
+    // 修复前先停连发并释放已按下的目标键，再切回 SendInput：避免修复进行时 DLL 仍持有 sys 句柄，
+    // 也避免正连发时切后端导致目标键 down/up 走不同后端而卡住。
+    app.state::<crate::commands::engine::EngineState>()
+        .0
+        .cancel_all_loops();
     init_backend(InputMode::SendInput);
     if let Ok(store) = app.store(crate::STORE_PATH) {
         store.set("input_mode", serde_json::json!("sendinput"));

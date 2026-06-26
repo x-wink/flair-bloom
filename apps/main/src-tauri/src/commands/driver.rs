@@ -81,6 +81,11 @@ pub async fn uninstall_driver(app: AppHandle) -> Result<(), String> {
     {
         use tauri_plugin_store::StoreExt;
         use win_input::{init_backend, InputMode};
+        // 切回 SendInput 前先停连发并释放已按下的目标键：否则此刻正用 Interception/DD 后端连发、
+        // 某目标键处于按下态时，切后端会丢弃旧后端，其释放走 SendInput → 后端错配、键卡住。
+        app.state::<crate::commands::engine::EngineState>()
+            .0
+            .cancel_all_loops();
         init_backend(InputMode::SendInput);
         if let Ok(store) = app.store(crate::STORE_PATH) {
             store.set("input_mode", serde_json::json!("sendinput"));
@@ -160,6 +165,11 @@ pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<UninstallOutcome,
     {
         use tauri_plugin_store::StoreExt;
         use win_input::{init_backend, InputMode};
+        // 切回 SendInput 前先停连发并释放已按下的目标键：否则此刻正用 Interception/DD 后端连发、
+        // 某目标键处于按下态时，切后端会丢弃旧后端，其释放走 SendInput → 后端错配、键卡住。
+        app.state::<crate::commands::engine::EngineState>()
+            .0
+            .cancel_all_loops();
         init_backend(InputMode::SendInput);
         if let Ok(store) = app.store(crate::STORE_PATH) {
             store.set("input_mode", serde_json::json!("sendinput"));

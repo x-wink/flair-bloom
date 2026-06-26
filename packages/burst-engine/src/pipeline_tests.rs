@@ -34,6 +34,9 @@ impl Scheduler for RecordingScheduler {
     fn start_rule(&self, rule: Arc<BurstRule>, generation: u64) {
         self.log(format!("start:{}:g{generation}", rule.id));
     }
+    fn tap_once(&self, rule: Arc<BurstRule>, generation: u64) {
+        self.log(format!("tap:{}:g{generation}", rule.id));
+    }
     fn stop_rule(&self, rule_id: String, generation: u64) {
         self.log(format!("stop:{rule_id}:g{generation}"));
     }
@@ -91,6 +94,25 @@ fn hold_press_release_emits_start_then_stop_same_generation() {
     engine.on_key_release(trigger);
 
     assert_eq!(rec.cmds(), vec!["start:h:g1", "stop:h:g1"]);
+}
+
+#[test]
+fn wheel_hold_emits_single_tap_not_start_then_stop() {
+    // 边界（A1）：滚轮触发的 Hold 规则，每格（press+release 瞬发）只下发一条一次性 tap 命令，
+    // 而非 start+stop——后者会被调度器在首拍前合并掉，导致零注入。
+    use qzh_profile::key_id::MouseButton;
+    let wheel = KeyId::Mouse(MouseButton::WheelUp);
+    let (engine, rec) = setup(vec![rule(
+        "w",
+        BurstMode::Hold,
+        wheel,
+        KeyId::Keyboard(0x45),
+    )]);
+
+    engine.on_key_press(wheel);
+    engine.on_key_release(wheel);
+
+    assert_eq!(rec.cmds(), vec!["tap:w:g1"]);
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use qzh_profile::key_id::KeyId;
+use qzh_profile::key_id::{KeyId, MouseButton};
 use qzh_profile::profile::{BurstRule, MIN_EFFECTIVE_INTERVAL_MS};
 use std::collections::{hash_map::Entry, HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -24,10 +24,19 @@ struct ScheduledRule {
     phase: RulePhase,
     next_at: Instant,
     is_down: bool,
+    /// 一次性点按：完成一个完整 down→up 周期后自动移除，不再排下一拍。
+    /// 供滚轮触发的 Hold 规则使用（滚轮每格只点按一次，没有「松开」来停止连发）。
+    one_shot: bool,
 }
 
 enum SchedulerCommand {
     Start {
+        rule: Arc<BurstRule>,
+        generation: u64,
+    },
+    /// 一次性点按一条规则的目标键（滚轮 Hold）。与 [`SchedulerCommand::Start`] 不同：
+    /// 不按 `rule.id` 去重，每次都用唯一内部 ID 排程，故同一规则的多格滚轮各点按一次。
+    TapOnce {
         rule: Arc<BurstRule>,
         generation: u64,
     },
@@ -180,6 +189,10 @@ impl SchedulerHandle {
         self.send(SchedulerCommand::Start { rule, generation });
     }
 
+    pub fn tap_once(&self, rule: Arc<BurstRule>, generation: u64) {
+        self.send(SchedulerCommand::TapOnce { rule, generation });
+    }
+
     pub fn stop_rule(&self, rule_id: String, generation: u64) {
         self.send(SchedulerCommand::Stop {
             rule_id,
@@ -245,6 +258,7 @@ impl Drop for SchedulerHandle {
 /// 真实 [`SchedulerHandle`] 跑在真线程 + waitable timer 上，无法直接确定性测命令时序。
 pub(crate) trait Scheduler: Send + Sync {
     fn start_rule(&self, rule: Arc<BurstRule>, generation: u64);
+    fn tap_once(&self, rule: Arc<BurstRule>, generation: u64);
     fn stop_rule(&self, rule_id: String, generation: u64);
     fn stop_all_async(&self, generation: u64);
     fn stop_all_blocking(&self, generation: u64) -> bool;
@@ -255,6 +269,9 @@ pub(crate) trait Scheduler: Send + Sync {
 impl Scheduler for SchedulerHandle {
     fn start_rule(&self, rule: Arc<BurstRule>, generation: u64) {
         SchedulerHandle::start_rule(self, rule, generation);
+    }
+    fn tap_once(&self, rule: Arc<BurstRule>, generation: u64) {
+        SchedulerHandle::tap_once(self, rule, generation);
     }
     fn stop_rule(&self, rule_id: String, generation: u64) {
         SchedulerHandle::stop_rule(self, rule_id, generation);
@@ -289,6 +306,7 @@ fn worker_loop(
         stats,
         simulated_keys,
         min_interval_ms: MIN_EFFECTIVE_INTERVAL_MS,
+        tap_seq: 0,
     };
     let mut wait = platform_wait::WaitContext::new(command_waker, hp_degraded);
 
@@ -334,6 +352,8 @@ struct SchedulerWorker {
     /// 的「总」注入速率有上限，多条规则同时连发按规则数等分，避免叠加冲破天花板导致「收不住」。
     /// 只拉长拍间间隔、不影响 `hold` 点按时长。
     min_interval_ms: u32,
+    /// 一次性点按（`TapOnce`）的内部自增序号，用于生成唯一排程 ID，使同一规则的多次点按互不去重。
+    tap_seq: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -354,7 +374,27 @@ impl SchedulerWorker {
                         phase: RulePhase::DownPhase,
                         next_at: Instant::now(),
                         is_down: false,
+                        one_shot: false,
                     });
+                }
+                false
+            }
+            SchedulerCommand::TapOnce { rule, generation } => {
+                if generation == self.current_generation {
+                    // 唯一内部 ID：不与 rule.id 冲突，也使同一规则的多格滚轮各排一条、互不去重。
+                    self.tap_seq = self.tap_seq.wrapping_add(1);
+                    let id: Arc<str> = Arc::from(format!("\u{0}tap#{}", self.tap_seq).as_str());
+                    self.rules.insert(
+                        id,
+                        ScheduledRule {
+                            rule,
+                            generation,
+                            phase: RulePhase::DownPhase,
+                            next_at: Instant::now(),
+                            is_down: false,
+                            one_shot: true,
+                        },
+                    );
                 }
                 false
             }
@@ -404,6 +444,27 @@ impl SchedulerWorker {
         self.rules.clear();
         let events = self.release_all_target_holds();
         self.target_holds.clear();
+        self.dispatch_events(events);
+        // 释放 target_holds 后再按账本兜底对账，补发任何「曾注入 down、但其 up 注入失败」
+        // 而残留按下态的目标键，杜绝卡键（按键工具最差故障）。
+        self.reconcile_simulated_ledger();
+    }
+
+    /// 兜底对账：把账本里仍记为「按下」的目标键补发一次 up。
+    /// 正常路径下 target_holds 释放后账本应已清零；唯一残留来源是之前某次 up 注入返回
+    /// `Failed`（安全桌面 / 前台抢焦等）导致 OS 端按键仍按下却未被递减——在此补发。
+    fn reconcile_simulated_ledger(&self) {
+        let stuck: Vec<KeyId> = {
+            let simulated = self
+                .simulated_keys
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            simulated.keys().copied().collect()
+        };
+        if stuck.is_empty() {
+            return;
+        }
+        let events: Vec<InputEvent> = stuck.into_iter().map(InputEvent::up).collect();
         self.dispatch_events(events);
     }
 
@@ -483,6 +544,10 @@ impl SchedulerWorker {
                     rule.is_down = false;
                     rule.phase = RulePhase::DownPhase;
                     rule.next_at = now + interval;
+                    // 一次性点按（滚轮 Hold）：tap 模式一拍即完成 down+up，随即移除。
+                    if rule.one_shot {
+                        expired.push(id.clone());
+                    }
                 }
                 RulePhase::DownPhase => {
                     if let AcquireOutcome::Acquired =
@@ -503,6 +568,10 @@ impl SchedulerWorker {
                     rule.phase = RulePhase::DownPhase;
                     let rest = interval.saturating_sub(hold).max(Duration::from_millis(1));
                     rule.next_at = now + rest;
+                    // 一次性点按（滚轮 Hold）：完成 down→up 一个周期后移除，不再排下一拍。
+                    if rule.one_shot {
+                        expired.push(id.clone());
+                    }
                 }
             }
         }
@@ -593,6 +662,14 @@ impl SchedulerWorker {
             .unwrap_or_else(|e| e.into_inner());
         for (event, result) in events.iter().zip(results.iter().copied()) {
             if !result.was_sent() {
+                continue;
+            }
+            // 滚轮是瞬发事件（每格 down 即结束、无持续按下态，其 up 走 Noop），不计入「按下中」
+            // 账本，否则只增不减、也会让兜底对账误发滚轮 up。
+            if matches!(
+                event.key,
+                KeyId::Mouse(MouseButton::WheelUp | MouseButton::WheelDown)
+            ) {
                 continue;
             }
             if event.is_up {
@@ -883,6 +960,31 @@ mod tests {
         }
     }
 
+    /// 记录所有派发事件、并把它们都视为成功（Sent）的派发替身。
+    #[derive(Default)]
+    struct RecordingDispatcher {
+        events: Mutex<Vec<InputEvent>>,
+    }
+
+    impl EventDispatcher for RecordingDispatcher {
+        fn dispatch(&self, events: &[InputEvent]) -> Vec<DispatchResult> {
+            self.events
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .extend_from_slice(events);
+            vec![DispatchResult::Sent; events.len()]
+        }
+    }
+
+    impl RecordingDispatcher {
+        fn events(&self) -> Vec<InputEvent> {
+            self.events
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+        }
+    }
+
     fn test_worker() -> (SchedulerWorker, SimulatedKeys) {
         let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
         let worker = SchedulerWorker {
@@ -893,6 +995,7 @@ mod tests {
             stats: None,
             simulated_keys: simulated_keys.clone(),
             min_interval_ms: 1,
+            tap_seq: 0,
         };
         (worker, simulated_keys)
     }
@@ -996,5 +1099,74 @@ mod tests {
         worker.dispatch_events(vec![InputEvent::up(key)]);
 
         assert!(!simulated_keys.lock().unwrap().contains_key(&key));
+    }
+
+    #[test]
+    fn cleanup_all_reconciles_residual_ledger_so_no_key_stuck() {
+        // 边界（B1）：某次 up 注入失败会让账本残留「按下」、而 target_holds 已清空。
+        // cleanup_all 必须按账本补发一次 up，杜绝 OS 端按键永久卡住。
+        let dispatcher = Arc::new(RecordingDispatcher::default());
+        let simulated_keys = Arc::new(Mutex::new(HashMap::new()));
+        let key = KeyId::Keyboard(0x45);
+        simulated_keys.lock().unwrap().insert(key, 1); // 模拟失败 up 后的残留按下态
+        let mut worker = SchedulerWorker {
+            rules: HashMap::new(),
+            target_holds: HashMap::new(),
+            current_generation: 0,
+            dispatcher: dispatcher.clone(),
+            stats: None,
+            simulated_keys: simulated_keys.clone(),
+            min_interval_ms: 1,
+            tap_seq: 0,
+        };
+
+        worker.cleanup_all();
+
+        assert!(dispatcher.events().contains(&InputEvent::up(key)));
+        assert!(simulated_keys.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn wheel_down_is_not_tracked_in_simulated_ledger() {
+        // 边界（B2）：滚轮瞬发、其 up 走 Noop 永不递减，故 down 也不该计入账本，否则只增不减。
+        let (worker, simulated_keys) = test_worker();
+        let wheel = KeyId::Mouse(MouseButton::WheelUp);
+
+        worker.dispatch_events(vec![InputEvent::down(wheel)]);
+
+        assert!(simulated_keys.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn tap_once_fires_one_cycle_then_self_removes() {
+        // 边界（A1）：滚轮 Hold 走一次性点按——注入一个 down→up 周期后规则自动移除，
+        // 不残留、不再排下一拍。
+        let (mut worker, _) = test_worker();
+        let target = KeyId::Keyboard(0x45);
+        worker.handle_command(SchedulerCommand::TapOnce {
+            rule: rule("w", target),
+            generation: 0,
+        });
+        assert_eq!(worker.rules.len(), 1);
+
+        // interval_ms=10 → hold>0：首拍发 down 进 UpPhase，第二拍发 up 后自删。
+        worker.process_due(Instant::now());
+        worker.process_due(Instant::now() + Duration::from_millis(100));
+
+        assert!(worker.rules.is_empty());
+        assert!(worker.target_holds.is_empty());
+    }
+
+    #[test]
+    fn tap_once_with_stale_generation_is_discarded() {
+        // 一次性点按同样受 generation 围栏约束：过期代的 tap 不应排程。
+        let (mut worker, _) = test_worker();
+        worker.current_generation = 2;
+        worker.handle_command(SchedulerCommand::TapOnce {
+            rule: rule("w", KeyId::Keyboard(0x45)),
+            generation: 1,
+        });
+
+        assert!(worker.rules.is_empty());
     }
 }

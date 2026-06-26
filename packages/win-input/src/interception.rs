@@ -86,16 +86,16 @@ impl InterceptionBackend {
             y: 0,
             information: SIM_MARKER as c_uint,
         };
-        // SAFETY: ctx/mouse_device 已验证；stroke 在调用期间在栈上
+        // SAFETY: ctx/mouse_device 已验证；stroke 在调用期间在栈上。
+        // 返回实际写入的 stroke 数：==1 才算成功，失败时上层会回退 SendInput 而非静默丢弃。
         unsafe {
             interception_send(
                 self.ctx,
                 mouse_device,
                 &stroke as *const InterceptionMouseStroke as *const InterceptionStroke,
                 1,
-            );
+            ) == 1
         }
-        true
     }
 
     pub fn send_mouse(&self, button: MouseButton, is_up: bool) -> bool {
@@ -140,16 +140,16 @@ impl InterceptionBackend {
             y: 0,
             information: SIM_MARKER as c_uint,
         };
-        // SAFETY: ctx/mouse_device 已验证；stroke 在调用期间在栈上
+        // SAFETY: ctx/mouse_device 已验证；stroke 在调用期间在栈上。
+        // 返回实际写入的 stroke 数：==1 才算成功，失败时上层会回退 SendInput 而非静默丢弃。
         unsafe {
             interception_send(
                 self.ctx,
                 mouse_device,
                 &stroke as *const InterceptionMouseStroke as *const InterceptionStroke,
                 1,
-            );
+            ) == 1
         }
-        true
     }
 }
 

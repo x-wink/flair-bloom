@@ -23,10 +23,15 @@ impl RuleSnapshot {
                         .entry(rule.trigger_key)
                         .or_default()
                         .push(rule.clone());
-                    hold_release_index
-                        .entry(rule.trigger_key)
-                        .or_default()
-                        .push(rule.clone());
+                    // 滚轮触发键没有「松开」事件（每格瞬发 press+release），其 Hold 规则由引擎
+                    // 当作一次性点按处理、不靠 release 停止；若放进 hold_release 索引，紧随 press
+                    // 的合成 release 会在调度器发出首拍前就把规则停掉（零注入）。故排除滚轮。
+                    if !rule.trigger_key.is_wheel() {
+                        hold_release_index
+                            .entry(rule.trigger_key)
+                            .or_default()
+                            .push(rule.clone());
+                    }
                 }
                 BurstMode::Toggle => {
                     press_index
@@ -87,6 +92,23 @@ mod tests {
         let snapshot = RuleSnapshot::new(vec![rule("r", BurstMode::Toggle, key, key)]);
 
         assert_eq!(snapshot.enabled_press_rules(key).len(), 1);
+    }
+
+    #[test]
+    fn wheel_triggered_hold_is_in_press_index_but_not_hold_release_index() {
+        // 边界（A1）：滚轮触发的 Hold 规则要能被按下命中（press 索引），但不能进 hold_release
+        // 索引——否则滚轮每格紧随 press 的合成 release 会把规则停在首拍之前，导致零注入。
+        use qzh_profile::key_id::MouseButton;
+        let wheel = KeyId::Mouse(MouseButton::WheelUp);
+        let snapshot = RuleSnapshot::new(vec![rule(
+            "w",
+            BurstMode::Hold,
+            wheel,
+            KeyId::Keyboard(0x45),
+        )]);
+
+        assert_eq!(snapshot.enabled_press_rules(wheel).len(), 1);
+        assert!(snapshot.enabled_hold_release_rules(wheel).is_empty());
     }
 
     #[test]

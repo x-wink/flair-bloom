@@ -74,6 +74,7 @@ impl Sim {
             simulated_keys: Arc::new(Mutex::new(HashMap::new())),
             // 纯时序 golden 断言不限速；下限本身的行为单独由 min_interval_floor_* 测试覆盖。
             min_interval_ms: 1,
+            tap_seq: 0,
         };
         let rules = rules
             .into_iter()

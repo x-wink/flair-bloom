@@ -55,30 +55,7 @@ pub fn set_rules(state: State<EngineState>, rules: Vec<BurstRule>) -> Result<(),
     }
 
     #[cfg(windows)]
-    {
-        let mode = win_input::current_mode();
-        if mode.requires_distinct_target_for_toggle() {
-            let label = input_mode_label(mode);
-            for rule in rules.iter().filter(|r| r.enabled) {
-                if !matches!(rule.mode, qzh_profile::profile::BurstMode::Toggle) {
-                    continue;
-                }
-                if rule.target_key == rule.trigger_key {
-                    return Err(format!(
-                        "{} 模式下，切换连发规则「{}」的目标键不可与启动热键相同",
-                        label, rule.id
-                    ));
-                }
-                let stop = rule.stop_key.unwrap_or(rule.trigger_key);
-                if rule.target_key == stop {
-                    return Err(format!(
-                        "{} 模式下，切换连发规则「{}」的目标键不可与停止热键相同",
-                        label, rule.id
-                    ));
-                }
-            }
-        }
-    }
+    check_rules_for_mode(&rules, win_input::current_mode())?;
 
     state.0.set_rules(rules);
     Ok(())
@@ -150,46 +127,18 @@ pub fn set_input_mode(
             ));
         }
 
-        {
-            use qzh_profile::key_id::{KeyId, MouseButton};
-            let label = input_mode_label(input_mode);
-            let forbids_side_button = input_mode.forbids_side_button_target();
-            let distinct_target = input_mode.requires_distinct_target_for_toggle();
-            let rules = state.0.get_rules();
-            for rule in rules.iter().filter(|r| r.enabled) {
-                if forbids_side_button
-                    && matches!(
-                        rule.target_key,
-                        KeyId::Mouse(MouseButton::X1) | KeyId::Mouse(MouseButton::X2)
-                    )
-                {
-                    return Err(format!(
-                        "切换失败：规则「{}」的目标键是鼠标侧键，{} 模式不支持。请把目标键改为左/右/中键或键盘键。",
-                        rule.id, label
-                    ));
-                }
-                if !distinct_target || !matches!(rule.mode, qzh_profile::profile::BurstMode::Toggle)
-                {
-                    continue;
-                }
-                if rule.target_key == rule.trigger_key {
-                    return Err(format!(
-                        "切换失败：切换连发规则「{}」的目标键与启动热键相同。\n{} 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
-                        rule.id, label
-                    ));
-                }
-                let stop = rule.stop_key.unwrap_or(rule.trigger_key);
-                if rule.target_key == stop {
-                    return Err(format!(
-                        "切换失败：切换连发规则「{}」的目标键与停止热键相同。\n{} 模式下，切换连发的目标键不可与启动/停止热键相同。请修改后再切换。",
-                        rule.id, label
-                    ));
-                }
-            }
-        }
+        check_rules_for_mode(&state.0.get_rules(), input_mode)?;
 
-        state.0.cancel_all_loops();
+        // 切后端期间临时关掉全局开关再切换：cancel_all_loops 之后、init_backend 之前若有物理触发
+        // 到来，会用旧后端启动一条规则、其释放却走新后端 → down/up 后端错配、键卡住。关掉全局开关
+        // 使这段窗口内不会启动任何规则，切完按原状态恢复。set_global_enabled(false, true) 会经旧后端
+        // 阻塞释放所有已按下的目标键。
+        let was_enabled = state.0.global_enabled.load(Ordering::SeqCst);
+        state.0.set_global_enabled(false, true);
         init_backend(input_mode);
+        if was_enabled {
+            state.0.set_global_enabled(true, false);
+        }
 
         if let Ok(store) = app.store(crate::STORE_PATH) {
             store.set("input_mode", serde_json::json!(input_mode.as_str()));
@@ -213,4 +162,47 @@ fn input_mode_label(mode: win_input::InputMode) -> &'static str {
         win_input::InputMode::DdSimple => "DD驱动",
         win_input::InputMode::DdHid => "DDHID",
     }
+}
+
+/// 校验规则集是否满足目标输入模式的约束：DD 系列要求 Toggle 目标键区别于启动/停止键；
+/// DD-HID 还禁止鼠标侧键（X1/X2）作目标。`set_rules`（编辑规则保存）与 `set_input_mode`
+/// （切换模式）共用同一校验，杜绝两入口约束不对称（曾经 set_rules 漏查侧键，可越过 DD-HID 限制）。
+#[cfg(windows)]
+fn check_rules_for_mode(rules: &[BurstRule], mode: win_input::InputMode) -> Result<(), String> {
+    use qzh_profile::key_id::{KeyId, MouseButton};
+    use qzh_profile::profile::BurstMode;
+
+    let label = input_mode_label(mode);
+    let forbids_side_button = mode.forbids_side_button_target();
+    let distinct_target = mode.requires_distinct_target_for_toggle();
+    for rule in rules.iter().filter(|r| r.enabled) {
+        if forbids_side_button
+            && matches!(
+                rule.target_key,
+                KeyId::Mouse(MouseButton::X1) | KeyId::Mouse(MouseButton::X2)
+            )
+        {
+            return Err(format!(
+                "规则「{}」的目标键是鼠标侧键，{} 模式不支持。请把目标键改为左/右/中键或键盘键。",
+                rule.id, label
+            ));
+        }
+        if !distinct_target || !matches!(rule.mode, BurstMode::Toggle) {
+            continue;
+        }
+        if rule.target_key == rule.trigger_key {
+            return Err(format!(
+                "{} 模式下，切换连发规则「{}」的目标键不可与启动热键相同。请修改后再使用。",
+                label, rule.id
+            ));
+        }
+        let stop = rule.stop_key.unwrap_or(rule.trigger_key);
+        if rule.target_key == stop {
+            return Err(format!(
+                "{} 模式下，切换连发规则「{}」的目标键不可与停止热键相同。请修改后再使用。",
+                label, rule.id
+            ));
+        }
+    }
+    Ok(())
 }

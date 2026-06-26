@@ -48,6 +48,14 @@ impl KeyId {
     pub fn is_mouse(&self) -> bool {
         matches!(self, Self::Mouse(_))
     }
+
+    /// 是否是鼠标滚轮（瞬发事件，无法「按住」，故 Hold 规则对其只能每格点按一次）。
+    pub fn is_wheel(&self) -> bool {
+        matches!(
+            self,
+            Self::Mouse(MouseButton::WheelUp | MouseButton::WheelDown)
+        )
+    }
 }
 
 #[cfg(test)]
