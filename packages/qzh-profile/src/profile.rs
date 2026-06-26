@@ -20,7 +20,7 @@ pub const CURRENT_SCHEMA_VERSION: u32 = 4;
 /// 单个 [`Profile`] 允许的最大规则数量，超出会在 [`Profile::validate`] 阶段被拒绝。
 pub const MAX_RULES: usize = 64;
 /// 数据结构上的绝对下限。`validate` 据此判定结构合法性，不收紧到 [`MIN_EFFECTIVE_INTERVAL_MS`]，
-/// 旧配置 <16ms 在加载时由 [`Profile::clamp_intervals`] 钳位而非拒绝。
+/// 旧配置 <10ms 在加载时由 [`Profile::clamp_intervals`] 钳位而非拒绝。
 pub const MIN_INTERVAL_MS: u32 = 1;
 /// 注入周期「基础」下限（ms）：全局 LL 钩子链 + RIT 对每个注入事件有固定「过路税」，管线
 /// 可持续的「总」注入速率有上限。单条规则用此基础下限（10ms ≈ 100 taps/s 仍可稳定收住）；
@@ -76,10 +76,10 @@ pub struct BurstRule {
     pub target_key: KeyId,
     /// 触发模式：[`BurstMode::Hold`] 或 [`BurstMode::Toggle`]。
     pub mode: BurstMode,
-    /// Toggle mode only: separate stop hotkey. Defaults to trigger_key when None.
+    /// 仅 Toggle 模式：独立停止热键。为 `None` 时回退为 `trigger_key`。
     #[serde(default)]
     pub stop_key: Option<KeyId>,
-    /// Milliseconds between simulated keypresses. Clamped to [`MIN_INTERVAL_MS`, `MAX_INTERVAL_MS`].
+    /// 每次模拟按键之间的间隔毫秒数。钳进 \[[`MIN_INTERVAL_MS`], [`MAX_INTERVAL_MS`]\]。
     pub interval_ms: u32,
     /// Toggle 规则互斥分组名。同组内激活一条规则时，其他活跃的同组 Toggle 规则自动停止。
     /// Hold 规则忽略此字段。`None` 表示不属于任何分组。
@@ -91,9 +91,9 @@ pub struct BurstRule {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BurstMode {
-    /// Fire while key is held.
+    /// 按住触发键期间持续连发。
     Hold,
-    /// Toggle on/off with hotkey.
+    /// 按一下热键开启、再按一下关闭。
     Toggle,
 }
 

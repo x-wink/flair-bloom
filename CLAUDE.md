@@ -71,7 +71,7 @@ packages/qzh-format/src/
   header.rs                     # FileHeader（Magic/Version/Flags/Nonce）
   lib.rs                        # read_encrypted / write_encrypted 高层 helper
 packages/qzh-profile/src/
-  key_id.rs                     # KeyId（Keyboard(VK) | Mouse(MouseButton)）+ MouseButton 5 键
+  key_id.rs                     # KeyId（Keyboard(VK) | Mouse(MouseButton)）+ MouseButton 7 键（左/右/中/X1/X2 + 滚轮上下）
   profile.rs                    # Profile / BurstRule 数据结构 + validate()
   macro_seq.rs                  # MacroSequence / MacroStep + MAX_STEPS=256（亲友功能）
   schema_migrate.rs             # migrate_profile()，调用 packages/migrate
@@ -82,7 +82,7 @@ packages/win-sysinfo/src/
   prereq.rs                     # detect_hvci / detect_sac / detect_pending_reboot / Defender 排除路径
 packages/win-input/src/
   lib.rs                        # InputMode / init_backend / dispatch / SIM_MARKER / PENDING_INJECTIONS
-  ddhid.rs / dd_common.rs       # DD-HID 后端
+  ddhid.rs / ddsimple.rs / dd_common.rs   # DD-HID 与 DDSimple 后端（共用 dd_common FFI 装载层）
   interception.rs               # Interception 后端 + is_driver_installed()
 packages/burst-engine/src/
   lib.rs                        # BurstEngine + start_listener（LL keyboard/mouse hook + 消息循环）
@@ -103,17 +103,20 @@ packages/win-driver/src/
 
 文件读写高层入口：`qzh_format::read_encrypted(path)` / `qzh_format::write_encrypted(path, &T)` 封装了 header+aad+decrypt+parse / serialize+encrypt+atomic-rename 五连段；`qzh_profile::load_from_path(path)` / `qzh_profile::save_to_path(path, &profile)` 在此基础上再叠加 schema 迁移与业务校验。
 
-**按键标识 [`KeyId`]**：tagged union，前后端共享 wire format `{kind:"keyboard",code:81}` / `{kind:"mouse",code:"left"}`。`MouseButton` 含 `Left/Right/Middle/X1/X2`。所有连发规则字段（`trigger_key`/`target_key`/`stop_key`）与全局热键字段（`global_toggle`/`global_stop`/`panel_toggle`）都用 `KeyId`，`PENDING_INJECTIONS` 注入事件队列也以 `(KeyId, is_up)` 为键。定义在 `packages/qzh-profile/src/key_id.rs`。
+**按键标识 [`KeyId`]**：tagged union，前后端共享 wire format `{kind:"keyboard",code:81}` / `{kind:"mouse",code:"left"}`。`MouseButton` 含 `Left/Right/Middle/X1/X2` + `WheelUp/WheelDown`（滚轮，瞬发）。所有连发规则字段（`trigger_key`/`target_key`/`stop_key`）与全局热键字段（`global_toggle`/`global_stop`/`panel_toggle`）都用 `KeyId`，`PENDING_INJECTIONS` 注入事件队列也以 `(KeyId, is_up)` 为键。定义在 `packages/qzh-profile/src/key_id.rs`。
 
 **AES 主密钥**：当前为编译期常量占位符（`packages/crypto/src/aes.rs` 顶部 `MASTER_KEY`），发布前需替换为 build script 注入的真实密钥。
 
 **许可证**：Ed25519 离线校验。私钥仅在 `apps/keygen` 使用，不进主应用二进制。兑换码 `QZHUA-XXXXX-XXXXX-XXXXX-XXXXX`（Base32：64 字节签名 + JSON payload）。payload 含 `issue_time`（防时钟回拨）+ `expiry` + `features u32`（位掩码，见 `license.rs::feature_bits`）。公钥当前为全零占位，发布前替换。
 
-**连发引擎**（`packages/burst-engine`）：`windows_sys` `WH_KEYBOARD_LL` + `WH_MOUSE_LL` 双低级钩子共用同一消息循环线程，监听键盘与鼠标 5 键（左 / 右 / 中 / X1 / X2，含 `WM_XBUTTONDOWN/UP` 高 16 位识别 X1/X2）。按键/按钮注入分三档通道，按用户在设置中选择的优先级生效：
+**连发引擎**（`packages/burst-engine`）：`windows_sys` `WH_KEYBOARD_LL` + `WH_MOUSE_LL` 双低级钩子共用同一消息循环线程，监听键盘与鼠标 5 键（左 / 右 / 中 / X1 / X2，含 `WM_XBUTTONDOWN/UP` 高 16 位识别 X1/X2）及滚轮（`WM_MOUSEWHEEL`，每格瞬发 press+release）。按键/按钮注入分四档通道，按用户在设置中选择的优先级生效：
 
 - **SendInput 默认**（`win-input/src/lib.rs`）：键盘 `SendInput INPUT_KEYBOARD` + `KEYEVENTF_SCANCODE`；鼠标 `INPUT_MOUSE` + `MOUSEEVENTF_*` 标志（X1/X2 用 `MOUSEEVENTF_XDOWN/UP` + `mouseData=XBUTTON1/2`）。`dwExtraInfo = SIM_MARKER` 标记自身注入事件防循环。
-- **DD 驱动**（`win-input/src/dd_common.rs` + `win-input/src/ddhid.rs`）：动态加载 DD 驱动 DLL，键盘 `DD_key`，鼠标 `DD_btn`（值域 1=L↓/2=L↑/4=R↓/8=R↑/16=M↓/32=M↑，**X1/X2 不在值域**，回退 SendInput）。
-- **Interception 驱动**（`win-input/src/interception.rs`）：键盘 + 鼠标设备各扫描一次，鼠标 `InterceptionMouseStroke` 状态位映射 `INTERCEPTION_MOUSE_BUTTON_4/5_DOWN/UP`（X1/X2 走 BUTTON_4/5）。
+- **Interception 驱动**（`win-input/src/interception.rs`，游戏模式，当前主推）：键盘 + 鼠标设备各扫描一次，鼠标 `InterceptionMouseStroke` 状态位映射 `INTERCEPTION_MOUSE_BUTTON_4/5_DOWN/UP`（X1/X2 走 BUTTON_4/5）。`interception_send` 返回写入 stroke 数，鼠标/滚轮失败回退 SendInput。
+- **DDSimple 驱动**（`win-input/src/ddsimple.rs` + `dd_common.rs`，dd63330）：键盘 `DD_key`，鼠标走 `MOUSE_INPUT_DATA.ButtonFlags`，**原生支持 X1/X2 侧键**。
+- **DD-HID 驱动**（`win-input/src/ddhid.rs` + `dd_common.rs`，ddhid.63340）：键盘 `DD_key`，鼠标 `DD_btn`（值域 1=L↓/2=L↑/4=R↓/8=R↑/16=M↓/32=M↑，**X1/X2 不在值域**，走状态位补丁，否则回退 SendInput）。
+
+DD 系列（DDSimple / DD-HID）驱动注入把 `ExtraInformation` 写死为 0，`SIM_MARKER` 无法幸存，自注入回灌改由 `PENDING_INJECTIONS` 时间窗口队列过滤。
 
 `win_input::dispatch(KeyId, is_up)` 是统一入口，`(mode, KeyId)` 模式匹配分发到对应 backend，X1/X2 在 DD 模式 / 鼠标设备缺失时按 once 旗标 warn 一次后自动回退 SendInput。`burst-engine` 负责线程编排：用 `catch_unwind` 包裹引擎线程，并发连发用 `AtomicBool cancel + thread::park_timeout`，`Drop` 时先 signal 再 join 确保按键不卡住。非 Windows 平台提供空实现（`cfg(windows)` 隔离）。
 
@@ -136,7 +139,7 @@ packages/win-driver/src/
 
 ## 功能分层
 
-核心功能：按压连发、Toggle 连发（键盘 + 鼠标 5 键统一支持）、配置文件管理、桌宠基础动画、自动更新。  
+核心功能：按压连发、Toggle 连发（键盘 + 鼠标 5 键 + 滚轮统一支持）、配置文件管理、桌宠基础动画、自动更新。  
 亲友专属功能（兑换码激活，`feature_bits` 控制）：宏录制回放、随机抖动、条件配置集、桌宠扩展动画包。`MOUSE_BURST` 位预留但当前不限制——v0.2 鼠标连发对所有用户开放。
 
 ## 发版流程
