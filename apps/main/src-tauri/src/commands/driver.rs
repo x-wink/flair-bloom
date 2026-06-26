@@ -79,18 +79,13 @@ pub async fn install_driver(app: AppHandle) -> Result<(), String> {
 pub async fn uninstall_driver(app: AppHandle) -> Result<(), String> {
     #[cfg(windows)]
     {
-        use tauri_plugin_store::StoreExt;
-        use win_input::{init_backend, InputMode};
-        // 切回 SendInput 前先停连发并释放已按下的目标键：否则此刻正用 Interception/DD 后端连发、
-        // 某目标键处于按下态时，切后端会丢弃旧后端，其释放走 SendInput → 后端错配、键卡住。
-        app.state::<crate::commands::engine::EngineState>()
-            .0
-            .cancel_all_loops();
-        init_backend(InputMode::SendInput);
-        if let Ok(store) = app.store(crate::STORE_PATH) {
-            store.set("input_mode", serde_json::json!("sendinput"));
-            let _ = store.save();
-        }
+        // 切回 SendInput 前先停连发、经旧后端阻塞释放已按下的目标键，且切换窗口内不启动新规则，
+        // 避免目标键 down/up 跨新旧后端错配卡住（统一走 switch_input_backend）。
+        crate::commands::engine::switch_input_backend(
+            &app,
+            &app.state::<crate::commands::engine::EngineState>().0,
+            win_input::InputMode::SendInput,
+        );
         let res_dir = resource_dir(&app)?;
         let result = win_driver::interception::uninstall(&res_dir).await;
         if let Err(ref e) = result {
@@ -163,18 +158,13 @@ pub async fn install_dd_hid_driver(app: AppHandle) -> Result<DdHidInstallOutcome
 pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<UninstallOutcome, String> {
     #[cfg(windows)]
     {
-        use tauri_plugin_store::StoreExt;
-        use win_input::{init_backend, InputMode};
-        // 切回 SendInput 前先停连发并释放已按下的目标键：否则此刻正用 Interception/DD 后端连发、
-        // 某目标键处于按下态时，切后端会丢弃旧后端，其释放走 SendInput → 后端错配、键卡住。
-        app.state::<crate::commands::engine::EngineState>()
-            .0
-            .cancel_all_loops();
-        init_backend(InputMode::SendInput);
-        if let Ok(store) = app.store(crate::STORE_PATH) {
-            store.set("input_mode", serde_json::json!("sendinput"));
-            let _ = store.save();
-        }
+        // 切回 SendInput 前先停连发、经旧后端阻塞释放已按下的目标键，且切换窗口内不启动新规则，
+        // 避免目标键 down/up 跨新旧后端错配卡住（统一走 switch_input_backend）。
+        crate::commands::engine::switch_input_backend(
+            &app,
+            &app.state::<crate::commands::engine::EngineState>().0,
+            win_input::InputMode::SendInput,
+        );
         let res_dir = resource_dir(&app)?;
         let (pending_reboot, exe_result) = win_driver::dd_hid::uninstall(&res_dir).await?;
         crate::commands::status::emit_status_changed(&app);

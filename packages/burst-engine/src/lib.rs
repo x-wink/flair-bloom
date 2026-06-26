@@ -116,8 +116,8 @@ struct ActiveRule {
 #[derive(Debug)]
 struct RuntimeState {
     lifecycle: EngineLifecycle,
-    /// 当前活跃规则。Toggle 是否「已开启」直接由此派生（含且 `mode == Toggle`），
-    /// 不再单独维护 `toggle_states`——双表同步是历史「toggle 双状态竞态」的根源。
+    /// 当前活跃规则。Toggle 是否「已开启」直接由此派生（存在且 `mode == Toggle`），
+    /// 以单一事实来源避免双表同步竞态。
     active_rules: HashMap<String, ActiveRule>,
     stop_generation: u64,
 }
@@ -134,6 +134,11 @@ pub struct BurstEngine {
     /// `0` 表示未设置。物理输入热路径据此免锁判定停止键，保证紧急停止 100% 触发
     /// 又不在每次按键时加 `hotkeys` 锁。由 [`set_hotkeys`] 维护。
     dedicated_stop: AtomicU64,
+    /// 后端切换进行中标志。置位期间物理触发不启动任何规则，使「停旧后端连发 → init_backend
+    /// 换后端」窗口内不会出现目标键 down 走旧后端、up 走新后端的错配卡键。不动 `global_enabled`，
+    /// 故用户在切换窗口内按下的全局停止热键得以保留。由 [`BurstEngine::begin_backend_switch`] /
+    /// [`BurstEngine::end_backend_switch`] 维护。
+    switching_backend: AtomicBool,
     /// 全局开关状态被热键改变时调用（由 app 层注册，用于同步托盘与前端）。
     on_global_changed: GlobalChangedCb,
     /// 面板显隐热键触发时调用。
@@ -176,6 +181,7 @@ impl BurstEngine {
             scheduler,
             hotkeys: Arc::new(Mutex::new(Hotkeys::default())),
             dedicated_stop: AtomicU64::new(0),
+            switching_backend: AtomicBool::new(false),
             on_global_changed: Arc::new(Mutex::new(None)),
             on_panel_toggle: Arc::new(Mutex::new(None)),
         }
@@ -200,6 +206,20 @@ impl BurstEngine {
     /// 兼容旧调用名：停止所有活动规则，并等待 scheduler 完成目标键释放。
     pub fn cancel_all_loops(&self) {
         self.stop_runtime_activity(true);
+    }
+
+    /// 进入后端切换：置「切换中」标志并停连发、经当前（旧）后端阻塞释放所有已按下的目标键。
+    /// 标志置位后物理触发不再启动规则，故切换窗口内不会产生 down/up 跨后端错配。必须与
+    /// [`BurstEngine::end_backend_switch`] 成对调用（中间执行 `init_backend`）。
+    pub fn begin_backend_switch(&self) {
+        self.switching_backend.store(true, Ordering::SeqCst);
+        self.stop_runtime_activity(true);
+    }
+
+    /// 结束后端切换：清除「切换中」标志，恢复物理触发→规则启动。全局开关状态未被本过程改动，
+    /// 故按其真实值（含切换期间用户按下的停止）自然恢复。
+    pub fn end_backend_switch(&self) {
+        self.switching_backend.store(false, Ordering::SeqCst);
     }
 
     /// 注册全局开关热键触发时的回调（供 app 层同步托盘与前端事件）。
@@ -279,7 +299,11 @@ impl BurstEngine {
             };
         }
 
-        if !self.global_enabled.load(Ordering::SeqCst) {
+        // 后端切换中或全局未启用：放行物理事件但不启动任何规则。切换中拦截规则启动，避免目标键
+        // down/up 跨新旧后端错配卡键；停止键与热键已在上方先行处理，不受此拦截影响。
+        if self.switching_backend.load(Ordering::SeqCst)
+            || !self.global_enabled.load(Ordering::SeqCst)
+        {
             return KeyProcessResult {
                 accepted_physical: true,
                 handled: false,
@@ -332,8 +356,15 @@ impl BurstEngine {
             self.global_enabled.store(true, Ordering::SeqCst);
             runtime.lifecycle = EngineLifecycle::Running;
         } else {
-            self.global_enabled.store(false, Ordering::SeqCst);
-            self.pause_runtime(wait);
+            // 与 enable 分支对称：在 runtime 锁内落定 global_enabled=false，使开关状态与后续的
+            // lifecycle 判定串行化（lifecycle 最终由 stop_runtime_activity 末尾按 global_enabled
+            // 收敛为 Paused）。阻塞式停止刻意放在锁外执行——低级钩子线程会读 global_enabled，
+            // 绝不能在持锁期间跨线程阻塞导致系统输入卡顿。
+            {
+                let _runtime = revive(self.runtime.lock());
+                self.global_enabled.store(false, Ordering::SeqCst);
+            }
+            self.stop_runtime_activity(wait);
         }
     }
 
@@ -521,11 +552,6 @@ impl BurstEngine {
         };
         self.scheduler.stop_rule(rule_id.to_string(), generation);
         true
-    }
-
-    fn pause_runtime(&self, wait: bool) {
-        self.global_enabled.store(false, Ordering::SeqCst);
-        self.stop_runtime_activity(wait);
     }
 
     /// 复位 hook 维护的物理按键账本。仅在停止 / 暂停 / 切模式 / 退出等低频复位点调用，
@@ -1124,5 +1150,53 @@ mod tests {
 
         engine.on_key_press(new_trigger);
         assert_eq!(engine.get_active_ids(), vec!["new".to_string()]);
+    }
+
+    #[test]
+    fn backend_switch_blocks_rule_start_until_finished() {
+        // 边界（#1/#2）：后端切换窗口内物理触发不得启动规则（否则目标键 down 走旧后端、up 走新
+        // 后端会卡键）；切换结束后恢复正常启动。
+        let engine = BurstEngine::new();
+        let trigger = KeyId::Keyboard(0x51);
+        engine.set_rules(vec![rule(
+            "h",
+            BurstMode::Hold,
+            trigger,
+            KeyId::Keyboard(0x41),
+        )]);
+        engine.set_global_enabled(true, false);
+
+        engine.begin_backend_switch();
+        engine.on_key_press(trigger);
+        assert!(engine.get_active_ids().is_empty());
+        engine.on_key_release(trigger);
+        engine.end_backend_switch();
+
+        engine.on_key_press(trigger);
+        assert_eq!(engine.get_active_ids(), vec!["h".to_string()]);
+    }
+
+    #[test]
+    fn global_stop_during_backend_switch_is_preserved() {
+        // 边界（#2）：切换窗口内用户按下全局停止后，切换流程不得把开关重新打开——切换全程不触碰
+        // global_enabled，故停止得以保留。
+        let engine = BurstEngine::new();
+        let trigger = KeyId::Keyboard(0x51);
+        engine.set_rules(vec![rule(
+            "h",
+            BurstMode::Hold,
+            trigger,
+            KeyId::Keyboard(0x41),
+        )]);
+        engine.set_global_enabled(true, false);
+
+        engine.begin_backend_switch();
+        // 模拟切换期间用户的停止（热键路径最终也调用 set_global_enabled(false)）。
+        engine.set_global_enabled(false, false);
+        engine.end_backend_switch();
+
+        assert!(!engine.global_enabled.load(Ordering::SeqCst));
+        engine.on_key_press(trigger);
+        assert!(engine.get_active_ids().is_empty());
     }
 }

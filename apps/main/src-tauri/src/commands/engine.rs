@@ -114,8 +114,7 @@ pub fn set_input_mode(
 ) -> Result<(), String> {
     #[cfg(windows)]
     {
-        use tauri_plugin_store::StoreExt;
-        use win_input::{init_backend, InputMode};
+        use win_input::InputMode;
 
         let input_mode =
             InputMode::from_str(&mode).ok_or_else(|| format!("未知输入模式: {mode}"))?;
@@ -129,21 +128,8 @@ pub fn set_input_mode(
 
         check_rules_for_mode(&state.0.get_rules(), input_mode)?;
 
-        // 切后端期间临时关掉全局开关再切换：cancel_all_loops 之后、init_backend 之前若有物理触发
-        // 到来，会用旧后端启动一条规则、其释放却走新后端 → down/up 后端错配、键卡住。关掉全局开关
-        // 使这段窗口内不会启动任何规则，切完按原状态恢复。set_global_enabled(false, true) 会经旧后端
-        // 阻塞释放所有已按下的目标键。
-        let was_enabled = state.0.global_enabled.load(Ordering::SeqCst);
-        state.0.set_global_enabled(false, true);
-        init_backend(input_mode);
-        if was_enabled {
-            state.0.set_global_enabled(true, false);
-        }
+        switch_input_backend(&app, &state.0, input_mode);
 
-        if let Ok(store) = app.store(crate::STORE_PATH) {
-            store.set("input_mode", serde_json::json!(input_mode.as_str()));
-            let _ = store.save();
-        }
         crate::commands::status::emit_status_changed(&app);
         Ok(())
     }
@@ -151,6 +137,26 @@ pub fn set_input_mode(
     {
         let _ = (app, state, mode);
         Err("仅 Windows 平台支持切换输入模式".to_string())
+    }
+}
+
+/// 安全切换输入后端并持久化所选模式。切换期间通过 [`BurstEngine::begin_backend_switch`] 置
+/// 「切换中」标志、停连发并经旧后端阻塞释放所有已按下的目标键，使窗口内到来的物理触发不会启动
+/// 规则——杜绝目标键 down 走旧后端、up 走新后端的错配卡键。不改全局开关，用户在切换期间按下的
+/// 停止热键得以保留。`set_input_mode` 与驱动卸载 / 修复共用此入口，避免各处切后端逻辑漂移。
+#[cfg(windows)]
+pub(crate) fn switch_input_backend(
+    app: &AppHandle,
+    engine: &BurstEngine,
+    mode: win_input::InputMode,
+) {
+    use tauri_plugin_store::StoreExt;
+    engine.begin_backend_switch();
+    win_input::init_backend(mode);
+    engine.end_backend_switch();
+    if let Ok(store) = app.store(crate::STORE_PATH) {
+        store.set("input_mode", serde_json::json!(mode.as_str()));
+        let _ = store.save();
     }
 }
 
@@ -166,7 +172,7 @@ fn input_mode_label(mode: win_input::InputMode) -> &'static str {
 
 /// 校验规则集是否满足目标输入模式的约束：DD 系列要求 Toggle 目标键区别于启动/停止键；
 /// DD-HID 还禁止鼠标侧键（X1/X2）作目标。`set_rules`（编辑规则保存）与 `set_input_mode`
-/// （切换模式）共用同一校验，杜绝两入口约束不对称（曾经 set_rules 漏查侧键，可越过 DD-HID 限制）。
+/// （切换模式）共用同一校验，保证两入口约束一致。
 #[cfg(windows)]
 fn check_rules_for_mode(rules: &[BurstRule], mode: win_input::InputMode) -> Result<(), String> {
     use qzh_profile::key_id::{KeyId, MouseButton};
