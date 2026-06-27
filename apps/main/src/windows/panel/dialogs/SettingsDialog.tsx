@@ -376,13 +376,13 @@ export default function SettingsDialog(props: Props) {
                     {sound.enabled ? '切换全局开关时朗读语句' : '已关闭'}
                   </span>
                 </div>
-                <Button
-                  size="sm"
-                  tone={sound.enabled ? 'primary' : 'neutral'}
-                  onClick={() => props.onSoundChange({ enabled: !sound.enabled })}
-                >
-                  {sound.enabled ? '已启用' : '已禁用'}
-                </Button>
+                <input
+                  type="checkbox"
+                  className="enable-checkbox"
+                  checked={sound.enabled}
+                  onChange={(e) => props.onSoundChange({ enabled: e.target.checked })}
+                  aria-label="声音反馈"
+                />
               </div>
             </SettingsSection>
 
