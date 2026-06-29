@@ -36,10 +36,10 @@
 }
 
 .key-capture.key-capture-error {
-  border-color: var(--fb-error, #e05050);
-  color: var(--fb-error, #e05050);
+  border-color: var(--fb-color-danger);
+  color: var(--fb-color-danger);
 }
 .key-capture.key-capture-warn {
-  border-color: var(--fb-warning, #d97706);
-  color: var(--fb-warning, #d97706);
+  border-color: var(--fb-color-warning);
+  color: var(--fb-color-warning);
 }

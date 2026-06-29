@@ -115,7 +115,12 @@ export default function ContextMenu({
       mask={false}
       closeOnBackdrop={false}
     >
-      <div className="ctx-menu" ref={listRef} role="menu" data-ctx-chain={cid}>
+      <div
+        className={isRoot ? 'ctx-menu' : 'ctx-menu ctx-menu--sub'}
+        ref={listRef}
+        role="menu"
+        data-ctx-chain={cid}
+      >
         {items.map((item, i) => {
           if (isDivider(item)) {
             return <div key={`d-${i}`} className="ctx-menu-divider" role="separator" />;

@@ -26,7 +26,7 @@
   background: none;
   border: none;
   font-size: var(--fb-fs-xs);
-  color: var(--fb-primary);
+  color: var(--fb-color-primary);
   cursor: pointer;
   padding: 0 var(--fb-space-1);
   opacity: 0.85;
@@ -75,20 +75,20 @@
   border-bottom: none;
 }
 .found-item:hover {
-  background: var(--fb-bg-hover);
+  background: var(--fb-color-primary-soft);
 }
 .found-item.selected {
-  background: color-mix(in srgb, var(--fb-primary) 12%, transparent);
+  background: rgba(var(--fb-color-primary-rgb), 0.12);
 }
 
 .found-app {
   font-size: var(--fb-fs-xs);
-  color: var(--fb-primary);
+  color: var(--fb-color-primary);
   font-weight: var(--fb-fw-semibold);
 }
 .found-name {
   font-size: var(--fb-fs-sm);
-  color: var(--fb-text);
+  color: var(--fb-text-strong);
   font-weight: var(--fb-fw-medium);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -96,7 +96,7 @@
 }
 .found-path {
   font-size: 10px;
-  color: var(--fb-text-muted);
+  color: var(--fb-text-weak);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -112,20 +112,20 @@
   flex: 1;
   font-size: var(--fb-fs-sm);
   padding: var(--fb-space-2) var(--fb-space-3);
-  background: var(--fb-input-bg);
+  background: var(--fb-surface-soft);
   border: 1px solid var(--fb-border);
   border-radius: var(--fb-radius-sm);
-  color: var(--fb-text);
+  color: var(--fb-text-strong);
   outline: none;
   min-width: 0;
 }
 .custom-dir-input:focus {
-  border-color: var(--fb-primary);
+  border-color: var(--fb-color-primary);
 }
 
 /* 预览区 */
 .import-preview-section {
-  background: var(--fb-bg-subtle, color-mix(in srgb, var(--fb-surface) 60%, transparent));
+  background: var(--fb-surface-soft);
   border: 1px solid var(--fb-border);
   border-radius: var(--fb-radius-md);
   padding: var(--fb-space-4);
@@ -133,7 +133,7 @@
 
 .import-preview-error {
   font-size: var(--fb-fs-sm);
-  color: var(--fb-error, #e05050);
+  color: var(--fb-color-danger);
   margin: 0;
 }
 
@@ -151,11 +151,11 @@
 }
 .preview-value {
   font-size: var(--fb-fs-sm);
-  color: var(--fb-text);
+  color: var(--fb-text-strong);
 }
 .preview-warn {
   font-size: var(--fb-fs-xs);
-  color: var(--fb-warning, #d97706);
+  color: var(--fb-color-warning);
   margin-left: var(--fb-space-2);
 }
 
@@ -175,21 +175,21 @@
   flex: 1;
   font-size: var(--fb-fs-sm);
   padding: var(--fb-space-2) var(--fb-space-3);
-  background: var(--fb-input-bg);
+  background: var(--fb-surface-soft);
   border: 1px solid var(--fb-border);
   border-radius: var(--fb-radius-sm);
-  color: var(--fb-text);
+  color: var(--fb-text-strong);
   outline: none;
   min-width: 0;
 }
 .profile-name-input:focus {
-  border-color: var(--fb-primary);
+  border-color: var(--fb-color-primary);
 }
 
 /* 导入错误 */
 .import-error {
   font-size: var(--fb-fs-sm);
-  color: var(--fb-error, #e05050);
+  color: var(--fb-color-danger);
   margin: 0 0 var(--fb-space-4);
 }
 

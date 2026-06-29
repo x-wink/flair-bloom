@@ -13,6 +13,13 @@
   transform-origin: top center;
 }
 
+/* 子菜单可能较长（如主题颜色含全部门派色），限高并滚动，避免溢出窗口被截断。
+   仅作用于子菜单：根菜单需保持 overflow 可见以便子菜单向侧弹出。 */
+.ctx-menu--sub {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
 @keyframes ctx-menu-pop {
   from {
     opacity: 0;

@@ -87,8 +87,8 @@
 }
 
 .profile-card-flag--on {
-  background: var(--fb-color-success-soft);
-  color: var(--fb-color-success-active);
+  background: var(--fb-color-primary-soft);
+  color: var(--fb-color-primary);
 }
 
 .profile-card-flag--off {

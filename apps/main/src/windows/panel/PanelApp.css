@@ -14,6 +14,15 @@ textarea {
   user-select: text;
 }
 
+/* 表单控件与按钮默认不继承 color（UA 给黑色），统一继承为前景色，
+   暗色模式才能整体翻白；组件需要时自行覆盖（如实色按钮用 on-primary）。 */
+input,
+select,
+textarea,
+button {
+  color: inherit;
+}
+
 html,
 body {
   width: 100vw;
@@ -77,10 +86,6 @@ body {
   z-index: 0;
 }
 
-.panel.on::after {
-  color: var(--fb-app-watermark-active);
-}
-
 .panel > * {
   position: relative;
   z-index: 1;
@@ -119,7 +124,7 @@ body {
 }
 
 .panel.on .panel-header {
-  color: var(--fb-text-on-accent);
+  color: var(--fb-app-header-text);
 }
 
 .header-icon {
@@ -157,10 +162,6 @@ body {
 .win-btn.close:hover {
   background: var(--fb-color-danger-strong);
   color: var(--fb-text-on-accent);
-}
-
-.panel.on .win-btn:hover {
-  background: rgba(255, 255, 255, 0.25);
 }
 
 .rules-section {
@@ -301,13 +302,13 @@ body {
 
 .rule-row:not(.disabled) {
   box-shadow:
-    inset 3px 0 0 var(--fb-color-success),
+    inset 3px 0 0 var(--fb-color-primary),
     0 1px 2px rgba(0, 0, 0, 0.03);
 }
 
 .rule-row:not(.disabled):hover {
   box-shadow:
-    inset 3px 0 0 var(--fb-color-success),
+    inset 3px 0 0 var(--fb-color-primary),
     0 2px 8px rgba(var(--fb-color-primary-rgb), 0.1);
 }
 
@@ -345,7 +346,7 @@ body {
     background: var(--fb-surface);
     border-color: var(--fb-rule-active-border);
     box-shadow:
-      inset 3px 0 0 var(--fb-color-success),
+      inset 3px 0 0 var(--fb-color-primary),
       0 1px 2px rgba(0, 0, 0, 0.03);
   }
 
@@ -364,7 +365,7 @@ body {
     background: var(--fb-surface);
     border-color: var(--fb-rule-active-border);
     box-shadow:
-      inset 3px 0 0 var(--fb-color-success),
+      inset 3px 0 0 var(--fb-color-primary),
       0 2px 8px rgba(var(--fb-color-primary-rgb), 0.1);
   }
 
@@ -427,7 +428,7 @@ body {
 }
 
 .enable-checkbox:checked {
-  background: var(--fb-color-success);
+  background: var(--fb-color-primary);
 }
 
 .enable-checkbox:checked::after {
@@ -647,7 +648,7 @@ select {
 .group-name-text {
   font-size: var(--fb-fs-sm);
   font-weight: 600;
-  color: var(--fb-text-default);
+  color: var(--fb-text-strong);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -727,7 +728,7 @@ select {
 }
 
 .group-drop-zone {
-  border: 1.5px dashed var(--fb-border-default);
+  border: 1.5px dashed var(--fb-border);
   border-radius: var(--fb-radius-sm);
   padding: var(--fb-space-3);
   text-align: center;
@@ -740,13 +741,13 @@ select {
 
 .group-drop-zone.drag-active {
   border-color: var(--fb-color-primary);
-  background: color-mix(in srgb, var(--fb-color-primary) 6%, transparent);
+  background: rgba(var(--fb-color-primary-rgb), 0.06);
   color: var(--fb-color-primary);
 }
 
 /* 移出分组的逃脱区域 */
 .ungrouped-escape-zone {
-  border: 1.5px dashed var(--fb-border-default);
+  border: 1.5px dashed var(--fb-border);
   border-radius: var(--fb-radius-sm);
   padding: var(--fb-space-3);
   text-align: center;
@@ -760,7 +761,7 @@ select {
 
 .ungrouped-escape-zone.drag-active {
   border-color: var(--fb-color-primary);
-  background: color-mix(in srgb, var(--fb-color-primary) 6%, transparent);
+  background: rgba(var(--fb-color-primary-rgb), 0.06);
   color: var(--fb-color-primary);
 }
 
@@ -834,16 +835,4 @@ select {
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--fb-scrollbar-thumb-hover);
-}
-
-.panel.on * {
-  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
-}
-
-.panel.on ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.28);
-}
-
-.panel.on ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.5);
 }

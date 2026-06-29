@@ -4,10 +4,6 @@
   color: var(--fb-updater-text);
 }
 
-.panel.on .update-progress {
-  color: var(--fb-text-on-accent);
-}
-
 .update-progress-info {
   display: flex;
   align-items: center;
@@ -32,20 +28,12 @@
   font-variant-numeric: tabular-nums;
 }
 
-.panel.on .update-progress-value {
-  color: rgba(255, 255, 255, 0.78);
-}
-
 .update-progress-track {
   position: relative;
   height: 4px;
   overflow: hidden;
   border-radius: var(--fb-radius-pill);
   background: rgba(var(--fb-updater-text-rgb), 0.12);
-}
-
-.panel.on .update-progress-track {
-  background: rgba(255, 255, 255, 0.24);
 }
 
 .update-progress-fill {

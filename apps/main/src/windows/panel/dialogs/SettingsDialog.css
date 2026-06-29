@@ -156,17 +156,17 @@
 }
 
 .settings-mode-tag-recommend {
-  color: var(--fb-success-text, #1a7f5a);
-  background: var(--fb-success-soft, rgba(38, 166, 110, 0.16));
+  color: var(--fb-color-success-active);
+  background: var(--fb-color-success-soft);
 }
 
 .settings-mode-tag-backup {
   color: var(--fb-text-weak);
-  background: var(--fb-fill-soft, rgba(128, 128, 128, 0.16));
+  background: var(--fb-color-neutral-soft);
 }
 
 .settings-note-warn {
-  color: var(--fb-danger-text, #b4540e);
+  color: var(--fb-color-warning-active);
 }
 
 .settings-mode-meta {

@@ -30,6 +30,7 @@ import {
   applyThemeMode,
   DEFAULT_THEME_COLOR,
   DEFAULT_THEME_MODE,
+  SECT_PRESETS,
   type ThemeMode,
   type ThemeSettings,
 } from './theme';
@@ -1002,6 +1003,17 @@ export default function PanelApp() {
         .catch(() => {});
       return next;
     });
+  }
+
+  // 从下拉菜单设置明暗模式 / 主题色：应用+持久化并收起菜单。
+  function pickThemeMode(mode: ThemeMode) {
+    setMenuOpen(false);
+    persistTheme({ mode });
+  }
+
+  function pickThemeColor(color: string) {
+    setMenuOpen(false);
+    persistTheme({ color });
   }
 
   async function handleToggleAutostart() {
@@ -2273,6 +2285,44 @@ export default function PanelApp() {
         target={menuBtnRef}
         items={[
           { label: '设置', onClick: handleShowSettings },
+          {
+            label: '主题颜色',
+            children: [
+              {
+                label: '明亮',
+                active: theme.mode === 'light',
+                onClick: () => pickThemeMode('light'),
+              },
+              {
+                label: '黑暗',
+                active: theme.mode === 'dark',
+                onClick: () => pickThemeMode('dark'),
+              },
+              {
+                label: '跟随系统',
+                active: theme.mode === 'system',
+                onClick: () => pickThemeMode('system'),
+              },
+              { type: 'divider' },
+              ...SECT_PRESETS.map((p) => ({
+                label: p.name,
+                active: theme.color.toLowerCase() === p.color.toLowerCase(),
+                prependIcon: (
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: 12,
+                      height: 12,
+                      borderRadius: 3,
+                      background: p.color,
+                      boxShadow: 'inset 0 0 0 1px rgba(0, 0, 0, 0.15)',
+                    }}
+                  />
+                ),
+                onClick: () => pickThemeColor(p.color),
+              })),
+            ],
+          },
           { type: 'divider' },
           { label: '检查更新', onClick: handleCheckUpdate },
           {

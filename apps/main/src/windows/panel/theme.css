@@ -41,15 +41,23 @@
   --fb-color-warning-soft: rgba(245, 166, 35, 0.1);
   --fb-color-warning-soft-hover: rgba(245, 166, 35, 0.18);
 
-  /* 彩色实底上的文字（明暗两态都为白） */
-  --fb-text-on-accent: #fff;
+  /* ── 前景色（背景↔前景配对）──────────────────────────────
+     on-surface 系列 = 任意 surface 上的文字色；on-primary = 主色实底上的文字。
+     这是唯一事实来源，暗色模式只需在 :root[data-theme=dark] 翻转这一组，全局生效。
+     旧 --fb-text-* / --fb-text-on-accent 保留为别名，指向 on-* 自动跟随。 */
+  --fb-on-surface: #2d2d2d;
+  --fb-on-surface-variant: #555;
+  --fb-on-surface-muted: #888;
+  --fb-on-surface-faint: #aaa;
+  --fb-on-surface-disabled: #b8b8c0;
+  --fb-on-primary: #fff;
 
-  /* ── 文本灰阶 ─────────────────────────────────────────── */
-  --fb-text-strong: #2d2d2d;
-  --fb-text-regular: #555;
-  --fb-text-weak: #888;
-  --fb-text-faint: #aaa;
-  --fb-text-disabled: #b8b8c0;
+  --fb-text-strong: var(--fb-on-surface);
+  --fb-text-regular: var(--fb-on-surface-variant);
+  --fb-text-weak: var(--fb-on-surface-muted);
+  --fb-text-faint: var(--fb-on-surface-faint);
+  --fb-text-disabled: var(--fb-on-surface-disabled);
+  --fb-text-on-accent: var(--fb-on-primary);
 
   /* ── 边框 / 分隔 ──────────────────────────────────────── */
   --fb-border: #d6d6d6;
@@ -63,23 +71,39 @@
   --fb-surface-translucent: rgba(255, 255, 255, 0.76);
   --fb-surface-glass: rgba(255, 255, 255, 0.5);
 
-  /* 标题栏控件 hover 底 / 自定义滚动条（off 态深调，on 态由 .panel.on 覆写为白） */
+  /* 标题栏控件 hover 底 / 自定义滚动条（亮态深调，暗色由 dark 块覆写为浅调） */
   --fb-app-control-hover: rgba(0, 0, 0, 0.08);
   --fb-scrollbar-thumb: rgba(0, 0, 0, 0.2);
   --fb-scrollbar-thumb-hover: rgba(0, 0, 0, 0.38);
 
-  /* ── 应用主背景（标题/面板渐变，随全局开关 off/on 切换）── */
-  --fb-app-bg: linear-gradient(160deg, #f0edf8 0%, #e2ddf0 60%, #cfc9e6 100%);
-  --fb-app-bg-active: linear-gradient(160deg, #ffe3c4 0%, #ffb88a 55%, #ff8a5c 100%);
+  /* ── 应用主背景（标题/面板渐变，随全局开关 off/on 切换）──
+     均从主题色派生、叠在 var(--fb-surface) 上（亮暗自动适配）：off 极浅淡染，
+     on（全局激活）只加深一档仍保持浅色，文字维持深色可读；激活强信号交由底部
+     「全局已启用」实色按钮与规则卡绿色脉冲承担，不靠满铺浓色（会与外壳主色文字撞色）。 */
+  --fb-app-bg:
+    linear-gradient(
+      160deg,
+      rgba(var(--fb-color-primary-rgb), 0.1) 0%,
+      rgba(var(--fb-color-primary-rgb), 0.18) 60%,
+      rgba(var(--fb-color-primary-rgb), 0.3) 100%
+    ),
+    var(--fb-surface);
+  --fb-app-bg-active:
+    linear-gradient(
+      160deg,
+      rgba(var(--fb-color-primary-rgb), 0.22) 0%,
+      rgba(var(--fb-color-primary-rgb), 0.36) 60%,
+      rgba(var(--fb-color-primary-rgb), 0.52) 100%
+    ),
+    var(--fb-surface);
   --fb-app-header-text: #2e2650;
   --fb-app-watermark: rgba(0, 0, 0, 0.18);
-  --fb-app-watermark-active: rgba(255, 255, 255, 0.35);
 
-  /* ── 规则激活态（绿）──────────────────────────────────── */
-  --fb-rule-active-bg: #f3fbec;
-  --fb-rule-active-border: #cdebbb;
-  --fb-rule-active-border-strong: #8fd96a;
-  --fb-rule-active-accent: #6ddc35;
+  /* ── 规则激活态（跟随主题色，rgba 通道明暗自适配，无需 dark 覆盖）──── */
+  --fb-rule-active-bg: rgba(var(--fb-color-primary-rgb), 0.08);
+  --fb-rule-active-border: rgba(var(--fb-color-primary-rgb), 0.35);
+  --fb-rule-active-border-strong: rgba(var(--fb-color-primary-rgb), 0.6);
+  --fb-rule-active-accent: var(--fb-color-primary);
 
   /* ── 更新进度条（深底文字，随面板 on 翻白）────────────── */
   --fb-updater-text: #2a3a4a;
@@ -150,13 +174,13 @@
    主色 --fb-color-primary* 由预设注入、明暗共用；这里只调中性背景/文字/边框
    及随面板背景翻转的派生色。soft/soft-hover 走 -rgb 通道自动适配。 */
 :root[data-theme='dark'] {
-  --fb-text-on-accent: #fff;
-
-  --fb-text-strong: #ececf0;
-  --fb-text-regular: #c4c4cc;
-  --fb-text-weak: #9a9aa4;
-  --fb-text-faint: #76767e;
-  --fb-text-disabled: #5c5c64;
+  /* 前景色统一翻转（text-* 别名指向这组，自动跟随；on-primary 保持白） */
+  --fb-on-surface: #ececf0;
+  --fb-on-surface-variant: #c4c4cc;
+  --fb-on-surface-muted: #9a9aa4;
+  --fb-on-surface-faint: #76767e;
+  --fb-on-surface-disabled: #5c5c64;
+  --fb-on-primary: #fff;
 
   --fb-border: #3a3b42;
   --fb-border-soft: #303137;
@@ -172,18 +196,12 @@
   --fb-scrollbar-thumb: rgba(255, 255, 255, 0.2);
   --fb-scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
 
-  /* 面板背景：off 深紫灰、on 仍用暖橙（激活态保持醒目，略压暗） */
-  --fb-app-bg: linear-gradient(160deg, #2a2833 0%, #232230 60%, #1c1b26 100%);
-  --fb-app-bg-active: linear-gradient(160deg, #7a4a22 0%, #8f4f1e 55%, #9a4a16 100%);
+  /* 面板背景 --fb-app-bg / --fb-app-bg-active 不在此覆盖：off 用主色淡染叠 var(--fb-surface)
+     （暗色下 surface 已是深色，自动适配），on 仍点亮成主色浓色，明暗一致。 */
   --fb-app-header-text: #ececf0;
   --fb-app-watermark: rgba(255, 255, 255, 0.12);
-  --fb-app-watermark-active: rgba(255, 255, 255, 0.4);
 
-  /* 规则激活态：暗底绿调 */
-  --fb-rule-active-bg: #1d2a1b;
-  --fb-rule-active-border: #2f4a2a;
-  --fb-rule-active-border-strong: #3f7a35;
-  --fb-rule-active-accent: #6ddc35;
+  /* 规则激活态走 --fb-color-primary-rgb 通道，明暗共用，无需在此覆盖 */
 
   --fb-updater-text: #c4c4cc;
   --fb-updater-text-rgb: 196, 196, 204;

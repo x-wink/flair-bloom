@@ -23,8 +23,8 @@ export interface SectPreset {
 }
 
 /**
- * 主题色预设。配色取自剑网三无界全 20 门派心法代表色（社区约定，非官方 hex；
- * 金/褐/黑等由 onAccent 自动配深色字）。
+ * 主题色预设。配色取自剑网三无界全 20 门派心法代表色（社区约定，非官方 hex）。
+ * 彩色实底上的文字统一白字，故偏亮的金/褐色块上白字对比度一般，选色时已尽量避开过亮值。
  *
  * `sect` 门派名仅作来源对照、不在 UI 显示——界面只展示色块与雅称（`name`），
  * 悬停显示 `name`。下表即门派 ↔ 配色对照：
@@ -94,29 +94,8 @@ function darken(rgb: Rgb, factor: number): Rgb {
   return { r: rgb.r * (1 - factor), g: rgb.g * (1 - factor), b: rgb.b * (1 - factor) };
 }
 
-/** WCAG 相对亮度。 */
-function relLuminance({ r, g, b }: Rgb): number {
-  const lin = (c: number) => {
-    const s = c / 255;
-    return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
-  };
-  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-}
-
-function contrast(l1: number, l2: number): number {
-  const [hi, lo] = l1 >= l2 ? [l1, l2] : [l2, l1];
-  return (hi + 0.05) / (lo + 0.05);
-}
-
-/** 在彩色实底上选对比度更高的前景（白 或 近黑）。 */
-function onAccentFor(rgb: Rgb): string {
-  const bg = relLuminance(rgb);
-  const white = relLuminance({ r: 255, g: 255, b: 255 });
-  const dark = relLuminance({ r: 45, g: 45, b: 45 }); // --fb-text-strong #2d2d2d
-  return contrast(bg, white) >= contrast(bg, dark) ? '#fff' : '#2d2d2d';
-}
-
-/** 注入主色及其衍生到根元素。soft/soft-hover 透明色调通过 -rgb 通道自动跟随。 */
+/** 注入主色及其衍生到根元素。soft/soft-hover 透明色调通过 -rgb 通道自动跟随。
+ *  彩色实底上的前景统一用白字——显式写死，覆盖历史版本可能残留的内联深色值。 */
 export function applyThemeColor(hex: string): void {
   const rgb = hexToRgb(hex);
   const root = document.documentElement.style;
@@ -124,7 +103,7 @@ export function applyThemeColor(hex: string): void {
   root.setProperty('--fb-color-primary-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
   root.setProperty('--fb-color-primary-hover', rgbToHex(darken(rgb, 0.12)));
   root.setProperty('--fb-color-primary-active', rgbToHex(darken(rgb, 0.22)));
-  root.setProperty('--fb-text-on-accent', onAccentFor(rgb));
+  root.setProperty('--fb-text-on-accent', '#fff');
 }
 
 /** 解析 system → 实际亮暗。 */
