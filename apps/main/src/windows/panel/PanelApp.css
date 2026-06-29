@@ -86,6 +86,22 @@ body {
   z-index: 0;
 }
 
+/* 横版：背景水印缩小移到右下角空白处（底部行右栏留空与之对齐） */
+.panel--h::before {
+  background-position: right 56px bottom 72px;
+  background-size: 130px auto;
+  opacity: 0.18;
+}
+.panel--h::after {
+  left: auto;
+  right: 56px;
+  top: auto;
+  bottom: 52px;
+  text-align: right;
+  font-size: var(--fb-fs-xs);
+  letter-spacing: 0.3em;
+}
+
 .panel > * {
   position: relative;
   z-index: 1;

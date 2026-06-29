@@ -1,0 +1,353 @@
+.horizontal-layout {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between; /* 键盘在上、底部行在下 */
+  padding: var(--fb-space-3) var(--fb-space-6) var(--fb-space-4);
+  overflow: auto;
+}
+
+/* ── 键盘 ───────────────────────────────────────────────────────────── */
+.hkb-keyboard {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  gap: var(--fb-space-5);
+}
+
+.hkb-block {
+  display: flex;
+  flex-direction: column;
+}
+.hkb-row {
+  display: flex;
+  align-items: center;
+}
+.hkb-numpad-grid {
+  display: grid;
+}
+.hkb-spacer {
+  flex: none;
+  height: 40px;
+}
+
+.hkb-cap {
+  flex: none;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 0 2px;
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-sm);
+  background: var(--fb-surface-soft);
+  color: var(--fb-text-regular);
+  font-size: var(--fb-fs-xs);
+  font-weight: var(--fb-fw-medium);
+  line-height: 1.1;
+  text-align: center;
+  white-space: nowrap;
+  --pulse: var(--fb-color-primary-rgb);
+  transition:
+    background var(--fb-duration-fast) ease,
+    border-color var(--fb-duration-fast) ease,
+    transform var(--fb-duration-fast) ease;
+}
+.hkb-numpad-grid .hkb-cap {
+  width: auto;
+  height: auto;
+}
+.hkb-cap-label {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 修饰键 / 不可绑定键：虚线置灰 = 禁用，彻底不可交互（无点击 / 无 hover） */
+.hkb-cap--deco {
+  color: var(--fb-text-disabled);
+  background: var(--fb-surface-muted);
+  border-style: dashed;
+  border-color: var(--fb-divider);
+  opacity: 0.65;
+  pointer-events: none;
+}
+
+/* 可点键。hover 用 outline 微光环——与 toggle 的实边框分离，不再撞色。 */
+.hkb-cap--key {
+  cursor: pointer;
+}
+.hkb-cap--key:hover:not(.is-active) {
+  transform: translateY(-1px);
+  border-color: var(--fb-color-primary);
+  box-shadow: 0 2px 8px rgba(var(--fb-color-primary-rgb), 0.35);
+  z-index: 1;
+}
+.hkb-cap--key:active {
+  transform: translateY(1px);
+  box-shadow: none;
+}
+
+/* 切换连发：主题色边框 + 淡主色背景 + 主色前景 */
+.hkb-cap--key.is-toggle {
+  background: var(--fb-color-primary-soft);
+  border-color: var(--fb-color-primary);
+  color: var(--fb-color-primary);
+  font-weight: var(--fb-fw-semibold);
+}
+/* 按压连发：主题色实心 */
+.hkb-cap--key.is-hold {
+  background: var(--fb-color-primary);
+  border-color: var(--fb-color-primary);
+  color: var(--fb-text-on-accent);
+  font-weight: var(--fb-fw-semibold);
+}
+
+/* 已设·停用：主色虚线边框 + 主色文字、无底色（与灰色虚线的“不支持键”区分） */
+.hkb-cap--key.is-off {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--fb-color-primary);
+  color: var(--fb-color-primary);
+}
+
+/* 连发中：实底 + 脉冲 */
+.hkb-cap--key.is-active {
+  background: rgb(var(--pulse));
+  border-color: rgb(var(--pulse));
+  color: var(--fb-text-on-accent);
+  animation: hkb-pulse 0.9s ease-in-out infinite;
+}
+@keyframes hkb-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(var(--pulse), 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 4px rgba(var(--pulse), 0);
+  }
+}
+
+/* 高级规则（trigger≠target / 同键多规则）：橙色虚线，左键不可轮换 */
+.hkb-cap--key.is-advanced {
+  background: var(--fb-color-warning-soft);
+  border-style: dashed;
+  border-color: var(--fb-color-warning);
+  color: var(--fb-text-strong);
+  cursor: default;
+}
+
+/* 互斥分组：靠右上角序号角标 + 底部图例表达，不改边框样式 */
+
+/* 冲突着色（覆盖边框色） */
+.hkb-cap--key.is-error {
+  border-color: var(--fb-color-danger);
+}
+.hkb-cap--key.is-warn {
+  border-color: var(--fb-color-warning);
+}
+
+.hkb-group-badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  min-width: 13px;
+  height: 13px;
+  padding: 0 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--fb-radius-circle);
+  background: var(--fb-color-primary);
+  color: var(--fb-text-on-accent);
+  font-size: 9px;
+  font-weight: var(--fb-fw-bold);
+  line-height: 1;
+}
+/* ⚠️ emoji 角标：右上角、不裁剪（cap 已去掉 overflow:hidden） */
+.hkb-warn-badge {
+  position: absolute;
+  top: -6px;
+  right: -5px;
+  font-size: 11px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* ── 鼠标 ───────────────────────────────────────────────────────────── */
+.hmouse {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--fb-space-4);
+}
+.hmouse-title {
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-text-weak);
+  padding-top: var(--fb-space-2);
+}
+.hmouse-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fb-space-2);
+}
+.hmouse-row {
+  display: flex;
+  gap: var(--fb-space-2);
+}
+.hmouse-cap {
+  width: 64px;
+}
+
+/* 分割线：独立元素，居键盘与底部行之间，靠 space-between 上下空白相等 */
+.hdivider {
+  width: 100%;
+  height: 1px;
+  background: var(--fb-divider);
+  flex: none;
+}
+
+/* ── 底部一行：鼠标（左） / 间隔+图例（中） / 右侧空占位 ───────────────── */
+.hbottom {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: var(--fb-space-6);
+}
+/* 左：鼠标固定宽；右：空占位（与右下角水印对齐）；中：信息栏占满剩余 */
+.hmouse {
+  flex: 0 0 auto;
+}
+.hbottom-spacer {
+  flex: 0 0 180px;
+}
+.hbottom-center {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fb-space-2);
+}
+
+.hbar-interval {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-text-regular);
+}
+.hbar-interval input {
+  width: 64px;
+  padding: var(--fb-space-1) var(--fb-space-2);
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-sm);
+  background: var(--fb-surface);
+  font-size: var(--fb-fs-sm);
+  text-align: right;
+}
+.hbar-unit {
+  color: var(--fb-text-weak);
+}
+
+.hbar-legend {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-4);
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+}
+.hbar-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+}
+.hbar-swatch {
+  width: 13px;
+  height: 13px;
+  border-radius: var(--fb-radius-xs);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  font-weight: var(--fb-fw-bold);
+  color: #fff;
+}
+.sw-toggle {
+  background: var(--fb-color-primary-soft);
+  border: 1.5px solid var(--fb-color-primary);
+}
+.sw-hold {
+  background: var(--fb-color-primary);
+  border: 1.5px solid var(--fb-color-primary);
+}
+.sw-off {
+  background: transparent;
+  border: 1.5px dashed var(--fb-color-primary);
+}
+.sw-group {
+  background: var(--fb-color-primary);
+  border: none;
+  border-radius: var(--fb-radius-circle);
+}
+.hbar-warn-icon {
+  font-size: 12px;
+  line-height: 1;
+}
+
+.hbar-groups {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: center;
+  justify-content: center;
+  gap: var(--fb-space-2) var(--fb-space-3);
+}
+.hbar-group {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+  font-size: var(--fb-fs-xs);
+}
+.hbar-group-keys {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.hbar-key-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-xs);
+  background: var(--fb-surface-soft);
+  color: var(--fb-text-regular);
+  font-size: 9px;
+  font-weight: var(--fb-fw-medium);
+  line-height: 1;
+}
+.hbar-group-no {
+  min-width: 15px;
+  height: 15px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--fb-radius-circle);
+  background: var(--fb-color-primary);
+  color: var(--fb-text-on-accent);
+  font-size: 9px;
+  font-weight: var(--fb-fw-bold);
+}
+.hbar-group-name {
+  color: var(--fb-text-regular);
+  font-weight: var(--fb-fw-medium);
+}
