@@ -8,6 +8,9 @@ use tracing::{error, info, warn};
 use crate::engine::BurstEngine;
 
 pub fn load_or_init_profile(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
+    // 历史拼写修正：先把旧 defults.qzh 迁移为 defaults.qzh，再按 activePath 加载。
+    crate::commands::profile::migrate_legacy_default_profile(app);
+
     let active_path: Option<String> = app.store(crate::STORE_PATH).ok().and_then(|store| {
         store
             .get(crate::commands::profile::ACTIVE_PATH_KEY)

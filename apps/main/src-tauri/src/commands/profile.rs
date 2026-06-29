@@ -10,7 +10,7 @@ use std::{
 };
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_store::StoreExt;
-use tracing::warn;
+use tracing::{info, warn};
 
 use super::engine::EngineState;
 
@@ -18,7 +18,11 @@ static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 /// 默认配置名（同时是文件名 stem）。受保护：不能改名也不能删除，
 /// 用户对它的修改会触发自动 fork（见 [`fork_active_profile`]）。
-pub const DEFAULT_PROFILE_NAME: &str = "defults";
+pub const DEFAULT_PROFILE_NAME: &str = "defaults";
+
+/// 历史拼写错误的旧默认配置名。启动时由 [`migrate_legacy_default_profile`] 一次性
+/// 迁移为 [`DEFAULT_PROFILE_NAME`]，迁移后不再使用。
+pub const LEGACY_DEFAULT_PROFILE_NAME: &str = "defults";
 
 /// store 中存储「当前激活配置文件绝对路径」的键名。
 pub const ACTIVE_PATH_KEY: &str = "activeProfilePath";
@@ -343,6 +347,57 @@ pub(crate) fn create_default_profile(
 #[tauri::command]
 pub fn init_default_profile(app: AppHandle, state: State<EngineState>) -> Result<Profile, String> {
     create_default_profile(&app, &state.0)
+}
+
+/// 一次性迁移：把历史拼写错误的默认配置 `defults.qzh` 更正为 `defaults.qzh`
+/// （同步 meta.name 与 store 的 activeProfilePath）。仅在旧文件存在、且新文件尚不存在时执行，
+/// 已迁移或全新安装均为 no-op。任何步骤失败只记日志、不阻断启动（最坏情况退回到重建默认配置）。
+pub(crate) fn migrate_legacy_default_profile(app: &AppHandle) {
+    let Ok(dir) = profiles_dir(app) else {
+        return;
+    };
+    let legacy = dir.join(format!("{LEGACY_DEFAULT_PROFILE_NAME}.qzh"));
+    let renamed = dir.join(format!("{DEFAULT_PROFILE_NAME}.qzh"));
+    if !legacy.exists() || renamed.exists() {
+        return;
+    }
+
+    let mut profile = match read_profile_from_file(&legacy) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("旧默认配置迁移跳过（无法读取 {}）：{}", legacy.display(), e);
+            return;
+        }
+    };
+    profile.meta.name = DEFAULT_PROFILE_NAME.to_string();
+    profile.meta.updated_at = now_secs();
+    profile.meta.app_version = env!("CARGO_PKG_VERSION").to_string();
+
+    let saved = match write_profile_file_to_path(&renamed, &profile) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("旧默认配置迁移失败（写入 {}）：{}", renamed.display(), e);
+            return;
+        }
+    };
+    if let Err(e) = std::fs::remove_file(&legacy) {
+        warn!("旧默认配置迁移：删除旧文件失败 {}：{}", legacy.display(), e);
+    }
+
+    // 若当前激活配置正指向旧文件，同步到新路径
+    let active_was_legacy = app
+        .store(crate::STORE_PATH)
+        .ok()
+        .and_then(|s| {
+            s.get(ACTIVE_PATH_KEY)
+                .and_then(|v| v.as_str().map(String::from))
+        })
+        .map(|p| Path::new(&p) == legacy)
+        .unwrap_or(false);
+    if active_was_legacy {
+        set_active_path(app, &saved);
+    }
+    info!("已将旧默认配置 defults 迁移为 defaults");
 }
 
 #[tauri::command]

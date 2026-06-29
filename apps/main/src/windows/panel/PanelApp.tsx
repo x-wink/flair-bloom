@@ -49,7 +49,7 @@ const DEFAULT_SOUND: SoundSettings = {
   voiceName: '',
   globalOnly: false,
 };
-const DEFAULT_PROFILE_NAME = 'defults';
+const DEFAULT_PROFILE_NAME = 'defaults';
 // 注入周期基础下限 10ms（≈100 taps/s）：管线每事件过路税决定可持续「总」注入速率。单规则用
 // 此值；多条规则同时连发时后端按活跃规则数等分总速率（见 burst-engine process_due），避免叠加
 // 超发导致停止「收不住」。与后端 MIN_EFFECTIVE_INTERVAL_MS 对齐。
@@ -292,7 +292,7 @@ export default function PanelApp() {
   const [rules, setRules] = useState<BurstRule[]>([]);
   const [activeRuleIds, setActiveRuleIds] = useState<Set<string>>(new Set());
   const prevActiveRuleIdsRef = useRef<Set<string>>(new Set());
-  const [profileName, setProfileName] = useState('defults');
+  const [profileName, setProfileName] = useState('defaults');
   const [profileList, setProfileList] = useState<ProfileEntry[]>([]);
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileBtnRef = useRef<HTMLButtonElement>(null);

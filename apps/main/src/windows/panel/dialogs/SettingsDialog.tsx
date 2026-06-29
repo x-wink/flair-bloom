@@ -83,7 +83,7 @@ const TABS: { id: SettingsTab; label: string }[] = [
   { id: 'profiles', label: '配置文件' },
 ];
 
-const DEFAULT_PROFILE_NAME = 'defults';
+const DEFAULT_PROFILE_NAME = 'defaults';
 
 const INPUT_MODE_LABELS: Record<SettingsInputMode, string> = {
   sendinput: '通用模式',
