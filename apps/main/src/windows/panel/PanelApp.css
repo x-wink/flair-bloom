@@ -111,8 +111,33 @@ body {
   background: var(--fb-app-bg);
 }
 
+/* 全局开启：右下角为圆心的主色径向渐变（深色），向左上渐隐到透明；缩放做呼吸 */
 .panel.on {
-  background: var(--fb-app-bg-active);
+  background:
+    radial-gradient(
+      circle at 100% 100%,
+      rgba(var(--fb-color-primary-rgb), 0.6) 0%,
+      rgba(var(--fb-color-primary-rgb), 0.3) 38%,
+      transparent 100%
+    ),
+    var(--fb-surface);
+  background-repeat: no-repeat;
+  background-position: bottom right;
+  animation: panel-breathe 2.2s ease-in-out infinite;
+}
+@keyframes panel-breathe {
+  0%,
+  100% {
+    background-size: 115% 115%;
+  }
+  50% {
+    background-size: 210% 230%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .panel.on {
+    animation: none;
+  }
 }
 
 .panel-header {
