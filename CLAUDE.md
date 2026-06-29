@@ -57,10 +57,16 @@ apps/main/src-tauri/src/        # Tauri 后端（Rust）
     mod.rs                      # 仅 re-export burst_engine / win_input 公开 API
 apps/main/src/windows/panel/    # 面板窗口（React）
   main.tsx                      # 入口，挂载 Provider
-  PanelApp.tsx / .css           # 根组件
+  PanelApp.tsx / .css           # 根组件（竖版规则列表 + 横版键鼠图）
+  HorizontalLayout.tsx / .css   # 横版键鼠图布局
+  keyboardLayout.ts             # 键盘/鼠标示意图键位表
   theme.css                     # 设计 Token（颜色/间距/字号变量）
+  theme.ts                      # 主题预设色板 + 亮/暗/跟随系统应用逻辑
+  useKeyRelay.ts                # WebView 聚焦时键盘事件中继 Hook（面板与浮窗共用）
   components/                   # UI 基础组件
   dialogs/                      # 弹窗内容组件
+apps/main/src/windows/float/    # 浮窗（panel-float.html，常驻置顶胶囊）
+  FloatApp.tsx / .css           # 显示激活规则 + 全局开关 + 展开主面板
 apps/main/src/assets/icons/     # SVG 图标源文件（currentColor / 1em 尺寸）
 apps/keygen/                    # 兑换码生成 CLI
 packages/crypto/src/
@@ -97,9 +103,13 @@ packages/win-driver/src/
 
 ## 关键架构决策
 
-**单进程多窗口**：面板（`panel.html`）和桌宠（`pet.html`，v0.3 加入）是同一 Tauri 进程的独立 WebView，通过 `app.emit_all()` 通信，无 Named Pipe。
+**单进程多窗口**：面板（`panel.html`）和常驻置顶浮窗（`panel-float.html`，v0.3 加入）是同一 Tauri 进程的独立 WebView，通过 `app.emit_all()` 事件通信（如 `float-active`/`global-enabled-changed`/`theme-changed`），无 Named Pipe。窗口显隐统一走 `lib.rs` 的 `enter_panel_mode`（显示面板、隐藏浮窗）/ `enter_float_mode`（先显示浮窗再隐藏面板，浮窗缺失则保留面板）。桌宠（`pet.html`）顺延至 v0.4。
 
-**配置文件格式（.qzh）**：`FileHeader`（19 字节，含 Nonce）+ AES-256-GCM 密文 + Auth Tag。Header 的 `magic+version+flags` 作为 AAD 防篡改。JSON payload 首字段 `schema_version` 驱动 `qzh-profile/src/schema_migrate.rs` 迁移链（Strategy B）。当前 `CURRENT_SCHEMA_VERSION = 2`（v1→v2：所有按键字段从裸 `u32` VK 升级为 [`KeyId`]，向后兼容自动迁移）。`tauri-plugin-store` 的 settings.json 复用同一迁移基础设施（`packages/migrate`）。
+WebView 聚焦时 `WH_KEYBOARD_LL` 全局钩子不触发，面板与浮窗都用 `useKeyRelay` 把键盘事件中继到后端 `relay_key_event` 命令，交由引擎统一处理热键 / Toggle 触发 / `pressed_keys` 维护，避免聚焦窗口时热键被吞。
+
+**输入模式与布局互斥**：DD 系列驱动（DDSimple / DDHID）的单键规则约束无法用横版键鼠图表达，故二者互斥——前端在 `selectInputMode`（横版下禁选 DD）与 `switchLayout`（DD 下禁切横版）两个 choke point 拦截并置灰提示。
+
+**配置文件格式（.qzh）**：`FileHeader`（19 字节，含 Nonce）+ AES-256-GCM 密文 + Auth Tag。Header 的 `magic+version+flags` 作为 AAD 防篡改。JSON payload 首字段 `schema_version` 驱动 `qzh-profile/src/schema_migrate.rs` 迁移链（Strategy B）。当前 `CURRENT_SCHEMA_VERSION = 4`（v1→v2 所有按键字段从裸 `u32` VK 升级为 [`KeyId`]；v2→v3 新增滚轮上 / 下；v3→v4 `BurstRule` 新增可选 `group` 字段——Toggle 互斥分组；均向后兼容自动迁移）。`tauri-plugin-store` 的 settings.json 复用同一迁移基础设施（`packages/migrate`）。
 
 文件读写高层入口：`qzh_format::read_encrypted(path)` / `qzh_format::write_encrypted(path, &T)` 封装了 header+aad+decrypt+parse / serialize+encrypt+atomic-rename 五连段；`qzh_profile::load_from_path(path)` / `qzh_profile::save_to_path(path, &profile)` 在此基础上再叠加 schema 迁移与业务校验。
 
