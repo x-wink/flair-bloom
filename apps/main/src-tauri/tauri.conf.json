@@ -38,6 +38,23 @@
         "shadow": false,
         "center": true,
         "dragDropEnabled": false
+      },
+      {
+        "label": "float",
+        "title": "FlairBloom 浮窗",
+        "url": "/panel-float.html",
+        "width": 150,
+        "height": 54,
+        "visible": false,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "dragDropEnabled": false
       }
     ],
     "security": {

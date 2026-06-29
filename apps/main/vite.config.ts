@@ -8,6 +8,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         panel: resolve(__dirname, 'panel.html'),
+        'panel-float': resolve(__dirname, 'panel-float.html'),
       },
     },
   },

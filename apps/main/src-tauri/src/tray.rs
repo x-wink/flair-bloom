@@ -42,7 +42,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>, engine: Arc<BurstEngine>) -> t
                 let _ = app.emit("global-enabled-changed", enabled);
             }
             "open" => {
-                crate::show_panel(app);
+                crate::enter_panel_mode(app);
             }
             "quit" => {
                 engine_clone.shutdown();
@@ -53,7 +53,7 @@ pub fn setup_tray<R: Runtime>(app: &AppHandle<R>, engine: Arc<BurstEngine>) -> t
         .on_tray_icon_event(|tray, event| {
             if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
                 let app = tray.app_handle();
-                crate::show_panel(app);
+                crate::enter_panel_mode(app);
             }
         })
         .build(app)?;

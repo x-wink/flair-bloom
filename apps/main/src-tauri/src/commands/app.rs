@@ -43,6 +43,18 @@ pub fn agree_license(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 浮窗"放大"按钮 / 其它呼出入口：显示主面板并隐藏浮窗。
+#[tauri::command]
+pub fn show_main_panel(app: AppHandle) {
+    crate::enter_panel_mode(&app);
+}
+
+/// 主面板"最小化到浮窗"：隐藏主面板并显示常驻浮窗。
+#[tauri::command]
+pub fn minimize_to_float(app: AppHandle) {
+    crate::enter_float_mode(&app);
+}
+
 #[tauri::command]
 pub fn exit_app(app: AppHandle, engine: State<EngineState>) {
     engine.0.shutdown();

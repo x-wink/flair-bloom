@@ -20,7 +20,10 @@ use bootstrap::{
     update::{check_for_updates, UpdateLock},
 };
 use commands::{
-    app::{agree_license, check_update, exit_app, needs_agreement, toggle_autostart},
+    app::{
+        agree_license, check_update, exit_app, minimize_to_float, needs_agreement, show_main_panel,
+        toggle_autostart,
+    },
     ddhid_diagnostic::export_dd_hid_diagnostic_report,
     driver::{
         install_dd_hid_driver, install_driver, is_dd_hid_driver_installed, is_driver_installed,
@@ -49,11 +52,37 @@ pub const APP_NAME_CN: &str = "气质花按键助手";
 pub const APP_IDENTIFIER: &str = "fun.xwink.flairbloom";
 pub(crate) const STORE_PATH: &str = "settings.json";
 
+pub(crate) const PANEL_LABEL: &str = "panel";
+pub(crate) const FLOAT_LABEL: &str = "float";
+
 pub(crate) fn show_panel<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(panel) = app.get_webview_window("panel") {
+    if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
         let _ = panel.show();
         let _ = panel.unminimize();
         let _ = panel.set_focus();
+    }
+}
+
+/// 进入面板模式：显示主面板、隐藏浮窗。所有"呼出主面板"入口都应走这里。
+pub(crate) fn enter_panel_mode<R: Runtime>(app: &AppHandle<R>) {
+    show_panel(app);
+    if let Some(float) = app.get_webview_window(FLOAT_LABEL) {
+        let _ = float.hide();
+        // 通知浮窗停止轮询，避免隐藏后仍空转
+        let _ = float.emit("float-active", false);
+    }
+}
+
+/// 进入浮窗模式：隐藏主面板、显示常驻浮窗。所有"隐藏主面板"入口都应走这里。
+pub(crate) fn enter_float_mode<R: Runtime>(app: &AppHandle<R>) {
+    if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
+        let _ = panel.hide();
+    }
+    if let Some(float) = app.get_webview_window(FLOAT_LABEL) {
+        let _ = float.show();
+        let _ = float.set_focus();
+        // 通知浮窗开始轮询激活规则
+        let _ = float.emit("float-active", true);
     }
 }
 
@@ -77,7 +106,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            show_panel(app);
+            enter_panel_mode(app);
         }))
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_store::Builder::default().build())
@@ -117,6 +146,8 @@ pub fn run() {
             agree_license,
             check_update,
             exit_app,
+            show_main_panel,
+            minimize_to_float,
             toggle_autostart,
             log_from_frontend,
             open_app_dir,
@@ -158,13 +189,13 @@ pub fn run() {
                 burst_engine.set_on_panel_toggle(move || {
                     let handle = handle.clone();
                     tauri::async_runtime::spawn(async move {
-                        if let Some(win) = handle.get_webview_window("panel") {
+                        if let Some(win) = handle.get_webview_window(PANEL_LABEL) {
                             let visible = win.is_visible().unwrap_or(false);
                             let minimized = win.is_minimized().unwrap_or(false);
                             if visible && !minimized {
-                                let _ = win.minimize();
+                                enter_float_mode(&handle);
                             } else {
-                                show_panel(&handle);
+                                enter_panel_mode(&handle);
                             }
                         }
                     });

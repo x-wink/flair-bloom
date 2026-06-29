@@ -1575,7 +1575,7 @@ export default function PanelApp() {
       .get<CloseBehavior>(CLOSE_BEHAVIOR_KEY)
       .then((remembered) => {
         if (remembered === 'exit') getCurrentWindow().destroy();
-        else if (remembered === 'minimize') getCurrentWindow().hide();
+        else if (remembered === 'minimize') invoke('minimize_to_float').catch(() => {});
         else void askCloseBehavior();
       })
       .catch(() => {
@@ -1606,7 +1606,7 @@ export default function PanelApp() {
     if (!ok) return;
     if (result.remember) persistCloseBehavior(result.choice);
     if (result.choice === 'exit') getCurrentWindow().destroy();
-    else getCurrentWindow().hide();
+    else invoke('minimize_to_float').catch(() => {});
   }
 
   function handleShowSettings(tab: SettingsTab = 'general') {
@@ -1747,8 +1747,8 @@ export default function PanelApp() {
           </button>
           <button
             className="win-btn"
-            onClick={() => getCurrentWindow().minimize()}
-            aria-label="最小化"
+            onClick={() => invoke('minimize_to_float').catch(() => {})}
+            aria-label="最小化到浮窗"
           >
             <MinimizeIcon size={14} />
           </button>

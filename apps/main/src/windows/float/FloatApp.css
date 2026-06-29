@@ -1,0 +1,186 @@
+/* 浮窗：常驻置顶的极简胶囊条。透明窗口，内容 hug 宽度（窗口随之收缩），
+   背景与呼吸动画复用主面板（off 渐变 / on 右下径向渐变 + 缩放呼吸）。 */
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+}
+
+#root {
+  display: inline-block;
+}
+
+.fb-float {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fb-space-3);
+  padding: var(--fb-space-3) var(--fb-space-3) var(--fb-space-3) var(--fb-space-4);
+  border-radius: var(--fb-radius-2xl);
+  border: 1px solid rgba(var(--fb-color-primary-rgb), 0.35);
+  color: var(--fb-app-header-text);
+  cursor: grab;
+  overflow: hidden;
+}
+.fb-float:active {
+  cursor: grabbing;
+}
+
+/* 背景：与主面板一致（PanelApp.css） */
+.fb-float.off {
+  background: var(--fb-app-bg);
+}
+.fb-float.on {
+  background:
+    radial-gradient(
+      circle at 100% 100%,
+      rgba(var(--fb-color-primary-rgb), 0.6) 0%,
+      rgba(var(--fb-color-primary-rgb), 0.3) 38%,
+      transparent 100%
+    ),
+    var(--fb-surface);
+  background-repeat: no-repeat;
+  background-position: bottom right;
+  animation: fb-float-breathe 2.2s ease-in-out infinite;
+}
+@keyframes fb-float-breathe {
+  0%,
+  100% {
+    background-size: 115% 115%;
+  }
+  50% {
+    background-size: 210% 230%;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fb-float.on {
+    animation: none;
+  }
+}
+
+.fb-float-logo {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+}
+
+.fb-float-content {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+}
+
+.fb-float-empty {
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+  white-space: nowrap;
+  padding: 0 var(--fb-space-2);
+}
+
+/* 互斥分组容器：框住同组全部按键（含未激活），方便看效果。
+   组名置于键上方，纵向排布以节省横向宽度。 */
+.fb-float-group {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 2px var(--fb-space-2) var(--fb-space-2);
+  border: 1px dashed rgba(var(--fb-color-primary-rgb), 0.5);
+  border-radius: var(--fb-radius-md);
+}
+.fb-float-group-name {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-left: 2px;
+  font-size: var(--fb-fs-xs);
+  font-weight: var(--fb-fw-medium);
+  line-height: 1.2;
+  color: var(--fb-text-regular);
+}
+.fb-float-group-caps {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+}
+
+/* 复用横版键帽样式（HorizontalLayout.css），但在浮窗里只读：
+   去掉 hover 位移/光环；单字符键保持正方形（min-width = height），多字符自然加宽。 */
+.fb-float .hkb-cap--key {
+  box-sizing: border-box;
+  width: auto;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 var(--fb-space-2);
+  font-size: 10px;
+  border-radius: var(--fb-radius-xs);
+  cursor: grab;
+}
+.fb-float .hkb-cap--key:hover:not(.is-active) {
+  transform: none;
+  box-shadow: none;
+}
+.fb-float .hkb-cap--key:active {
+  transform: none;
+}
+
+/* 未激活键帽降透明度，与激活态区分 */
+.fb-float .hkb-cap--key:not(.is-active) {
+  opacity: 0.5;
+}
+
+/* 激活脉冲：只向外扩散、不回收（末帧已全透明，回到 0 不可见） */
+.fb-float .hkb-cap--key.is-active {
+  animation: fb-float-cap-pulse 0.45s ease-out infinite;
+}
+@keyframes fb-float-cap-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(var(--pulse), 0.5);
+  }
+  100% {
+    box-shadow: 0 0 0 5px rgba(var(--pulse), 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fb-float .hkb-cap--key.is-active {
+    animation: none;
+  }
+}
+
+.fb-float-expand {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: var(--fb-radius-md);
+  background: transparent;
+  color: var(--fb-app-header-text);
+  cursor: pointer;
+  transition:
+    background var(--fb-duration-fast) ease,
+    color var(--fb-duration-fast) ease;
+}
+.fb-float-expand:hover {
+  background: var(--fb-app-control-hover);
+  color: var(--fb-color-primary);
+}
+.fb-float-expand:active {
+  transform: translateY(1px);
+}
