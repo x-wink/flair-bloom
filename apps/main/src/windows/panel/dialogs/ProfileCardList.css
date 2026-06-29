@@ -108,7 +108,7 @@
   min-width: 0;
   padding: var(--fb-space-3) var(--fb-space-4);
   border-radius: var(--fb-radius-md);
-  background: rgba(255, 255, 255, 0.76);
+  background: var(--fb-surface-translucent);
   color: var(--fb-text-weak);
   font-size: var(--fb-fs-xs);
   white-space: nowrap;

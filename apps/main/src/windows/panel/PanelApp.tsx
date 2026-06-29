@@ -25,6 +25,14 @@ import AgreementDialog from './dialogs/AgreementDialog';
 import ImportDialog from './dialogs/ImportDialog';
 import RepairDialog from './dialogs/RepairDialog';
 import SettingsDialog, { type SettingsTab, type SoundSettings } from './dialogs/SettingsDialog';
+import {
+  applyThemeColor,
+  applyThemeMode,
+  DEFAULT_THEME_COLOR,
+  DEFAULT_THEME_MODE,
+  type ThemeMode,
+  type ThemeSettings,
+} from './theme';
 import UpdateNoticeDialog, { type UpdateNoticeInfo } from './dialogs/UpdateNoticeDialog';
 import './PanelApp.css';
 
@@ -32,6 +40,12 @@ const settingsStore = new LazyStore('settings.json');
 const CLOSE_BEHAVIOR_KEY = 'closeBehavior';
 const ACTIVE_TAB_KEY = 'activeTab';
 const SOUND_KEY = 'sound';
+const THEME_KEY = 'theme';
+
+const DEFAULT_THEME: ThemeSettings = {
+  color: DEFAULT_THEME_COLOR,
+  mode: DEFAULT_THEME_MODE,
+};
 
 const DEFAULT_SOUND: SoundSettings = {
   enabled: false,
@@ -285,6 +299,8 @@ export default function PanelApp() {
   const [togglingAutostart, setTogglingAutostart] = useState(false);
   const [sound, setSound] = useState<SoundSettings>(DEFAULT_SOUND);
   const soundRef = useRef<SoundSettings>(DEFAULT_SOUND);
+  const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME);
+  const themeModeRef = useRef<ThemeMode>(DEFAULT_THEME.mode);
   const [availableVoices, setAvailableVoices] = useState<string[]>([]);
   const [switchingMode, setSwitchingMode] = useState(false);
   const [modePickerOpen, setModePickerOpen] = useState(false);
@@ -466,6 +482,27 @@ export default function PanelApp() {
     getVersion()
       .then(setAppVersion)
       .catch(() => {});
+  }, []);
+
+  // 主题：从 store 加载主色 + 亮暗模式并立即应用；mode=system 时监听系统配色变化。
+  useEffect(() => {
+    settingsStore
+      .get<ThemeSettings>(THEME_KEY)
+      .then((v) => {
+        const merged: ThemeSettings = { ...DEFAULT_THEME, ...v };
+        setTheme(merged);
+        themeModeRef.current = merged.mode;
+        applyThemeColor(merged.color);
+        applyThemeMode(merged.mode);
+      })
+      .catch(() => {});
+
+    const mql = window.matchMedia('(prefers-color-scheme: dark)');
+    const onSystemChange = () => {
+      if (themeModeRef.current === 'system') applyThemeMode('system');
+    };
+    mql.addEventListener('change', onSystemChange);
+    return () => mql.removeEventListener('change', onSystemChange);
   }, []);
 
   // 声音设置：从 store 加载，同时枚举系统语音列表
@@ -944,6 +981,23 @@ export default function PanelApp() {
       soundRef.current = next;
       settingsStore
         .set(SOUND_KEY, next)
+        .then(() => settingsStore.save())
+        .catch(() => {});
+      return next;
+    });
+  }
+
+  // 主题变更：立即应用（主色 / 亮暗）并持久化。
+  function persistTheme(patch: Partial<ThemeSettings>) {
+    setTheme((prev) => {
+      const next = { ...prev, ...patch };
+      if (patch.color !== undefined) applyThemeColor(next.color);
+      if (patch.mode !== undefined) {
+        themeModeRef.current = next.mode;
+        applyThemeMode(next.mode);
+      }
+      settingsStore
+        .set(THEME_KEY, next)
         .then(() => settingsStore.save())
         .catch(() => {});
       return next;
@@ -2287,6 +2341,8 @@ export default function PanelApp() {
           onToggleAutostart={() => void handleToggleAutostart()}
           onSoundChange={persistSound}
           onPreviewSound={previewSound}
+          theme={theme}
+          onThemeChange={persistTheme}
           onCreateProfile={() => {
             setShowSettings(false);
             void handleCreateProfile();

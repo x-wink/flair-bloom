@@ -21,7 +21,7 @@
 }
 
 .key-capture:hover {
-  border-color: #b6a3f1;
+  border-color: rgba(var(--fb-color-primary-rgb), 0.45);
 }
 
 .key-capture:focus {
@@ -31,7 +31,7 @@
 
 .key-capture.capturing {
   border-color: var(--fb-color-primary);
-  background: #f0ecfc;
+  background: var(--fb-color-primary-soft);
   outline: none;
 }
 

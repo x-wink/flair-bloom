@@ -55,7 +55,7 @@
 }
 
 .ctx-menu-item.ctx-menu-item--active:not(:hover):not(:focus-visible) {
-  background: rgba(108, 77, 230, 0.04);
+  background: rgba(var(--fb-color-primary-rgb), 0.04);
 }
 
 .ctx-menu-item.ctx-menu-item--danger {
@@ -131,16 +131,16 @@
 
 .ctx-menu-item:hover .ctx-menu-subtitle,
 .ctx-menu-item:focus-visible .ctx-menu-subtitle {
-  color: #b3a4f0;
+  color: rgba(var(--fb-color-primary-rgb), 0.6);
 }
 
 .ctx-menu-item--danger:hover .ctx-menu-subtitle,
 .ctx-menu-item--danger:focus-visible .ctx-menu-subtitle {
-  color: #eea5a5;
+  color: rgba(var(--fb-color-danger-rgb), 0.6);
 }
 
 .ctx-menu-item--disabled .ctx-menu-subtitle {
-  color: #c8c8d0;
+  color: var(--fb-text-disabled);
 }
 
 .ctx-menu-check {

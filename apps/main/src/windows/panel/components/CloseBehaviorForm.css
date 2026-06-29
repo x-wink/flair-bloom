@@ -10,7 +10,7 @@
 }
 
 .radio-row:hover {
-  background: rgba(108, 77, 230, 0.08);
+  background: rgba(var(--fb-color-primary-rgb), 0.08);
 }
 
 .radio-row input[type='radio'] {

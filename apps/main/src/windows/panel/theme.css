@@ -2,37 +2,47 @@
 
 :root {
   /* ── Tone 基色 ────────────────────────────────────────── */
+  /* 主色由预设色板（PanelApp 注入 --fb-color-primary* 全套）覆盖，这里是出厂默认（万花·霞紫）。
+     -rgb 通道供 rgba() 透明派生跟随主题色，换肤/暗色时无需逐个枚举 soft 变体。 */
   --fb-color-primary: #6c4de6;
+  --fb-color-primary-rgb: 108, 77, 230;
   --fb-color-neutral: #6e6e76;
+  --fb-color-neutral-rgb: 110, 110, 118;
   --fb-color-danger: #e05c5c;
+  --fb-color-danger-rgb: 224, 92, 92;
   --fb-color-success: #52c41a;
+  --fb-color-success-rgb: 82, 196, 26;
   --fb-color-warning: #f5a623;
 
-  /* ── Tone 派生（预先计算，WebView2 不支持 color-mix）── */
+  /* ── Tone 派生（hover/active 预算，soft 走 -rgb 通道）──── */
   --fb-color-primary-hover: #5f44ca;
   --fb-color-primary-active: #543cb3;
-  --fb-color-primary-soft: rgba(108, 77, 230, 0.1);
-  --fb-color-primary-soft-hover: rgba(108, 77, 230, 0.18);
+  --fb-color-primary-soft: rgba(var(--fb-color-primary-rgb), 0.1);
+  --fb-color-primary-soft-hover: rgba(var(--fb-color-primary-rgb), 0.18);
 
   --fb-color-neutral-hover: #616168;
   --fb-color-neutral-active: #56565c;
-  --fb-color-neutral-soft: rgba(110, 110, 118, 0.1);
-  --fb-color-neutral-soft-hover: rgba(110, 110, 118, 0.18);
+  --fb-color-neutral-soft: rgba(var(--fb-color-neutral-rgb), 0.1);
+  --fb-color-neutral-soft-hover: rgba(var(--fb-color-neutral-rgb), 0.18);
 
   --fb-color-danger-hover: #c55151;
   --fb-color-danger-active: #af4848;
-  --fb-color-danger-soft: rgba(224, 92, 92, 0.1);
-  --fb-color-danger-soft-hover: rgba(224, 92, 92, 0.18);
+  --fb-color-danger-soft: rgba(var(--fb-color-danger-rgb), 0.1);
+  --fb-color-danger-soft-hover: rgba(var(--fb-color-danger-rgb), 0.18);
+  --fb-color-danger-strong: #e81123;
 
   --fb-color-success-hover: #48ac17;
   --fb-color-success-active: #409914;
-  --fb-color-success-soft: rgba(82, 196, 26, 0.1);
-  --fb-color-success-soft-hover: rgba(82, 196, 26, 0.18);
+  --fb-color-success-soft: rgba(var(--fb-color-success-rgb), 0.1);
+  --fb-color-success-soft-hover: rgba(var(--fb-color-success-rgb), 0.18);
 
   --fb-color-warning-hover: #d8921f;
   --fb-color-warning-active: #bf811b;
   --fb-color-warning-soft: rgba(245, 166, 35, 0.1);
   --fb-color-warning-soft-hover: rgba(245, 166, 35, 0.18);
+
+  /* 彩色实底上的文字（明暗两态都为白） */
+  --fb-text-on-accent: #fff;
 
   /* ── 文本灰阶 ─────────────────────────────────────────── */
   --fb-text-strong: #2d2d2d;
@@ -50,6 +60,30 @@
   --fb-surface: #fff;
   --fb-surface-soft: #fafafa;
   --fb-surface-muted: #f4f4f6;
+  --fb-surface-translucent: rgba(255, 255, 255, 0.76);
+  --fb-surface-glass: rgba(255, 255, 255, 0.5);
+
+  /* 标题栏控件 hover 底 / 自定义滚动条（off 态深调，on 态由 .panel.on 覆写为白） */
+  --fb-app-control-hover: rgba(0, 0, 0, 0.08);
+  --fb-scrollbar-thumb: rgba(0, 0, 0, 0.2);
+  --fb-scrollbar-thumb-hover: rgba(0, 0, 0, 0.38);
+
+  /* ── 应用主背景（标题/面板渐变，随全局开关 off/on 切换）── */
+  --fb-app-bg: linear-gradient(160deg, #f0edf8 0%, #e2ddf0 60%, #cfc9e6 100%);
+  --fb-app-bg-active: linear-gradient(160deg, #ffe3c4 0%, #ffb88a 55%, #ff8a5c 100%);
+  --fb-app-header-text: #2e2650;
+  --fb-app-watermark: rgba(0, 0, 0, 0.18);
+  --fb-app-watermark-active: rgba(255, 255, 255, 0.35);
+
+  /* ── 规则激活态（绿）──────────────────────────────────── */
+  --fb-rule-active-bg: #f3fbec;
+  --fb-rule-active-border: #cdebbb;
+  --fb-rule-active-border-strong: #8fd96a;
+  --fb-rule-active-accent: #6ddc35;
+
+  /* ── 更新进度条（深底文字，随面板 on 翻白）────────────── */
+  --fb-updater-text: #2a3a4a;
+  --fb-updater-text-rgb: 42, 58, 74;
 
   /* ── 间距阶梯（4 的倍数）─────────────────────────────── */
   --fb-space-1: 2px;
@@ -109,4 +143,52 @@
   --fb-z-modal: 100;
   --fb-z-overlay-mask: 99990;
   --fb-z-overlay-content: 99999;
+}
+
+/* ── 暗色模式：仅覆盖颜色 token，尺寸/字号等沿用 :root ──────────────
+   由 theme.ts applyThemeMode 写 documentElement.dataset.theme="dark" 激活。
+   主色 --fb-color-primary* 由预设注入、明暗共用；这里只调中性背景/文字/边框
+   及随面板背景翻转的派生色。soft/soft-hover 走 -rgb 通道自动适配。 */
+:root[data-theme='dark'] {
+  --fb-text-on-accent: #fff;
+
+  --fb-text-strong: #ececf0;
+  --fb-text-regular: #c4c4cc;
+  --fb-text-weak: #9a9aa4;
+  --fb-text-faint: #76767e;
+  --fb-text-disabled: #5c5c64;
+
+  --fb-border: #3a3b42;
+  --fb-border-soft: #303137;
+  --fb-divider: rgba(255, 255, 255, 0.08);
+
+  --fb-surface: #202126;
+  --fb-surface-soft: #26272c;
+  --fb-surface-muted: #2c2d33;
+  --fb-surface-translucent: rgba(255, 255, 255, 0.06);
+  --fb-surface-glass: rgba(26, 27, 32, 0.6);
+
+  --fb-app-control-hover: rgba(255, 255, 255, 0.12);
+  --fb-scrollbar-thumb: rgba(255, 255, 255, 0.2);
+  --fb-scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
+
+  /* 面板背景：off 深紫灰、on 仍用暖橙（激活态保持醒目，略压暗） */
+  --fb-app-bg: linear-gradient(160deg, #2a2833 0%, #232230 60%, #1c1b26 100%);
+  --fb-app-bg-active: linear-gradient(160deg, #7a4a22 0%, #8f4f1e 55%, #9a4a16 100%);
+  --fb-app-header-text: #ececf0;
+  --fb-app-watermark: rgba(255, 255, 255, 0.12);
+  --fb-app-watermark-active: rgba(255, 255, 255, 0.4);
+
+  /* 规则激活态：暗底绿调 */
+  --fb-rule-active-bg: #1d2a1b;
+  --fb-rule-active-border: #2f4a2a;
+  --fb-rule-active-border-strong: #3f7a35;
+  --fb-rule-active-accent: #6ddc35;
+
+  --fb-updater-text: #c4c4cc;
+  --fb-updater-text-rgb: 196, 196, 204;
+
+  --fb-shadow-popover: 0 12px 32px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
+  --fb-shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.6);
+  --fb-shadow-toast: 0 6px 20px rgba(0, 0, 0, 0.5);
 }

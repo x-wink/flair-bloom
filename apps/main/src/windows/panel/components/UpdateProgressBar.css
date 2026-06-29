@@ -1,11 +1,11 @@
 .update-progress {
   flex-shrink: 0;
   padding: 0 var(--fb-space-7) var(--fb-space-4);
-  color: #2a3a4a;
+  color: var(--fb-updater-text);
 }
 
 .panel.on .update-progress {
-  color: #fff;
+  color: var(--fb-text-on-accent);
 }
 
 .update-progress-info {
@@ -28,7 +28,7 @@
 
 .update-progress-value {
   flex-shrink: 0;
-  color: rgba(42, 58, 74, 0.72);
+  color: rgba(var(--fb-updater-text-rgb), 0.72);
   font-variant-numeric: tabular-nums;
 }
 
@@ -41,7 +41,7 @@
   height: 4px;
   overflow: hidden;
   border-radius: var(--fb-radius-pill);
-  background: rgba(42, 58, 74, 0.12);
+  background: rgba(var(--fb-updater-text-rgb), 0.12);
 }
 
 .panel.on .update-progress-track {
@@ -53,7 +53,7 @@
   inset: 0 auto 0 0;
   width: 0;
   border-radius: inherit;
-  background: linear-gradient(90deg, #6c4de6 0%, #22a06b 100%);
+  background: linear-gradient(90deg, var(--fb-color-primary) 0%, var(--fb-color-success) 100%);
   transition: width 0.18s ease;
 }
 

@@ -41,11 +41,11 @@
 
 /* underline 变体 —— 下边框分割线 */
 .fb-tab-bar--underline {
-  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  border-bottom: 1px solid var(--fb-divider);
 }
 .fb-tab-bar--vertical.fb-tab-bar--underline {
   border-bottom: none;
-  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  border-right: 1px solid var(--fb-divider);
 }
 
 /* pill 变体 —— 圆角按钮组 */
@@ -124,7 +124,7 @@
   font-size: var(--fb-fs-xs);
   padding: 1px var(--fb-space-4);
   border-radius: var(--fb-radius-pill);
-  background: rgba(108, 77, 230, 0.12);
+  background: rgba(var(--fb-color-primary-rgb), 0.12);
   color: var(--fb-color-primary);
   font-weight: var(--fb-fw-medium);
 }

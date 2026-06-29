@@ -14,5 +14,5 @@
 
 .profile-name-input:focus {
   border-color: var(--fb-color-primary);
-  box-shadow: 0 0 0 2px rgba(108, 77, 230, 0.18);
+  box-shadow: 0 0 0 2px var(--fb-color-primary-soft-hover);
 }

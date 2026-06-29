@@ -8,6 +8,7 @@ import Tabs from '../components/Tabs';
 import type { ConflictSeverity } from '../conflicts';
 import DialogShell from './DialogShell';
 import ProfileCardList, { type SettingsProfileEntry } from './ProfileCardList';
+import { SECT_PRESETS, type ThemeMode, type ThemeSettings } from '../theme';
 import './SettingsDialog.css';
 
 export type SettingsTab = 'general' | 'hotkeys' | 'sound' | 'profiles';
@@ -69,6 +70,8 @@ interface Props {
   onToggleAutostart: () => void;
   onSoundChange: (patch: Partial<SoundSettings>) => void;
   onPreviewSound: (type: 'start' | 'end' | 'toggleStart' | 'toggleEnd') => void;
+  theme: ThemeSettings;
+  onThemeChange: (patch: Partial<ThemeSettings>) => void;
   onCreateProfile: () => void;
   onImportProfile: () => void;
   onSwitchProfile: (path: string) => void;
@@ -84,6 +87,12 @@ const TABS: { id: SettingsTab; label: string }[] = [
 ];
 
 const DEFAULT_PROFILE_NAME = 'defaults';
+
+const THEME_MODE_OPTIONS: { value: ThemeMode; label: string }[] = [
+  { value: 'light', label: '亮' },
+  { value: 'dark', label: '暗' },
+  { value: 'system', label: '跟随系统' },
+];
 
 const INPUT_MODE_LABELS: Record<SettingsInputMode, string> = {
   sendinput: '通用模式',
@@ -294,6 +303,52 @@ export default function SettingsDialog(props: Props) {
       <div className="settings-body">
         {tab === 'general' && (
           <>
+            <SettingsSection title="外观">
+              <div className="settings-row">
+                <div className="settings-row-main">
+                  <span className="settings-row-title">明暗模式</span>
+                  <span className="settings-row-desc">跟随系统或手动锁定亮/暗</span>
+                </div>
+                <div className="theme-mode-seg">
+                  {THEME_MODE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.value}
+                      type="button"
+                      className={`theme-mode-seg-btn${
+                        props.theme.mode === opt.value ? ' theme-mode-seg-btn--active' : ''
+                      }`}
+                      onClick={() => props.onThemeChange({ mode: opt.value })}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="settings-row settings-row--stack">
+                <div className="settings-row-main">
+                  <span className="settings-row-title">主题色</span>
+                  <span className="settings-row-desc">移入查看配色名称</span>
+                </div>
+                <div className="theme-swatches">
+                  {SECT_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className={`theme-swatch${
+                        props.theme.color.toLowerCase() === p.color.toLowerCase()
+                          ? ' theme-swatch--active'
+                          : ''
+                      }`}
+                      style={{ background: p.color }}
+                      title={p.name}
+                      aria-label={p.name}
+                      onClick={() => props.onThemeChange({ color: p.color })}
+                    />
+                  ))}
+                </div>
+              </div>
+            </SettingsSection>
+
             <SettingsSection title="运行">
               <div className="settings-row">
                 <div className="settings-row-main">

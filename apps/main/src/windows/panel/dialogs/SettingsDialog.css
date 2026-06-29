@@ -31,6 +31,70 @@
   color: var(--fb-text-faint);
 }
 
+/* ── 外观：明暗模式分段控件 + 主题色色板 ──
+   用复合选择器压过 .settings-row 的 align-items:center（同特异性、靠后定义会胜出）。 */
+.settings-row.settings-row--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--fb-space-5);
+}
+
+.theme-mode-seg {
+  display: inline-flex;
+  flex: none;
+  border: 1px solid var(--fb-border-soft);
+  border-radius: var(--fb-radius-md);
+  overflow: hidden;
+}
+
+.theme-mode-seg-btn {
+  padding: var(--fb-space-2) var(--fb-space-5);
+  border: none;
+  background: var(--fb-surface);
+  color: var(--fb-text-regular);
+  font: inherit;
+  font-size: var(--fb-fs-sm);
+  cursor: pointer;
+  transition:
+    background var(--fb-duration-base) ease,
+    color var(--fb-duration-base) ease;
+}
+
+.theme-mode-seg-btn + .theme-mode-seg-btn {
+  border-left: 1px solid var(--fb-border-soft);
+}
+
+.theme-mode-seg-btn--active {
+  background: var(--fb-color-primary);
+  color: var(--fb-text-on-accent);
+}
+
+.theme-swatches {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(28px, 1fr));
+  gap: var(--fb-space-4);
+}
+
+.theme-swatch {
+  width: 100%;
+  aspect-ratio: 1;
+  min-height: 24px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: var(--fb-radius-md);
+  cursor: pointer;
+  transition: transform var(--fb-duration-base) ease;
+}
+
+.theme-swatch:hover {
+  transform: scale(1.08);
+}
+
+.theme-swatch--active {
+  border-color: var(--fb-surface);
+  box-shadow: 0 0 0 2px var(--fb-color-primary);
+}
+
 .settings-row {
   display: flex;
   align-items: center;

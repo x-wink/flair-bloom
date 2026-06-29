@@ -17,7 +17,7 @@
 
 .update-badge {
   display: inline-block;
-  background: #e2dafa;
+  background: var(--fb-color-primary-soft);
   color: var(--fb-color-primary);
   font-size: var(--fb-fs-xs);
   font-weight: var(--fb-fw-semibold);
@@ -69,7 +69,7 @@
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   font-size: var(--fb-fs-md);
   line-height: var(--fb-lh-loose);
-  color: #444;
+  color: var(--fb-text-regular);
   white-space: pre-wrap;
   word-break: break-word;
   -webkit-user-select: text;
@@ -80,7 +80,7 @@
   padding: var(--fb-space-6) var(--fb-space-12) var(--fb-space-10);
   display: flex;
   justify-content: center;
-  border-top: 1px solid #f3f3f3;
+  border-top: 1px solid var(--fb-border-soft);
 }
 
 .update-notice-close {
