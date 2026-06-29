@@ -160,6 +160,8 @@ body {
   }
 }
 
+/* 小图标按钮：全局开关（开=停止图标 / 关=启动图标）与放大按钮共用样式 */
+.fb-float-global,
 .fb-float-expand {
   flex: none;
   width: 28px;
@@ -177,10 +179,20 @@ body {
     background var(--fb-duration-fast) ease,
     color var(--fb-duration-fast) ease;
 }
+.fb-float-global:hover,
 .fb-float-expand:hover {
   background: var(--fb-app-control-hover);
   color: var(--fb-color-primary);
 }
+.fb-float-global:active,
 .fb-float-expand:active {
   transform: translateY(1px);
+}
+/* 运行中：停止图标用主色，醒目提示正在连发 */
+.fb-float-global.is-on {
+  color: var(--fb-color-primary);
+}
+.fb-float-global:disabled {
+  opacity: 0.5;
+  cursor: default;
 }

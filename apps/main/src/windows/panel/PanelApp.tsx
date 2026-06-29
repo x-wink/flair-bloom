@@ -1,7 +1,7 @@
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { LogicalSize } from '@tauri-apps/api/dpi';
-import { listen } from '@tauri-apps/api/event';
+import { emit, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { LazyStore } from '@tauri-apps/plugin-store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -15,13 +15,14 @@ import { useConfirm } from './components/ConfirmDialog';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import { ChevronIcon, CloseIcon, EditIcon, MenuIcon, MinimizeIcon } from './components/icons';
 import Kbd from './components/Kbd';
-import KeyCapture, { BROWSER_VK, keyboardKey, keyLabel, type KeyId } from './components/KeyCapture';
+import KeyCapture, { keyboardKey, keyEq, keyLabel, type KeyId } from './components/KeyCapture';
 import Overlay from './components/Overlay';
 import ProfileNameForm from './components/ProfileNameForm';
 import Tabs from './components/Tabs';
 import { useToast } from './components/Toast';
 import UpdateProgressBar, { type UpdateDownloadProgress } from './components/UpdateProgressBar';
 import { detectConflicts, severityForKey, severityForRule } from './conflicts';
+import { useKeyRelay } from './useKeyRelay';
 import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
 import ImportDialog from './dialogs/ImportDialog';
@@ -129,6 +130,11 @@ function inputModeRequiresAdmin(mode: InputMode): boolean {
   return mode !== 'sendinput';
 }
 
+// DD 系列驱动（DDSimple / DDHID）。横版键鼠图无法表达其单键规则约束，二者互斥。
+function isDdInputMode(mode: InputMode): boolean {
+  return mode === 'ddsimple' || mode === 'dd_hid';
+}
+
 const DD_HID_BLOCKED_NOTICE = (
   <>
     经测试 DDHID
@@ -188,15 +194,6 @@ interface ForkResult {
   path: string;
 }
 
-interface RelayKeyResult {
-  accepted_physical: boolean;
-  handled: boolean;
-}
-
-function keyToken(key: KeyId): string {
-  return `${key.kind}:${key.code}`;
-}
-
 function newRule(mode: BurstMode = 'hold'): BurstRule {
   const isHold = mode === 'hold';
   const triggerVk = isHold ? 0x51 : 0x46; // Hold: Q, Toggle: F
@@ -217,11 +214,6 @@ function defaultRules(): BurstRule[] {
   return [newRule('hold'), newRule('toggle')];
 }
 
-function keyEq(a: KeyId | null | undefined, b: KeyId | null | undefined): boolean {
-  if (!a || !b) return false;
-  return a.kind === b.kind && a.code === b.code;
-}
-
 /** 横版单键规则：触发键 == 连发键（== 停止键，toggle 时）。 */
 function newSingleKeyRule(key: KeyId, mode: BurstMode, interval: number): BurstRule {
   return {
@@ -234,13 +226,6 @@ function newSingleKeyRule(key: KeyId, mode: BurstMode, interval: number): BurstR
     interval_ms: interval,
     group: null,
   };
-}
-
-function isEditableKeyboardTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  return Boolean(
-    target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])'),
-  );
 }
 
 function buildProfileMenu(args: {
@@ -377,9 +362,8 @@ export default function PanelApp() {
   const ddHidFallbackInFlightRef = useRef(false);
   const ddHidNoticeOpenRef = useRef(false);
   const profileNameRef = useRef(profileName);
-  const relayedKeyDownsRef = useRef<Map<string, KeyId>>(new Map());
-  const relayDownInFlightRef = useRef<Set<string>>(new Set());
-  const relayedKeyReleasedEarlyRef = useRef<Set<string>>(new Set());
+  // WebView2 聚焦时全局键盘钩子失效，将键盘事件中继到后端引擎（与浮窗共用）。
+  useKeyRelay();
   const isDefaultProfile = profileName === DEFAULT_PROFILE_NAME;
 
   const showDdHidBlockedNotice = useCallback(async () => {
@@ -742,79 +726,6 @@ export default function PanelApp() {
   profileNameRef.current = profileName;
   hotkeysRef.current = hotkeys;
 
-  // WebView2 聚焦时 WH_KEYBOARD_LL 不触发；将键盘事件中继到后端引擎统一处理
-  // （热键、Toggle 触发键、pressed_keys 维护）。
-  // bubble 阶段注册：KeyCapture 在 capture 阶段 stopPropagation()，捕获模式下不干扰。
-  useEffect(() => {
-    const releaseRelayedDowns = () => {
-      const pending = [...relayedKeyDownsRef.current.values()];
-      relayedKeyDownsRef.current.clear();
-      relayDownInFlightRef.current.clear();
-      relayedKeyReleasedEarlyRef.current.clear();
-      for (const key of pending) {
-        invoke('relay_key_event', { key, isUp: true }).catch(() => {});
-      }
-    };
-    const downHandler = (e: KeyboardEvent) => {
-      const allowDefault = isEditableKeyboardTarget(e.target);
-      if (!allowDefault) e.preventDefault();
-      const vk = BROWSER_VK[e.code];
-      if (vk !== undefined) {
-        const key = keyboardKey(vk);
-        if (!e.repeat) {
-          const token = keyToken(key);
-          relayDownInFlightRef.current.add(token);
-          invoke<RelayKeyResult>('relay_key_event', { key, isUp: false })
-            .then((result) => {
-              relayDownInFlightRef.current.delete(token);
-              if (result.accepted_physical) {
-                if (relayedKeyReleasedEarlyRef.current.delete(token)) {
-                  invoke('relay_key_event', { key, isUp: true }).catch(() => {});
-                } else {
-                  relayedKeyDownsRef.current.set(token, key);
-                }
-              }
-            })
-            .catch(() => {
-              relayDownInFlightRef.current.delete(token);
-              relayedKeyReleasedEarlyRef.current.delete(token);
-            });
-        }
-      }
-    };
-    const upHandler = (e: KeyboardEvent) => {
-      if (!isEditableKeyboardTarget(e.target)) e.preventDefault();
-      const vk = BROWSER_VK[e.code];
-      if (vk !== undefined) {
-        const key = keyboardKey(vk);
-        const token = keyToken(key);
-        if (!relayedKeyDownsRef.current.delete(token)) {
-          if (relayDownInFlightRef.current.has(token)) {
-            relayedKeyReleasedEarlyRef.current.add(token);
-          }
-          return;
-        }
-        invoke('relay_key_event', { key, isUp: true }).catch(() => {});
-      }
-    };
-    const visibilityHandler = () => {
-      if (document.visibilityState === 'hidden') {
-        releaseRelayedDowns();
-      }
-    };
-    window.addEventListener('keydown', downHandler);
-    window.addEventListener('keyup', upHandler);
-    window.addEventListener('blur', releaseRelayedDowns);
-    document.addEventListener('visibilitychange', visibilityHandler);
-    return () => {
-      window.removeEventListener('keydown', downHandler);
-      window.removeEventListener('keyup', upHandler);
-      window.removeEventListener('blur', releaseRelayedDowns);
-      document.removeEventListener('visibilitychange', visibilityHandler);
-      releaseRelayedDowns();
-    };
-  }, []);
-
   const refreshProfileList = useCallback(async () => {
     try {
       const list = await invoke<ProfileEntry[]>('list_profiles');
@@ -1017,32 +928,30 @@ export default function PanelApp() {
   }
 
   function persistSound(patch: Partial<SoundSettings>) {
-    setSound((prev) => {
-      const next = { ...prev, ...patch };
-      soundRef.current = next;
-      settingsStore
-        .set(SOUND_KEY, next)
-        .then(() => settingsStore.save())
-        .catch(() => {});
-      return next;
-    });
+    // 副作用（写盘）放在 updater 外，避免 StrictMode 双调用导致重复写入。
+    const next = { ...soundRef.current, ...patch };
+    soundRef.current = next;
+    setSound(next);
+    settingsStore
+      .set(SOUND_KEY, next)
+      .then(() => settingsStore.save())
+      .catch(() => {});
   }
 
-  // 主题变更：立即应用（主色 / 亮暗）并持久化。
+  // 主题变更：立即应用（主色 / 亮暗）、持久化，并广播给其他窗口（浮窗）同步。
   function persistTheme(patch: Partial<ThemeSettings>) {
-    setTheme((prev) => {
-      const next = { ...prev, ...patch };
-      if (patch.color !== undefined) applyThemeColor(next.color);
-      if (patch.mode !== undefined) {
-        themeModeRef.current = next.mode;
-        applyThemeMode(next.mode);
-      }
-      settingsStore
-        .set(THEME_KEY, next)
-        .then(() => settingsStore.save())
-        .catch(() => {});
-      return next;
-    });
+    const next = { ...theme, ...patch };
+    setTheme(next);
+    if (patch.color !== undefined) applyThemeColor(next.color);
+    if (patch.mode !== undefined) {
+      themeModeRef.current = next.mode;
+      applyThemeMode(next.mode);
+    }
+    settingsStore
+      .set(THEME_KEY, next)
+      .then(() => settingsStore.save())
+      .catch(() => {});
+    emit('theme-changed', next).catch(() => {});
   }
 
   // 从下拉菜单设置明暗模式 / 主题色：应用+持久化并收起菜单。
@@ -1154,6 +1063,12 @@ export default function PanelApp() {
       await showDdHidBlockedNotice();
       return;
     }
+    // DD 系列与横版键鼠图互斥：横版下禁止切到 DD 驱动。
+    if (isDdInputMode(target) && layout === 'horizontal') {
+      setModePickerOpen(false);
+      toast.warning('横版键鼠图不支持 DD 驱动模式，请先切回竖版规则列表');
+      return;
+    }
     if (switchingMode || target === inputMode) return;
     setSwitchingMode(true);
     try {
@@ -1249,6 +1164,11 @@ export default function PanelApp() {
   }
 
   function switchLayout(next: PanelLayout) {
+    // DD 系列与横版键鼠图互斥：DD 驱动下禁止切到横版。
+    if (next === 'horizontal' && isDdInputMode(inputMode)) {
+      toast.warning('DD 驱动模式不支持横版键鼠图，请先切换到游戏模式或通用模式');
+      return;
+    }
     setLayout(next);
     void applyWindowSize(next);
     settingsStore
@@ -1722,8 +1642,15 @@ export default function PanelApp() {
           <button
             className="win-btn"
             onClick={() => switchLayout(layout === 'vertical' ? 'horizontal' : 'vertical')}
+            disabled={isDdInputMode(inputMode) && layout === 'vertical'}
             aria-label="切换布局"
-            title={layout === 'vertical' ? '切换到横版键鼠图' : '切换到竖版规则列表'}
+            title={
+              isDdInputMode(inputMode) && layout === 'vertical'
+                ? 'DD 驱动模式不支持横版键鼠图'
+                : layout === 'vertical'
+                  ? '切换到横版键鼠图'
+                  : '切换到竖版规则列表'
+            }
           >
             {layout === 'vertical' ? (
               <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -2531,6 +2458,7 @@ export default function PanelApp() {
           initialTab={settingsInitialTab}
           appVersion={appVersion}
           inputMode={inputMode}
+          layout={layout}
           switchingMode={switchingMode}
           globalEnabled={globalEnabled}
           togglingGlobal={togglingGlobal}

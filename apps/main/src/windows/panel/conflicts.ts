@@ -10,7 +10,7 @@
  *  - 全局热键 == target_key（target 走注入通道，hook 过滤自身注入）
  */
 
-import { keyLabel, type KeyId } from './components/KeyCapture';
+import { keyEq, keyLabel, type KeyId } from './components/KeyCapture';
 
 export type BurstMode = 'hold' | 'toggle';
 
@@ -49,12 +49,6 @@ export interface Conflict {
 }
 
 // ── 工具 ─────────────────────────────────────────────────────────────────────
-
-function keyEq(a: KeyId | null, b: KeyId | null): boolean {
-  if (!a || !b) return false;
-  if (a.kind !== b.kind) return false;
-  return a.code === b.code;
-}
 
 function keyStr(k: KeyId): string {
   return `${k.kind}:${k.code}`;

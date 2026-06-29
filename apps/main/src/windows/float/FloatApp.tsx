@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { getCurrentWindow, LogicalSize, PhysicalPosition } from '@tauri-apps/api/window';
+import {
+  availableMonitors,
+  getCurrentWindow,
+  LogicalSize,
+  PhysicalPosition,
+} from '@tauri-apps/api/window';
 import { LazyStore } from '@tauri-apps/plugin-store';
 import iconUrl from '../../assets/icon-64.png';
 import { keyLabel, type KeyId } from '../panel/components/KeyCapture';
+import { useKeyRelay } from '../panel/useKeyRelay';
 import {
   applyThemeColor,
   applyThemeMode,
@@ -51,9 +57,13 @@ function capClass(r: FloatRule, active: boolean): string {
 export default function FloatApp() {
   const [active, setActive] = useState(false);
   const [globalEnabled, setGlobalEnabled] = useState(false);
+  const [togglingGlobal, setTogglingGlobal] = useState(false);
   const [rules, setRules] = useState<FloatRule[]>([]);
   const [activeIds, setActiveIds] = useState<string[]>([]);
   const floatRef = useRef<HTMLDivElement>(null);
+
+  // 浮窗聚焦时全局键盘钩子失效，与主面板共用键盘事件中继，避免热键被吞。
+  useKeyRelay();
 
   // ── 主题：与主面板同源（settings.json 的 theme），并跟随系统配色 ──
   const themeModeRef = useRef<ThemeMode>(DEFAULT_THEME_MODE);
@@ -74,7 +84,18 @@ export default function FloatApp() {
       if (themeModeRef.current === 'system') applyThemeMode('system');
     };
     mql.addEventListener('change', onSystemChange);
-    return () => mql.removeEventListener('change', onSystemChange);
+
+    // 主面板改主题时广播 theme-changed，浮窗实时同步（否则常驻浮窗会停留在旧主题）。
+    const unlistenT = listen<ThemeSettings>('theme-changed', (e) => {
+      const v = e.payload;
+      themeModeRef.current = v.mode;
+      applyThemeColor(v.color);
+      applyThemeMode(v.mode);
+    });
+    return () => {
+      mql.removeEventListener('change', onSystemChange);
+      unlistenT.then((fn) => fn()).catch(() => {});
+    };
   }, []);
 
   // ── 全局开关：驱动背景渐变与呼吸动画（与主面板一致）──
@@ -90,19 +111,32 @@ export default function FloatApp() {
 
   // ── 位置：启动恢复上次位置，拖动后持久化 ──
   useEffect(() => {
-    settingsStore
-      .get<{ x: number; y: number }>(FLOAT_POS_KEY)
-      .then((pos) => {
-        if (pos && Number.isFinite(pos.x) && Number.isFinite(pos.y)) {
-          getCurrentWindow()
-            .setPosition(new PhysicalPosition(Math.round(pos.x), Math.round(pos.y)))
-            .catch(() => {});
-        }
-      })
-      .catch(() => {});
-
     let unlisten: (() => void) | undefined;
     let saveTimer: ReturnType<typeof setTimeout> | undefined;
+
+    void (async () => {
+      try {
+        const pos = await settingsStore.get<{ x: number; y: number }>(FLOAT_POS_KEY);
+        if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
+        // 仅当坐标落在当前某显示器范围内才恢复，避免副屏拔除/改分辨率后浮窗停在屏幕外不可达。
+        const monitors = await availableMonitors();
+        const onScreen = monitors.some(
+          (m) =>
+            pos.x >= m.position.x &&
+            pos.x < m.position.x + m.size.width &&
+            pos.y >= m.position.y &&
+            pos.y < m.position.y + m.size.height,
+        );
+        if (onScreen) {
+          await getCurrentWindow().setPosition(
+            new PhysicalPosition(Math.round(pos.x), Math.round(pos.y)),
+          );
+        }
+      } catch {
+        /* 恢复失败保持默认位置 */
+      }
+    })();
+
     getCurrentWindow()
       .onMoved(({ payload }) => {
         if (saveTimer) clearTimeout(saveTimer);
@@ -206,6 +240,21 @@ export default function FloatApp() {
     invoke('show_main_panel').catch(() => {});
   };
 
+  // 全局开关：复用主面板逻辑（set_global_enabled），乐观更新本地状态。
+  const toggleGlobal = async () => {
+    if (togglingGlobal) return;
+    const next = !globalEnabled;
+    setTogglingGlobal(true);
+    try {
+      await invoke('set_global_enabled', { enabled: next });
+      setGlobalEnabled(next);
+    } catch {
+      /* 切换失败保持原状 */
+    } finally {
+      setTogglingGlobal(false);
+    }
+  };
+
   const activeSet = new Set(activeIds);
   // 含激活规则的互斥分组（保持规则出现顺序）
   const activeGroups: string[] = [];
@@ -265,6 +314,28 @@ export default function FloatApp() {
           </>
         )}
       </div>
+
+      <button
+        type="button"
+        className={`fb-float-global ${globalEnabled ? 'is-on' : 'is-off'}`}
+        title={globalEnabled ? '暂停全局连发' : '启动全局连发'}
+        aria-label={globalEnabled ? '暂停全局连发' : '启动全局连发'}
+        disabled={togglingGlobal}
+        onClick={() => void toggleGlobal()}
+      >
+        {globalEnabled ? (
+          // 运行中：显示暂停图标（双竖条），点击即停
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+            <rect x="7" y="5" width="3.5" height="14" rx="1.5" fill="currentColor" />
+            <rect x="13.5" y="5" width="3.5" height="14" rx="1.5" fill="currentColor" />
+          </svg>
+        ) : (
+          // 已停止：显示启动图标（三角），点击即开
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+            <path d="M8 5v14l11-7z" fill="currentColor" />
+          </svg>
+        )}
+      </button>
 
       <button type="button" className="fb-float-expand" title="展开主面板" onClick={onExpand}>
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">

@@ -28,8 +28,8 @@ export default function CloseBehaviorForm({ defaultChoice, onChange }: Props) {
           onChange={() => update('minimize', remember)}
         />
         <span>
-          <strong>最小化到托盘</strong>
-          <small>程序继续在后台运行（推荐）</small>
+          <strong>切换到悬浮窗</strong>
+          <small>收起为右下角悬浮窗，连发继续运行（推荐）</small>
         </span>
       </label>
       <label className="radio-row">

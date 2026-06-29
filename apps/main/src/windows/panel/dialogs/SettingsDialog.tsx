@@ -2,7 +2,7 @@ import { type ReactNode, useState } from 'react';
 import Button from '../components/Button';
 import { CardList, CardListButton } from '../components/CardList';
 import type { CloseBehavior } from '../components/CloseBehaviorForm';
-import KeyCapture, { type KeyId } from '../components/KeyCapture';
+import KeyCapture, { keyEq, type KeyId } from '../components/KeyCapture';
 import { VolumeIcon } from '../components/icons';
 import Tabs from '../components/Tabs';
 import type { ConflictSeverity } from '../conflicts';
@@ -37,6 +37,7 @@ interface Props {
   initialTab?: SettingsTab;
   appVersion: string;
   inputMode: SettingsInputMode;
+  layout: 'vertical' | 'horizontal';
   switchingMode: boolean;
   globalEnabled: boolean;
   togglingGlobal: boolean;
@@ -113,7 +114,7 @@ const CLOSE_BEHAVIOR_OPTIONS: {
   label: string;
   detail: string;
 }[] = [
-  { value: 'minimize', label: '最小化到托盘', detail: '后台继续运行' },
+  { value: 'minimize', label: '切换到悬浮窗', detail: '收起为悬浮窗' },
   { value: 'exit', label: '直接退出', detail: '关闭应用进程' },
   { value: null, label: '关闭时询问', detail: '每次确认' },
 ];
@@ -192,10 +193,6 @@ function SliderRow({
   );
 }
 
-function hotkeyKeyEq(a: KeyId | null, b: KeyId | null): boolean {
-  return !!a && !!b && a.kind === b.kind && a.code === b.code;
-}
-
 // 单条播报语句行：文本框（含内嵌试听图标）+ 行尾独立开关。
 // 文本编辑与试听仅受总开关 masterEnabled 限制；行尾开关仅控制实际播报，不锁定编辑。
 function SoundStatementRow({
@@ -272,7 +269,7 @@ export default function SettingsDialog(props: Props) {
       const others = (['global_toggle', 'global_stop', 'panel_toggle'] as const).filter(
         (f) => f !== field,
       );
-      if (others.some((f) => hotkeyKeyEq(props.hotkeys[f], key))) {
+      if (others.some((f) => keyEq(props.hotkeys[f], key))) {
         setHotkeyDupNote('该按键已被其它全局热键占用，请换一个');
         return;
       }
@@ -388,12 +385,15 @@ export default function SettingsDialog(props: Props) {
               <CardList>
                 {SELECTABLE_INPUT_MODES.map((mode) => {
                   const tag = modeTag(mode);
+                  // DD 系列与横版键鼠图互斥：横版下禁用 DD 驱动选项。
+                  const ddBlocked =
+                    props.layout === 'horizontal' && (mode === 'ddsimple' || mode === 'dd_hid');
                   return (
                     <CardListButton
                       key={mode}
                       active={props.inputMode === mode}
                       className="settings-mode"
-                      disabled={props.switchingMode}
+                      disabled={props.switchingMode || ddBlocked}
                       onClick={() => props.onSelectInputMode(mode)}
                     >
                       <span className="settings-mode-name">
@@ -405,7 +405,9 @@ export default function SettingsDialog(props: Props) {
                         )}
                       </span>
                       <span className="settings-mode-meta">
-                        {INPUT_MODE_HINTS[mode]} · {modeDetail(mode, props)}
+                        {ddBlocked
+                          ? '横版键鼠图下不可用，请先切回竖版'
+                          : `${INPUT_MODE_HINTS[mode]} · ${modeDetail(mode, props)}`}
                       </span>
                     </CardListButton>
                   );

@@ -2,6 +2,7 @@ import { type CSSProperties, useRef, useState } from 'react';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import {
   keyboardKey,
+  keyEq,
   keyLabel,
   mouseKey,
   type KeyId,
@@ -54,11 +55,6 @@ interface Props {
   onDeleteRule: (ruleId: string) => void;
   /** 删除某物理键上的全部规则（高级规则键用）。 */
   onDeleteKey: (key: KeyId) => void;
-}
-
-function keyEq(a: KeyId | null | undefined, b: KeyId | null | undefined): boolean {
-  if (!a || !b) return false;
-  return a.kind === b.kind && a.code === b.code;
 }
 
 function token(key: KeyId): string {

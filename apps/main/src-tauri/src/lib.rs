@@ -75,14 +75,17 @@ pub(crate) fn enter_panel_mode<R: Runtime>(app: &AppHandle<R>) {
 
 /// 进入浮窗模式：隐藏主面板、显示常驻浮窗。所有"隐藏主面板"入口都应走这里。
 pub(crate) fn enter_float_mode<R: Runtime>(app: &AppHandle<R>) {
-    if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
-        let _ = panel.hide();
-    }
+    // 先确保浮窗能显示再隐藏面板；浮窗缺失时保留面板，避免应用整体不可见。
     if let Some(float) = app.get_webview_window(FLOAT_LABEL) {
         let _ = float.show();
         let _ = float.set_focus();
         // 通知浮窗开始轮询激活规则
         let _ = float.emit("float-active", true);
+        if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
+            let _ = panel.hide();
+        }
+    } else if let Some(panel) = app.get_webview_window(PANEL_LABEL) {
+        let _ = panel.show();
     }
 }
 

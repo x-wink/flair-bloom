@@ -13,6 +13,12 @@ export type KeyId = { kind: 'keyboard'; code: number } | { kind: 'mouse'; code: 
 export const keyboardKey = (vk: number): KeyId => ({ kind: 'keyboard', code: vk });
 export const mouseKey = (btn: MouseButton): KeyId => ({ kind: 'mouse', code: btn });
 
+/** KeyId 相等判断；任一为空视为不等。 */
+export function keyEq(a: KeyId | null | undefined, b: KeyId | null | undefined): boolean {
+  if (!a || !b) return false;
+  return a.kind === b.kind && a.code === b.code;
+}
+
 const KEY_NAMES: Record<number, string> = {
   0x41: 'A',
   0x42: 'B',
