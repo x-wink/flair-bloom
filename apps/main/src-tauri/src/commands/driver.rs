@@ -214,7 +214,7 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
     {
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Foundation::ERROR_CANCELLED;
-        use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW};
+        use windows_sys::Win32::UI::Shell::{ShellExecuteExW, SEE_MASK_NOASYNC, SHELLEXECUTEINFOW};
 
         let _ =
             win_input::InputMode::from_str(&mode).ok_or_else(|| format!("未知输入模式: {mode}"))?;
@@ -226,7 +226,9 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
             .chain(std::iter::once(0))
             .collect();
         let verb: Vec<u16> = "runas\0".encode_utf16().collect();
-        let params: Vec<u16> = format!("--elevated --switch-mode={mode}\0")
+        // 传旧进程 PID，新实例启动时先等它退出释放单实例锁（见 wait_for_predecessor_exit）。
+        let pid = std::process::id();
+        let params: Vec<u16> = format!("--elevated --switch-mode={mode} --await-pid={pid}\0")
             .encode_utf16()
             .collect();
 
@@ -234,6 +236,9 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
             // SAFETY: SHELLEXECUTEINFOW 是 POD，全 0 初始化合法
             let mut sei: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
             sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+            // SEE_MASK_NOASYNC：本进程在 ShellExecuteEx 后立即退出，必须等提权启动
+            // 真正完成再返回，否则 shell 异步拉起会被中止，表现为「只退出不重启」。
+            sei.fMask = SEE_MASK_NOASYNC;
             sei.lpVerb = verb.as_ptr();
             sei.lpFile = path_wide.as_ptr();
             sei.lpParameters = params.as_ptr();
@@ -256,9 +261,11 @@ pub async fn relaunch_as_admin(app: AppHandle, mode: String) -> Result<(), Strin
 
         result.as_ref().map_err(|e| e.clone())?;
 
+        // 提权实例已由 SEE_MASK_NOASYNC 保证拉起完成，这里短暂延迟仅为让本次 invoke
+        // 响应回到前端后再退出。新实例会等本进程退出释放单实例锁后才继续启动。
         let app_clone = app.clone();
         tauri::async_runtime::spawn_blocking(move || {
-            std::thread::sleep(std::time::Duration::from_millis(300));
+            std::thread::sleep(std::time::Duration::from_millis(100));
             app_clone.exit(0);
         });
         Ok(())

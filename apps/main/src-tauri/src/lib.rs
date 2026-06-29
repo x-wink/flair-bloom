@@ -14,7 +14,7 @@ mod tray;
 
 use bootstrap::{
     agreement::{check_agreement, AGREEMENT_VERSION},
-    input::init_input_backend,
+    input::{init_input_backend, wait_for_predecessor_exit},
     logging,
     profile::load_or_init_profile,
     update::{check_for_updates, UpdateLock},
@@ -62,6 +62,9 @@ pub fn log_dir() -> std::path::PathBuf {
 }
 
 pub fn run() {
+    // 提权重启时，新实例先等旧实例退出释放单实例锁，再继续装配（含单实例插件）。
+    wait_for_predecessor_exit();
+
     let dir = logging::log_dir();
     std::fs::create_dir_all(&dir).ok();
     logging::init(&dir);

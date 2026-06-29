@@ -127,6 +127,7 @@ export default function RepairDialog({
   const [scanning, setScanning] = useState(false);
   const [running, setRunning] = useState<RepairCommand | null>(null);
   const [exportingReport, setExportingReport] = useState(false);
+  const [relaunching, setRelaunching] = useState(false);
   const [outcomes, setOutcomes] = useState<Record<RepairCommand, RepairOutcome | null>>({
     repair_dd_hid_residue: null,
     repair_interception_residue: null,
@@ -206,6 +207,26 @@ export default function RepairDialog({
     }
   }, [exportingReport]);
 
+  // 手动以管理员身份重启：保留当前输入模式，新提权实例会接管。失败时才复位 loading，
+  // 成功路径下本进程很快退出，无需复位。
+  const relaunchAsAdmin = useCallback(async () => {
+    if (relaunching) return;
+    const ok = await confirm({
+      title: '以管理员身份重启',
+      description: '应用将以管理员权限重启，期间窗口会短暂关闭。授权 UAC 后会自动回到当前界面。',
+      confirmText: '以管理员重启',
+      cancelText: '取消',
+    });
+    if (!ok) return;
+    setRelaunching(true);
+    try {
+      await invoke('relaunch_as_admin', { mode: inputMode });
+    } catch (e) {
+      onToastRef.current('error', `提权重启失败：${e}`);
+      setRelaunching(false);
+    }
+  }, [confirm, relaunching, inputMode]);
+
   const displayIssues = buildDisplayIssues(report?.items ?? []);
   const hasIssues = (report?.items ?? []).some((i) => i.severity !== 'info');
 
@@ -241,11 +262,24 @@ export default function RepairDialog({
           <ul className="repair-status-list">
             <li>
               <span className="repair-status-key">管理员权限</span>
-              <span
-                className={`repair-status-badge ${elevated ? 'repair-flag--ok' : 'repair-flag--off'}`}
-              >
-                {elevated ? '已提权' : '普通用户'}
-              </span>
+              <div className="repair-status-actions">
+                <span
+                  className={`repair-status-badge ${elevated ? 'repair-flag--ok' : 'repair-flag--off'}`}
+                >
+                  {elevated ? '已提权' : '普通用户'}
+                </span>
+                {!elevated && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    tone="primary"
+                    loading={relaunching}
+                    onClick={() => void relaunchAsAdmin()}
+                  >
+                    以管理员重启
+                  </Button>
+                )}
+              </div>
             </li>
             <li>
               <span className="repair-status-key">开机自启</span>
