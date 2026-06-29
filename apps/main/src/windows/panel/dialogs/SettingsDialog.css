@@ -242,8 +242,14 @@
   flex: none;
 }
 
+.settings-input-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
 .settings-text-input {
-  width: 120px;
+  width: 180px;
   padding: var(--fb-space-2) var(--fb-space-4);
   border: 1px solid var(--fb-border-soft);
   border-radius: var(--fb-radius-md);
@@ -252,7 +258,43 @@
   font: inherit;
   font-size: var(--fb-fs-sm);
   outline: none;
+  /* 超出宽度的文本省略（失焦时浏览器原生省略号） */
+  text-overflow: ellipsis;
   transition: border-color var(--fb-duration-base) ease;
+}
+
+/* 试听图标内嵌在文本框右侧 */
+.settings-input-wrap .settings-text-input {
+  padding-right: 30px;
+}
+
+.settings-input-icon-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fb-text-weak);
+  font-size: 15px;
+  cursor: pointer;
+  border-radius: var(--fb-radius-sm);
+  transition: color var(--fb-duration-base) ease;
+}
+
+.settings-input-icon-btn:hover:not(:disabled) {
+  color: var(--fb-color-primary);
+}
+
+.settings-input-icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .settings-text-input:focus {
@@ -337,9 +379,12 @@
     gap: var(--fb-space-2);
   }
 
-  .settings-text-input,
   .settings-slider {
     width: 90px;
+  }
+
+  .settings-text-input {
+    width: 135px;
   }
 
   .settings-select {

@@ -3,6 +3,7 @@ import Button from '../components/Button';
 import { CardList, CardListButton } from '../components/CardList';
 import type { CloseBehavior } from '../components/CloseBehaviorForm';
 import KeyCapture, { type KeyId } from '../components/KeyCapture';
+import { VolumeIcon } from '../components/icons';
 import Tabs from '../components/Tabs';
 import type { ConflictSeverity } from '../conflicts';
 import DialogShell from './DialogShell';
@@ -15,6 +16,11 @@ type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
 
 export interface SoundSettings {
   enabled: boolean;
+  // 每个播报时机独立开关，默认开；总开关 enabled 关闭时整体静音
+  startEnabled: boolean;
+  endEnabled: boolean;
+  toggleStartEnabled: boolean;
+  toggleEndEnabled: boolean;
   volume: number;
   rate: number;
   pitch: number;
@@ -179,6 +185,67 @@ function SliderRow({
 
 function hotkeyKeyEq(a: KeyId | null, b: KeyId | null): boolean {
   return !!a && !!b && a.kind === b.kind && a.code === b.code;
+}
+
+// 单条播报语句行：文本框（含内嵌试听图标）+ 行尾独立开关。
+// 文本编辑与试听仅受总开关 masterEnabled 限制；行尾开关仅控制实际播报，不锁定编辑。
+function SoundStatementRow({
+  title,
+  desc,
+  value,
+  enabled,
+  masterEnabled,
+  onTextChange,
+  onToggle,
+  onPreview,
+}: {
+  title: string;
+  desc: ReactNode;
+  value: string;
+  enabled: boolean;
+  masterEnabled: boolean;
+  onTextChange: (v: string) => void;
+  onToggle: (on: boolean) => void;
+  onPreview: () => void;
+}) {
+  return (
+    <div className="settings-row">
+      <div className="settings-row-main">
+        <span className="settings-row-title">{title}</span>
+        <span className="settings-row-desc">{desc}</span>
+      </div>
+      <div className="settings-text-group">
+        <div className="settings-input-wrap">
+          <input
+            type="text"
+            className="settings-text-input"
+            value={value}
+            maxLength={30}
+            disabled={!masterEnabled}
+            onChange={(e) => onTextChange(e.target.value)}
+          />
+          <button
+            type="button"
+            className="settings-input-icon-btn"
+            disabled={!masterEnabled}
+            onClick={onPreview}
+            aria-label="试听"
+            title="试听"
+          >
+            <VolumeIcon />
+          </button>
+        </div>
+        <input
+          type="checkbox"
+          className="enable-checkbox"
+          checked={enabled}
+          disabled={!masterEnabled}
+          onChange={(e) => onToggle(e.target.checked)}
+          aria-label={`${title}提示开关`}
+        />
+      </div>
+    </div>
+  );
 }
 
 export default function SettingsDialog(props: Props) {
@@ -390,106 +457,46 @@ export default function SettingsDialog(props: Props) {
               <div
                 className={`settings-sound-body${sound.enabled ? '' : ' settings-sound-body--disabled'}`}
               >
-                <div className="settings-row">
-                  <div className="settings-row-main">
-                    <span className="settings-row-title">全局启用</span>
-                    <span className="settings-row-desc">全局开关启用时朗读</span>
-                  </div>
-                  <div className="settings-text-group">
-                    <input
-                      type="text"
-                      className="settings-text-input"
-                      value={sound.startText}
-                      maxLength={30}
-                      disabled={!sound.enabled}
-                      onChange={(e) => props.onSoundChange({ startText: e.target.value })}
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      tone="neutral"
-                      disabled={!sound.enabled}
-                      onClick={() => props.onPreviewSound('start')}
-                    >
-                      试听
-                    </Button>
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-main">
-                    <span className="settings-row-title">全局停用</span>
-                    <span className="settings-row-desc">全局开关停用时朗读</span>
-                  </div>
-                  <div className="settings-text-group">
-                    <input
-                      type="text"
-                      className="settings-text-input"
-                      value={sound.endText}
-                      maxLength={30}
-                      disabled={!sound.enabled}
-                      onChange={(e) => props.onSoundChange({ endText: e.target.value })}
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      tone="neutral"
-                      disabled={!sound.enabled}
-                      onClick={() => props.onPreviewSound('end')}
-                    >
-                      试听
-                    </Button>
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-main">
-                    <span className="settings-row-title">Toggle 开始</span>
-                    <span className="settings-row-desc">启动时朗读，{'${key}'} 替换为目标键名</span>
-                  </div>
-                  <div className="settings-text-group">
-                    <input
-                      type="text"
-                      className="settings-text-input"
-                      value={sound.toggleStartText}
-                      maxLength={30}
-                      disabled={!sound.enabled}
-                      onChange={(e) => props.onSoundChange({ toggleStartText: e.target.value })}
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      tone="neutral"
-                      disabled={!sound.enabled}
-                      onClick={() => props.onPreviewSound('toggleStart')}
-                    >
-                      试听
-                    </Button>
-                  </div>
-                </div>
-                <div className="settings-row">
-                  <div className="settings-row-main">
-                    <span className="settings-row-title">Toggle 结束</span>
-                    <span className="settings-row-desc">停止时朗读，{'${key}'} 替换为目标键名</span>
-                  </div>
-                  <div className="settings-text-group">
-                    <input
-                      type="text"
-                      className="settings-text-input"
-                      value={sound.toggleEndText}
-                      maxLength={30}
-                      disabled={!sound.enabled}
-                      onChange={(e) => props.onSoundChange({ toggleEndText: e.target.value })}
-                    />
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      tone="neutral"
-                      disabled={!sound.enabled}
-                      onClick={() => props.onPreviewSound('toggleEnd')}
-                    >
-                      试听
-                    </Button>
-                  </div>
-                </div>
+                <SoundStatementRow
+                  title="全局启用"
+                  desc="全局开关启用时朗读"
+                  value={sound.startText}
+                  enabled={sound.startEnabled}
+                  masterEnabled={sound.enabled}
+                  onTextChange={(v) => props.onSoundChange({ startText: v })}
+                  onToggle={(on) => props.onSoundChange({ startEnabled: on })}
+                  onPreview={() => props.onPreviewSound('start')}
+                />
+                <SoundStatementRow
+                  title="全局停用"
+                  desc="全局开关停用时朗读"
+                  value={sound.endText}
+                  enabled={sound.endEnabled}
+                  masterEnabled={sound.enabled}
+                  onTextChange={(v) => props.onSoundChange({ endText: v })}
+                  onToggle={(on) => props.onSoundChange({ endEnabled: on })}
+                  onPreview={() => props.onPreviewSound('end')}
+                />
+                <SoundStatementRow
+                  title="Toggle 开始"
+                  desc={<>启动时朗读，{'${key}'} 替换为目标键名</>}
+                  value={sound.toggleStartText}
+                  enabled={sound.toggleStartEnabled}
+                  masterEnabled={sound.enabled}
+                  onTextChange={(v) => props.onSoundChange({ toggleStartText: v })}
+                  onToggle={(on) => props.onSoundChange({ toggleStartEnabled: on })}
+                  onPreview={() => props.onPreviewSound('toggleStart')}
+                />
+                <SoundStatementRow
+                  title="Toggle 结束"
+                  desc={<>停止时朗读，{'${key}'} 替换为目标键名</>}
+                  value={sound.toggleEndText}
+                  enabled={sound.toggleEndEnabled}
+                  masterEnabled={sound.enabled}
+                  onTextChange={(v) => props.onSoundChange({ toggleEndText: v })}
+                  onToggle={(on) => props.onSoundChange({ toggleEndEnabled: on })}
+                  onPreview={() => props.onPreviewSound('toggleEnd')}
+                />
               </div>
             </SettingsSection>
 

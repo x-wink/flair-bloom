@@ -35,6 +35,10 @@ const SOUND_KEY = 'sound';
 
 const DEFAULT_SOUND: SoundSettings = {
   enabled: false,
+  startEnabled: true,
+  endEnabled: true,
+  toggleStartEnabled: false,
+  toggleEndEnabled: false,
   volume: 80,
   rate: 0,
   pitch: 0,
@@ -911,12 +915,14 @@ export default function PanelApp() {
   function speakGlobalChange(enabled: boolean) {
     const s = soundRef.current;
     if (!s.enabled) return;
+    if (enabled ? !s.startEnabled : !s.endEnabled) return;
     speakLatest(enabled ? s.startText : s.endText, s);
   }
 
   function speakToggle(rule: BurstRule, isStart: boolean) {
     const s = soundRef.current;
     if (!s.enabled) return;
+    if (isStart ? !s.toggleStartEnabled : !s.toggleEndEnabled) return;
     const template = (isStart ? s.toggleStartText : s.toggleEndText) ?? '';
     const text = template.split('${key}').join(keyLabel(rule.target_key));
     speakLatest(text, s);
