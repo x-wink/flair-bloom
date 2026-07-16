@@ -14,6 +14,7 @@ import Button from './components/Button';
 import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
 import { useConfirm } from './components/ConfirmDialog';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
+import IntervalInput from './components/IntervalInput';
 import { ChevronIcon, CloseIcon, EditIcon, MenuIcon, MinimizeIcon } from './components/icons';
 import Kbd from './components/Kbd';
 import KeyCapture, { keyboardKey, keyEq, keyLabel, type KeyId } from './components/KeyCapture';
@@ -1865,23 +1866,12 @@ export default function PanelApp() {
                               </div>
                               <div className="rule-field rule-interval">
                                 <label>间隔</label>
-                                <div className="interval-input">
-                                  <input
-                                    type="number"
-                                    min={MIN_INTERVAL_MS}
-                                    max={MAX_INTERVAL_MS}
-                                    value={rule.interval_ms}
-                                    onChange={(e) =>
-                                      updateRule(rule.id, {
-                                        interval_ms: Math.max(
-                                          MIN_INTERVAL_MS,
-                                          Math.min(MAX_INTERVAL_MS, Number(e.target.value)),
-                                        ),
-                                      })
-                                    }
-                                  />
-                                  <span>ms</span>
-                                </div>
+                                <IntervalInput
+                                  value={rule.interval_ms}
+                                  min={MIN_INTERVAL_MS}
+                                  max={MAX_INTERVAL_MS}
+                                  onChange={(v) => updateRule(rule.id, { interval_ms: v })}
+                                />
                               </div>
                             </div>
                             <input
@@ -2012,23 +2002,12 @@ export default function PanelApp() {
                       </div>
                       <div className="rule-field rule-interval">
                         <label>间隔</label>
-                        <div className="interval-input">
-                          <input
-                            type="number"
-                            min={MIN_INTERVAL_MS}
-                            max={MAX_INTERVAL_MS}
-                            value={rule.interval_ms}
-                            onChange={(e) =>
-                              updateRule(rule.id, {
-                                interval_ms: Math.max(
-                                  MIN_INTERVAL_MS,
-                                  Math.min(MAX_INTERVAL_MS, Number(e.target.value)),
-                                ),
-                              })
-                            }
-                          />
-                          <span>ms</span>
-                        </div>
+                        <IntervalInput
+                          value={rule.interval_ms}
+                          min={MIN_INTERVAL_MS}
+                          max={MAX_INTERVAL_MS}
+                          onChange={(v) => updateRule(rule.id, { interval_ms: v })}
+                        />
                       </div>
                     </div>
                     <input

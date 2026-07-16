@@ -1,5 +1,6 @@
 import { type CSSProperties, useRef, useState } from 'react';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
+import IntervalInput from './components/IntervalInput';
 import {
   keyboardKey,
   keyEq,
@@ -353,21 +354,15 @@ export default function HorizontalLayout({
             ))}
           </div>
 
-          <label className="hbar-interval">
+          <div className="hbar-interval">
             <span>统一间隔</span>
-            <input
-              type="number"
+            <IntervalInput
+              value={interval}
               min={intervalMin}
               max={intervalMax}
-              value={interval}
-              onChange={(e) => {
-                const v = Number(e.target.value);
-                if (Number.isNaN(v)) return;
-                onIntervalChange(Math.max(intervalMin, Math.min(intervalMax, Math.round(v))));
-              }}
+              onChange={onIntervalChange}
             />
-            <span className="hbar-unit">ms</span>
-          </label>
+          </div>
         </div>
 
         {/* 右：空占位，与左侧鼠标对称，使中间内容居中 */}

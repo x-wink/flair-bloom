@@ -241,18 +241,6 @@
   font-size: var(--fb-fs-sm);
   color: var(--fb-text-regular);
 }
-.hbar-interval input {
-  width: 64px;
-  padding: var(--fb-space-1) var(--fb-space-2);
-  border: 1px solid var(--fb-border);
-  border-radius: var(--fb-radius-sm);
-  background: var(--fb-surface);
-  font-size: var(--fb-fs-sm);
-  text-align: right;
-}
-.hbar-unit {
-  color: var(--fb-text-weak);
-}
 
 .hbar-legend {
   display: flex;

@@ -1,0 +1,60 @@
+.interval-input {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-1);
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-md);
+  background: var(--fb-surface-soft);
+}
+
+.interval-input input {
+  width: 44px;
+  padding: 5px var(--fb-space-1);
+  border: none;
+  background: transparent;
+  font-size: var(--fb-fs-md);
+  text-align: right;
+  outline: none;
+}
+
+/* 有步进按钮后隐藏原生上下箭头，避免双套控件 */
+.interval-input input::-webkit-outer-spin-button,
+.interval-input input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+
+.interval-unit {
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+}
+
+.interval-step {
+  width: 22px;
+  align-self: stretch;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fb-text-weak);
+  font-size: var(--fb-fs-md);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.interval-step:first-child {
+  border-radius: var(--fb-radius-md) 0 0 var(--fb-radius-md);
+}
+
+.interval-step:last-child {
+  border-radius: 0 var(--fb-radius-md) var(--fb-radius-md) 0;
+}
+
+.interval-step:hover:not(:disabled) {
+  color: var(--fb-primary);
+  background: var(--fb-surface);
+}
+
+.interval-step:disabled {
+  opacity: 0.35;
+  cursor: default;
+}

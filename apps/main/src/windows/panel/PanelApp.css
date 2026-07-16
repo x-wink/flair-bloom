@@ -516,31 +516,6 @@ select {
   cursor: pointer;
 }
 
-.interval-input {
-  display: flex;
-  align-items: center;
-  gap: var(--fb-space-2);
-  border: 1px solid var(--fb-border);
-  border-radius: var(--fb-radius-md);
-  background: var(--fb-surface-soft);
-  padding: 0 var(--fb-space-4) 0 0;
-}
-
-.interval-input input {
-  width: 56px;
-  padding: 5px var(--fb-space-3);
-  border: none;
-  background: transparent;
-  font-size: var(--fb-fs-md);
-  text-align: right;
-  outline: none;
-}
-
-.interval-input span {
-  font-size: var(--fb-fs-xs);
-  color: var(--fb-text-weak);
-}
-
 .del-btn {
   position: absolute;
   top: var(--fb-space-2);
