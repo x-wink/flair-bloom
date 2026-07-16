@@ -35,6 +35,7 @@ interface Props {
   onSwitchProfile: (path: string) => void;
   onRenameProfile: (name: string) => void;
   onDeleteProfile: (name: string) => void;
+  onExportProfile: (name: string) => void;
 }
 
 function displayProfileName(name: string, defaultProfileName: string): string {
@@ -144,8 +145,19 @@ export default function ProfileCardList(props: Props) {
               </span>
               <ProfileHotkeys summary={profile.summary} />
             </div>
-            {!isDefault && (
-              <div className="profile-card-actions">
+            <div className="profile-card-actions">
+              <Button
+                variant="outline"
+                tone="neutral"
+                size="sm"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  props.onExportProfile(name);
+                }}
+              >
+                导出
+              </Button>
+              {!isDefault && (
                 <Button
                   variant="solid"
                   tone="danger"
@@ -158,8 +170,8 @@ export default function ProfileCardList(props: Props) {
                 >
                   删除
                 </Button>
-              </div>
-            )}
+              )}
+            </div>
           </CardListItem>
         );
       })}

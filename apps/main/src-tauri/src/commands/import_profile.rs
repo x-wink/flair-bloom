@@ -417,6 +417,7 @@ pub fn import_external_config(
     set_active_path(&app, &saved_path);
     state.0.set_rules(profile.rules.clone());
     state.0.set_hotkeys(hotkeys);
+    crate::tray::refresh_menu(&app);
 
     Ok(profile)
 }

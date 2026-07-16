@@ -75,9 +75,11 @@ interface Props {
   onThemeChange: (patch: Partial<ThemeSettings>) => void;
   onCreateProfile: () => void;
   onImportProfile: () => void;
+  onImportExternal: () => void;
   onSwitchProfile: (path: string) => void;
   onRenameProfile: (name: string) => void;
   onDeleteProfile: (name: string) => void;
+  onExportProfile: (name: string) => void;
 }
 
 const TABS: { id: SettingsTab; label: string }[] = [
@@ -637,6 +639,14 @@ export default function SettingsDialog(props: Props) {
                   >
                     导入配置
                   </Button>
+                  <Button
+                    variant="outline"
+                    tone="neutral"
+                    size="sm"
+                    onClick={props.onImportExternal}
+                  >
+                    外部导入
+                  </Button>
                 </div>
               </div>
 
@@ -647,6 +657,7 @@ export default function SettingsDialog(props: Props) {
                 onSwitchProfile={props.onSwitchProfile}
                 onRenameProfile={props.onRenameProfile}
                 onDeleteProfile={props.onDeleteProfile}
+                onExportProfile={props.onExportProfile}
               />
 
               {props.profiles.length === 0 && (

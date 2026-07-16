@@ -158,6 +158,7 @@
 
 .profile-card-actions {
   display: flex;
+  gap: var(--fb-space-3);
   align-self: end;
   justify-self: end;
   padding: 0 var(--fb-space-6) var(--fb-space-6) 0;

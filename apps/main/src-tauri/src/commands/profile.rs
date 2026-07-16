@@ -173,6 +173,20 @@ pub fn save_profile(
     Ok(path)
 }
 
+/// 激活一份已在 profiles 目录中的配置文件：读取（解密 / 迁移 / 钳位 / 校验）→
+/// 装载引擎 → 更新 `activeProfilePath`。[`load_profile`] 命令与托盘切换共用此入口。
+pub(crate) fn activate_profile_file(
+    app: &AppHandle,
+    engine: &crate::engine::BurstEngine,
+    path: &Path,
+) -> Result<Profile, String> {
+    let profile = read_profile_from_file(path)?;
+    engine.set_rules(profile.rules.clone());
+    engine.set_hotkeys(profile.hotkeys.clone());
+    set_active_path(app, &path.to_string_lossy());
+    Ok(profile)
+}
+
 #[tauri::command]
 pub fn load_profile(
     app: AppHandle,
@@ -187,12 +201,8 @@ pub fn load_profile(
         .to_string_lossy();
     let safe_path = dir.join(sanitize_filename(&file_name));
 
-    // 复用统一读取入口（含解密 / 迁移 / 间隔钳位 / 校验），避免重复解密逻辑漂移。
-    let profile = read_profile_from_file(&safe_path)?;
-
-    state.0.set_rules(profile.rules.clone());
-    state.0.set_hotkeys(profile.hotkeys.clone());
-    set_active_path(&app, &safe_path.to_string_lossy());
+    let profile = activate_profile_file(&app, &state.0, &safe_path)?;
+    crate::tray::refresh_menu(&app);
     Ok(profile)
 }
 
@@ -340,6 +350,7 @@ pub(crate) fn create_default_profile(
         store.set(ACTIVE_PATH_KEY, serde_json::json!(path));
         let _ = store.save();
     }
+    crate::tray::refresh_menu(app);
 
     Ok(profile)
 }
@@ -462,6 +473,7 @@ pub fn rename_profile(
     if was_active {
         set_active_path(&app, &saved_path);
     }
+    crate::tray::refresh_menu(&app);
     Ok(saved_path)
 }
 
@@ -495,6 +507,7 @@ pub fn delete_profile(
     std::fs::remove_file(&target_path).map_err(|e| format!("删除配置失败: {e}"))?;
 
     if !was_active {
+        crate::tray::refresh_menu(&app);
         return Ok(None);
     }
 
@@ -515,6 +528,7 @@ pub fn delete_profile(
             create_default_profile(&app, &state.0)?
         }
     };
+    crate::tray::refresh_menu(&app);
     Ok(Some(profile))
 }
 
@@ -556,6 +570,7 @@ pub fn fork_active_profile(app: AppHandle, suggested_name: String) -> Result<For
 
     let saved_path = write_profile_file_to_path(&final_path, &profile)?;
     set_active_path(&app, &saved_path);
+    crate::tray::refresh_menu(&app);
 
     Ok(ForkResult {
         profile,
@@ -567,6 +582,129 @@ pub fn fork_active_profile(app: AppHandle, suggested_name: String) -> Result<For
 pub struct ForkResult {
     pub profile: Profile,
     pub path: String,
+}
+
+/// 读取外部 .qzh 文件的大小上限（4 MB），与外部配置导入一致，防止大文件导致 OOM。
+const QZH_IMPORT_MAX_BYTES: u64 = 4 * 1024 * 1024;
+
+/// 导出指定配置为 .qzh 文件（跨设备迁移 / 社区分享）。
+/// 读取即完成解密 / 迁移 / 钳位 / 校验，导出内容始终是当前 schema 的规范化副本。
+#[tauri::command]
+pub fn export_profile(app: AppHandle, name: String, dest_path: String) -> Result<String, String> {
+    let dir = profiles_dir(&app)?;
+    let src = profile_path_for_name(&dir, &name);
+    if !src.exists() {
+        return Err(format!("配置不存在：{name}"));
+    }
+    let mut profile = read_profile_from_file(&src)?;
+    profile.schema_version = CURRENT_SCHEMA_VERSION;
+
+    let dest = ensure_qzh_extension(PathBuf::from(dest_path));
+    let saved = write_profile_file_to_path(&dest, &profile)?;
+    info!("已导出配置「{}」到 {}", name, dest.display());
+    Ok(saved)
+}
+
+/// 导入外部 .qzh 配置文件：完整读取校验后，以不冲突的名字复制进 profiles 目录，
+/// 并立即切换为活跃配置。
+#[tauri::command]
+pub fn import_qzh_profile(
+    app: AppHandle,
+    state: State<EngineState>,
+    path: String,
+) -> Result<Profile, String> {
+    let src = Path::new(&path);
+    if !src.exists() {
+        return Err(format!("文件不存在：{path}"));
+    }
+    let size = src
+        .metadata()
+        .map_err(|e| format!("读取文件信息失败：{e}"))?
+        .len();
+    if size > QZH_IMPORT_MAX_BYTES {
+        return Err(format!("文件过大（{size} 字节），超过 4 MB 上限"));
+    }
+    let mut profile = read_profile_from_file(src)?;
+
+    let stem = src
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let base = pick_import_base_name(&profile.meta.name, &stem);
+
+    let dir = profiles_dir(&app)?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建配置目录: {e}"))?;
+    let (final_name, final_path) = pick_unique_name(&dir, &base);
+
+    let now = now_secs();
+    profile.meta.name = final_name;
+    profile.meta.created_at = now;
+    profile.meta.updated_at = now;
+    profile.meta.app_version = env!("CARGO_PKG_VERSION").to_string();
+    profile.schema_version = CURRENT_SCHEMA_VERSION;
+
+    write_profile_file_to_path(&final_path, &profile)?;
+    state.0.set_rules(profile.rules.clone());
+    state.0.set_hotkeys(profile.hotkeys.clone());
+    set_active_path(&app, &final_path.to_string_lossy());
+    crate::tray::refresh_menu(&app);
+    info!("已导入 .qzh 配置「{}」", profile.meta.name);
+    Ok(profile)
+}
+
+/// 补全 .qzh 扩展名：追加而非替换，避免「我的.配置」被改写成「我的.qzh」。
+fn ensure_qzh_extension(mut path: PathBuf) -> PathBuf {
+    if path
+        .extension()
+        .is_none_or(|e| !e.eq_ignore_ascii_case("qzh"))
+    {
+        path.as_mut_os_string().push(".qzh");
+    }
+    path
+}
+
+/// 选择导入配置的基础名：优先取文件内 meta.name；为空或撞上受保护的默认名时
+/// 退回文件名（stem），再兜底「导入配置」。
+fn pick_import_base_name(meta_name: &str, stem: &str) -> String {
+    let name = meta_name.trim();
+    if !name.is_empty() && name != DEFAULT_PROFILE_NAME {
+        return name.to_string();
+    }
+    let stem = stem.trim();
+    if !stem.is_empty() && stem != DEFAULT_PROFILE_NAME {
+        return stem.to_string();
+    }
+    "导入配置".to_string()
+}
+
+/// 托盘菜单用的轻量配置清单：仅解出 meta（不迁移、不校验），返回（名称, 路径）。
+/// 排序与面板配置菜单一致：默认配置最前，其余按创建时间、名称。
+pub(crate) fn list_profiles_brief(app: &AppHandle) -> Vec<(String, PathBuf)> {
+    let Ok(dir) = profiles_dir(app) else {
+        return Vec::new();
+    };
+    let Ok(read) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut items: Vec<(ProfileMeta, PathBuf)> = read
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if path.extension().is_none_or(|e| e != "qzh") {
+                return None;
+            }
+            load_meta_from_file(&path).map(|meta| (meta, path))
+        })
+        .collect();
+    items.sort_by(|a, b| {
+        let a_default = a.0.name == DEFAULT_PROFILE_NAME;
+        let b_default = b.0.name == DEFAULT_PROFILE_NAME;
+        b_default
+            .cmp(&a_default)
+            .then(a.0.created_at.cmp(&b.0.created_at))
+            .then_with(|| a.0.name.cmp(&b.0.name))
+    });
+    items.into_iter().map(|(m, p)| (m.name, p)).collect()
 }
 
 /// 在 `dir` 下挑一个不冲突的文件名：base、base 2、base 3 ...

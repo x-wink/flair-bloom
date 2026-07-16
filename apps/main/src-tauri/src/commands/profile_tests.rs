@@ -150,3 +150,57 @@ fn profile_summary_counts_rules_and_hotkeys() {
         Some(KeyId::Mouse(qzh_profile::key_id::MouseButton::X1))
     );
 }
+
+#[test]
+fn ensure_qzh_extension_appends_when_missing() {
+    assert_eq!(
+        ensure_qzh_extension(PathBuf::from("/tmp/我的配置")),
+        PathBuf::from("/tmp/我的配置.qzh")
+    );
+}
+
+#[test]
+fn ensure_qzh_extension_keeps_existing_qzh() {
+    // 大小写不敏感：.qzh / .QZH 都视为已有扩展名
+    assert_eq!(
+        ensure_qzh_extension(PathBuf::from("/tmp/a.qzh")),
+        PathBuf::from("/tmp/a.qzh")
+    );
+    assert_eq!(
+        ensure_qzh_extension(PathBuf::from("/tmp/a.QZH")),
+        PathBuf::from("/tmp/a.QZH")
+    );
+}
+
+#[test]
+fn ensure_qzh_extension_appends_instead_of_replacing_other_extension() {
+    // 追加而非替换，避免「我的.配置」被改写成「我的.qzh」
+    assert_eq!(
+        ensure_qzh_extension(PathBuf::from("/tmp/我的.配置")),
+        PathBuf::from("/tmp/我的.配置.qzh")
+    );
+}
+
+#[test]
+fn import_base_name_prefers_meta_name() {
+    assert_eq!(pick_import_base_name("刺客", "文件名"), "刺客");
+}
+
+#[test]
+fn import_base_name_falls_back_to_stem_when_meta_empty_or_default() {
+    assert_eq!(pick_import_base_name("", "分享配置"), "分享配置");
+    assert_eq!(
+        pick_import_base_name(DEFAULT_PROFILE_NAME, "分享配置"),
+        "分享配置"
+    );
+}
+
+#[test]
+fn import_base_name_falls_back_to_placeholder() {
+    // meta 与 stem 都不可用（空 / 默认名）时兜底「导入配置」
+    assert_eq!(pick_import_base_name("", "  "), "导入配置");
+    assert_eq!(
+        pick_import_base_name(DEFAULT_PROFILE_NAME, DEFAULT_PROFILE_NAME),
+        "导入配置"
+    );
+}

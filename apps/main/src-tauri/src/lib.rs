@@ -36,8 +36,9 @@ use commands::{
     import_profile::{import_external_config, preview_import, scan_import_configs},
     log::{log_from_frontend, open_app_dir},
     profile::{
-        delete_profile, fork_active_profile, get_active_profile_path, init_default_profile,
-        list_profiles, load_profile, rename_profile, save_profile,
+        delete_profile, export_profile, fork_active_profile, get_active_profile_path,
+        import_qzh_profile, init_default_profile, list_profiles, load_profile, rename_profile,
+        save_profile,
     },
     repair::{
         diagnose_environment, repair_clean_logs, repair_corrupted_profiles, repair_dd_hid_residue,
@@ -117,6 +118,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_dialog::init())
         .manage(EngineState(burst_engine.clone()))
         .manage(UpdateLock(AtomicBool::new(false)))
         .invoke_handler(tauri::generate_handler![
@@ -145,6 +147,8 @@ pub fn run() {
             rename_profile,
             delete_profile,
             fork_active_profile,
+            export_profile,
+            import_qzh_profile,
             needs_agreement,
             agree_license,
             check_update,
@@ -176,11 +180,7 @@ pub fn run() {
                 burst_engine.set_on_global_changed(move |enabled| {
                     let handle = handle.clone();
                     tauri::async_runtime::spawn(async move {
-                        if let Some(tray) = handle.tray_by_id("main") {
-                            if let Ok(menu) = crate::tray::build_menu(&handle, enabled) {
-                                let _ = tray.set_menu(Some(menu));
-                            }
-                        }
+                        crate::tray::refresh_menu(&handle);
                         let _ = handle.emit("global-enabled-changed", enabled);
                     });
                 });

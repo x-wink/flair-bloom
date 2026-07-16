@@ -3,6 +3,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { LogicalSize } from '@tauri-apps/api/dpi';
 import { emit, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import { LazyStore } from '@tauri-apps/plugin-store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import iconUrl from '../../assets/icon-32.png';
@@ -362,6 +363,8 @@ export default function PanelApp() {
   const ddHidFallbackInFlightRef = useRef(false);
   const ddHidNoticeOpenRef = useRef(false);
   const profileNameRef = useRef(profileName);
+  // 供挂载期注册的事件监听调用最新的 switchToProfile（避免闭包锁死首帧版本）
+  const switchToProfileRef = useRef<(path: string) => Promise<void>>(async () => {});
   // WebView2 聚焦时全局键盘钩子失效，将键盘事件中继到后端引擎（与浮窗共用）。
   useKeyRelay();
   const isDefaultProfile = profileName === DEFAULT_PROFILE_NAME;
@@ -705,6 +708,10 @@ export default function PanelApp() {
       setUpdateProgress(null);
       toast.info('已是最新版本');
     });
+    // 托盘「切换配置」后同步面板：复用 load_profile 流程重载（后端已激活，重载幂等）
+    const unlistenProfileSwitch = listen<string>('active-profile-changed', (e) => {
+      void switchToProfileRef.current(e.payload);
+    });
     const unlistenClose = getCurrentWindow().onCloseRequested((event) => {
       event.preventDefault();
       void handleClose();
@@ -718,6 +725,7 @@ export default function PanelApp() {
       unlistenFailed.then((fn) => fn());
       unlistenReady.then((fn) => fn());
       unlistenUpToDate.then((fn) => fn());
+      unlistenProfileSwitch.then((fn) => fn());
       unlistenClose.then((fn) => fn());
     };
   }, []);
@@ -725,6 +733,7 @@ export default function PanelApp() {
   // 规则/热键变更后防抖自动保存到 .qzh
   profileNameRef.current = profileName;
   hotkeysRef.current = hotkeys;
+  switchToProfileRef.current = switchToProfile;
 
   const refreshProfileList = useCallback(async () => {
     try {
@@ -1487,6 +1496,55 @@ export default function PanelApp() {
       queueMicrotask(() => {
         initialLoadDone.current = true;
       });
+    }
+  }
+
+  async function handleImportQzhProfile() {
+    const path = await openFileDialog({
+      multiple: false,
+      filters: [{ name: '配置文件', extensions: ['qzh'] }],
+    });
+    if (!path) return;
+    if (saveTimer.current) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = undefined;
+    }
+    initialLoadDone.current = false;
+    try {
+      // 后端完成解密 / 迁移 / 校验，复制进配置目录并立即激活
+      const profile = await invoke<Profile>('import_qzh_profile', { path });
+      setRules(profile.rules);
+      setHotkeys({
+        global_toggle: profile.hotkeys.global_toggle ?? null,
+        global_stop: profile.hotkeys.global_stop ?? null,
+        panel_toggle: profile.hotkeys.panel_toggle ?? null,
+      });
+      setProfileName(profile.meta.name);
+      profileNameRef.current = profile.meta.name;
+      setAdvancedOpen({});
+      await refreshProfileList();
+      toast.success(`已导入配置「${profile.meta.name}」`);
+    } catch (e) {
+      toast.error(`导入失败：${e}`);
+    } finally {
+      queueMicrotask(() => {
+        initialLoadDone.current = true;
+      });
+    }
+  }
+
+  async function handleExportProfileByName(name: string) {
+    const displayName = name === DEFAULT_PROFILE_NAME ? '默认配置' : name;
+    const dest = await saveFileDialog({
+      defaultPath: `${displayName}.qzh`,
+      filters: [{ name: '配置文件', extensions: ['qzh'] }],
+    });
+    if (!dest) return;
+    try {
+      await invoke<string>('export_profile', { name, destPath: dest });
+      toast.success(`已导出「${displayName}」`);
+    } catch (e) {
+      toast.error(`导出失败：${e}`);
     }
   }
 
@@ -2502,11 +2560,16 @@ export default function PanelApp() {
           }}
           onImportProfile={() => {
             setShowSettings(false);
+            void handleImportQzhProfile();
+          }}
+          onImportExternal={() => {
+            setShowSettings(false);
             setShowImport(true);
           }}
           onSwitchProfile={(path) => void switchToProfile(path)}
           onRenameProfile={(name) => void handleRenameProfileByName(name)}
           onDeleteProfile={(name) => void handleDeleteProfileByName(name)}
+          onExportProfile={(name) => void handleExportProfileByName(name)}
         />
       </Overlay>
 
