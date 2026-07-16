@@ -1,6 +1,7 @@
-//! tracing 初始化 + panic hook + 旧日志清理。
+//! tracing 初始化 + panic hook（写崩溃日志 + 弹提示窗口）+ 旧日志清理。
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use crate::APP_IDENTIFIER;
@@ -75,6 +76,43 @@ pub fn init(dir: &PathBuf) {
         );
         let _ = std::fs::write(&crash_file, &msg);
         eprintln!("PANIC: {info}");
+        show_crash_dialog(crash_file);
         prev_hook(info);
     }));
+}
+
+static CRASH_DIALOG_SHOWN: AtomicBool = AtomicBool::new(false);
+
+/// 弹崩溃提示窗口（打开日志文件夹 / 关闭）。
+/// - 在独立线程展示：panic 可能发生在 LL hook 等敏感线程，原地阻塞会拖垮系统输入；
+/// - 进程级去重：连锁 panic 只弹第一次，避免弹窗风暴；
+/// - 主线程 panic 后进程随即退出时弹窗可能来不及展示，属可接受降级（崩溃日志仍在）。
+fn show_crash_dialog(crash_file: PathBuf) {
+    if CRASH_DIALOG_SHOWN.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        // 弹窗自身出错不能再进 panic hook 链路
+        let _ = std::panic::catch_unwind(move || {
+            const OPEN_LABEL: &str = "打开日志文件夹";
+            let result = rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Error)
+                .set_title(crate::APP_NAME_CN)
+                .set_description(format!(
+                    "{}遇到了一个问题并已崩溃。\n\n崩溃日志已保存，如需报告问题请提供：\n{}",
+                    crate::APP_NAME_CN,
+                    crash_file.display()
+                ))
+                .set_buttons(rfd::MessageButtons::OkCancelCustom(
+                    OPEN_LABEL.to_string(),
+                    "关闭".to_string(),
+                ))
+                .show();
+            if matches!(result, rfd::MessageDialogResult::Custom(ref s) if s == OPEN_LABEL) {
+                if let Some(dir) = crash_file.parent() {
+                    let _ = crate::commands::log::open_dir_in_explorer(dir);
+                }
+            }
+        });
+    });
 }

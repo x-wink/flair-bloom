@@ -16,6 +16,20 @@ use tracing::warn;
 /// 「切换配置」菜单项 id 前缀，后接配置文件绝对路径。
 const PROFILE_MENU_PREFIX: &str = "profile:";
 
+/// 托盘图标：启用态用彩色应用图标，禁用态用灰化版（`icons/tray-disabled.png`，
+/// 由 `icons/128x128.png` 灰度化生成），全局开关切换时随菜单一起刷新。
+const TRAY_ICON_ENABLED: &[u8] = include_bytes!("../icons/128x128.png");
+const TRAY_ICON_DISABLED: &[u8] = include_bytes!("../icons/tray-disabled.png");
+
+fn tray_icon(enabled: bool) -> tauri::image::Image<'static> {
+    let bytes = if enabled {
+        TRAY_ICON_ENABLED
+    } else {
+        TRAY_ICON_DISABLED
+    };
+    tauri::image::Image::from_bytes(bytes).expect("内置托盘图标必须可解码")
+}
+
 fn active_profile_path(app: &AppHandle) -> Option<String> {
     app.store(crate::STORE_PATH).ok().and_then(|s| {
         s.get(ACTIVE_PATH_KEY)
@@ -66,7 +80,8 @@ pub fn build_menu(app: &AppHandle, enabled: bool) -> tauri::Result<Menu<Wry>> {
     Menu::with_items(app, &[&toggle, &sep, &profiles_menu, &sep2, &open, &quit])
 }
 
-/// 重建托盘菜单（全局开关文案 + 配置清单与勾选态）。托盘尚未创建时（启动早期）no-op。
+/// 重建托盘菜单与图标（全局开关文案 / 启用禁用图标 + 配置清单与勾选态）。
+/// 托盘尚未创建时（启动早期）no-op。
 /// 配置清单或激活配置变化的命令（load / rename / delete / fork / import 等）都应调用。
 pub fn refresh_menu(app: &AppHandle) {
     let Some(tray) = app.tray_by_id("main") else {
@@ -79,18 +94,16 @@ pub fn refresh_menu(app: &AppHandle) {
     if let Ok(menu) = build_menu(app, enabled) {
         let _ = tray.set_menu(Some(menu));
     }
+    let _ = tray.set_icon(Some(tray_icon(enabled)));
 }
 
 pub fn setup_tray(app: &AppHandle, engine: Arc<BurstEngine>) -> tauri::Result<()> {
-    let menu = build_menu(app, engine.global_enabled.load(Ordering::SeqCst))?;
+    let enabled = engine.global_enabled.load(Ordering::SeqCst);
+    let menu = build_menu(app, enabled)?;
     let engine_clone = engine.clone();
 
     TrayIconBuilder::with_id("main")
-        .icon(
-            app.default_window_icon()
-                .expect("默认窗口图标必须在 tauri.conf.json 的 bundle.icon 中配置")
-                .clone(),
-        )
+        .icon(tray_icon(enabled))
         .menu(&menu)
         .on_menu_event(move |app, event| {
             let id = event.id.as_ref();
@@ -134,4 +147,18 @@ pub fn setup_tray(app: &AppHandle, engine: Arc<BurstEngine>) -> tauri::Result<()
         .build(app)?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::tray_icon;
+
+    #[test]
+    fn tray_icons_decode() {
+        // 运行时 tray_icon 用 expect 解码内嵌 PNG，这里兜底防止资源损坏进版本
+        let enabled = tray_icon(true);
+        let disabled = tray_icon(false);
+        assert!(enabled.width() > 0);
+        assert!(disabled.width() > 0);
+    }
 }

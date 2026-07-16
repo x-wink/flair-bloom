@@ -11,12 +11,15 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
+tauri = { version = "2", features = ["macos-private-api", "tray-icon", "image-png"] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-updater = "2"
 tauri-plugin-store = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-dialog = "2"
+# 崩溃提示窗口：panic hook 里没有 AppHandle，直接用 rfd 弹原生对话框
+# （与 tauri-plugin-dialog 底层同源同版本，不额外增加依赖树）
+rfd = "0.16"
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }

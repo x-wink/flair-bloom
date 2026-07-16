@@ -45,7 +45,7 @@ pub fn open_app_dir(app: AppHandle, kind: String) -> Result<(), String> {
     open_dir_in_explorer(&dir)
 }
 
-fn open_dir_in_explorer(dir: &std::path::Path) -> Result<(), String> {
+pub(crate) fn open_dir_in_explorer(dir: &std::path::Path) -> Result<(), String> {
     std::fs::create_dir_all(dir).map_err(|e| format!("无法创建目录: {e}"))?;
     #[cfg(target_os = "windows")]
     {
