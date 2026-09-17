@@ -8,7 +8,9 @@ const unavailable = computed(
 );
 
 const REPOSITORY = 'https://github.com/x-wink/flair-bloom';
-const SHA256_PLACEHOLDER = '0'.repeat(64);
+
+const { color: brandColor, select: selectBrand } = useBrandColor();
+const currentBrand = computed(() => brandPresets.find((preset) => preset.color === brandColor.value));
 
 const features = [
   {
@@ -37,10 +39,21 @@ const features = [
   },
 ];
 
+// 前四条是作者写的游戏梗，后两条摘自玩家群聊（不署名）；区块标题写明「传闻」，不冒充实名评价。
+// offset 是桌面端左缩进，offsetSm 是手机端，错开摆放拼出互相压边的效果
+const rumors = [
+  { text: '终于找到一个能用的，以前过的都是什么苦日子啊 TT', offset: '0%', offsetSm: '0%' },
+  { text: '原来还能换门派色吗？紫色还是最有韵味～', offset: '42%', offsetSm: '10%' },
+  { text: '把作者抓起来吧，我怀疑他私藏重器', offset: '18%', offsetSm: '4%' },
+  { text: '我劝你们别在测试服用，会影响正式服强度', offset: '4%', offsetSm: '0%' },
+  { text: '我最喜欢的右 Alt 终于可以使用了', offset: '38%', offsetSm: '10%' },
+  { text: '界面已经遥遥领先了', offset: '14%', offsetSm: '4%' },
+];
+
 const steps = [
   {
     title: '安装助手',
-    text: '下载安装包双击安装，首次打开同意协议。玩游戏请切到「游戏模式」，授权安装驱动后重启一次。',
+    text: '下载安装包双击安装，首次打开同意协议。玩游戏请切到「游戏模式」，按提示授权后重启一次。',
   },
   {
     title: '设置规则',
@@ -54,9 +67,9 @@ const steps = [
 
 const assurances = [
   { title: '松手就停', text: '多条规则一起连会自动控总速，不会越叠越快、停不下来。' },
-  { title: '不改游戏、不读内存', text: '只在系统层面监听和模拟按键，不碰游戏文件。' },
-  { title: '本地离线', text: '配置加密存在本机，不上传云端，除检查更新外不联网。' },
-  { title: '更新有校验', text: '自动更新走 HTTPS 并校验数字签名，镜像下载同样防掉包。' },
+  { title: '不动游戏文件', text: '只是替你按键，不改游戏、不读游戏数据。' },
+  { title: '配置存在自己电脑', text: '不用注册、不上传，除了检查更新不联网。' },
+  { title: '更新省心', text: '新版本自动更新，国内下载也快，安装包都校验过防掉包。' },
 ];
 </script>
 
@@ -135,7 +148,7 @@ const assurances = [
               </a>
             </div>
 
-            <!-- 清单在浏览器里异步读，读到之前用同样长度的不可见文本占住两行高度，免得读完把下面整页往下推 -->
+            <!-- 清单在浏览器里异步读，读到之前用同样长度的不可见文本占住行高，免得读完把下面整页往下推 -->
             <p class="mt-3 text-xs text-(--ui-fg-muted)">
               Windows 10 / 11（64 位）<template v-if="nsis">
                 · {{ formatSize(nsis.size) }} · 发布于
@@ -145,19 +158,11 @@ const assurances = [
                   target="_blank"
                   rel="noopener"
                   class="underline-offset-2 hover:underline"
-                  >GitHub 原始链接</a
+                  >GitHub 下载</a
                 ></template
               ><span v-else-if="!unavailable" class="invisible" aria-hidden="true">
-                · 0.0 MB · 发布于 0000-00-00 · GitHub 原始链接</span
+                · 0.0 MB · 发布于 0000-00-00 · GitHub 下载</span
               >
-            </p>
-            <p
-              v-if="!unavailable"
-              class="mt-1 text-xs break-all text-(--ui-fg-subtle)"
-              :class="{ invisible: !nsis }"
-              :aria-hidden="!nsis"
-            >
-              SHA-256：{{ nsis?.sha256 ?? SHA256_PLACEHOLDER }}
             </p>
           </div>
 
@@ -174,26 +179,68 @@ const assurances = [
       <section id="features" class="border-t border-(--ui-border-muted) bg-(--ui-surface-muted)/40">
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
           <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">能帮剑三玩家干嘛</h2>
-          <div class="glow-card mt-8 flex flex-col gap-4 p-6 sm:flex-row sm:items-center">
-            <span
-              class="flex size-12 shrink-0 items-center justify-center rounded-full bg-(--ui-primary) text-(--ui-primary-fg) shadow-(--ui-shadow-primary)"
-            >
-              <!-- 组件库离线图标子集没有闪电，内联 Phosphor lightning-fill，避免线上去外网拉图标 -->
-              <svg viewBox="0 0 256 256" class="size-6" aria-hidden="true">
-                <path
-                  fill="currentColor"
-                  d="M215.79 118.17a8 8 0 0 0-5-5.66L153.18 90.9l14.66-73.33a8 8 0 0 0-13.69-7l-112 120a8 8 0 0 0 3 13l57.63 21.61l-14.62 73.25a8 8 0 0 0 13.69 7l112-120a8 8 0 0 0 1.94-7.26"
-                />
-              </svg>
-            </span>
-            <div>
-              <h3 class="text-lg font-semibold text-(--ui-fg-strong)">有效降低输入延迟</h3>
-              <p class="mt-1 text-sm text-(--ui-fg-muted)">
-                技能一转好就按出去，不用盯着 CD 手搓抢时机：连发间隔最低
-                10ms，比手指狂按密得多；游戏模式在驱动层注入按键，直接送进游戏。
-              </p>
-            </div>
-          </div>
+          <!-- 玩家群里反复被夸的几点，单独放大，不做评价墙也不署名 -->
+          <ul class="mt-8 grid gap-4 md:grid-cols-2">
+            <li class="glow-card flex flex-col gap-4 p-6 sm:flex-row">
+              <HighlightIcon name="lightning" />
+              <div>
+                <h3 class="text-lg font-semibold text-(--ui-fg-strong)">有效降低输入延迟</h3>
+                <p class="mt-1 text-sm text-(--ui-fg-muted)">
+                  技能一转好就按出去，不用盯着 CD 手搓抢时机。连发间隔最低 10ms，比手指狂按密得多。
+                </p>
+              </div>
+            </li>
+            <li class="glow-card flex flex-col gap-4 p-6 sm:flex-row">
+              <HighlightIcon name="palette" />
+              <div>
+                <h3 class="text-lg font-semibold text-(--ui-fg-strong)">界面好看，门派色随心配</h3>
+                <p class="mt-1 text-sm text-(--ui-fg-muted)">
+                  亮暗模式随手换，20 种门派主题色任你搭。点色块试试，这个页面马上换色，当前是<span
+                    class="text-(--ui-fg)"
+                    >{{ currentBrand?.name }}</span
+                  >。
+                </p>
+                <div class="mt-3 flex flex-wrap gap-1.5">
+                  <button
+                    v-for="preset in brandPresets"
+                    :key="preset.id"
+                    type="button"
+                    class="size-5 rounded-full border-2 transition-transform hover:scale-125"
+                    :class="
+                      preset.color === brandColor
+                        ? 'border-(--ui-fg-strong)'
+                        : 'border-transparent'
+                    "
+                    :style="{ background: preset.color }"
+                    :title="preset.name"
+                    :aria-label="`换成${preset.name}`"
+                    :aria-pressed="preset.color === brandColor"
+                    @click="selectBrand(preset.color)"
+                  />
+                </div>
+              </div>
+            </li>
+            <li class="glow-card flex flex-col gap-4 p-6 sm:flex-row">
+              <HighlightIcon name="keyboard" />
+              <div>
+                <h3 class="text-lg font-semibold text-(--ui-fg-strong)">右 Alt 也能当热键</h3>
+                <p class="mt-1 text-sm text-(--ui-fg-muted)">
+                  一键开关、收起窗口这些热键，Shift、Ctrl、Alt、Win 都能绑，左右分开认。顺手的右 Alt
+                  终于用上了，游戏里直接按。
+                </p>
+              </div>
+            </li>
+            <li class="glow-card flex flex-col gap-4 p-6 sm:flex-row">
+              <HighlightIcon name="speaker" />
+              <div>
+                <h3 class="text-lg font-semibold text-(--ui-fg-strong)">语音提示自己定</h3>
+                <p class="mt-1 text-sm text-(--ui-fg-muted)">
+                  开关连发时念一句，不用盯屏幕。台词随便写，比如「我准备好库库按了」；也能换成自己的音频文件，mp3、wav
+                  这些都行。
+                </p>
+              </div>
+            </li>
+          </ul>
           <ul class="glow-marquee mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <li
               v-for="(feature, index) in features"
@@ -206,8 +253,7 @@ const assurances = [
             </li>
           </ul>
           <p class="mt-6 text-sm text-(--ui-fg-muted)">
-            另有横版键鼠图、常驻悬浮窗、全局热键、语音播报与 20
-            套门派配色（右上角色块可以先试），完整说明见
+            另有横版键鼠图、常驻悬浮窗等，完整说明见
             <a
               :href="`${REPOSITORY}#readme`"
               target="_blank"
@@ -216,6 +262,35 @@ const assurances = [
               >使用说明书</a
             >。
           </p>
+        </div>
+      </section>
+
+      <section id="rumors" class="overflow-hidden border-b border-(--ui-border-muted)">
+        <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
+          <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">江湖传闻</h2>
+          <p class="mt-2 text-sm text-(--ui-fg-muted)">纯属传闻，信不信由你。</p>
+          <ul class="mt-10 flex flex-col">
+            <li
+              v-for="(rumor, index) in rumors"
+              :key="rumor.text"
+              class="rumor-card w-[90%] px-6 py-7 sm:w-[70%] md:w-[55%]"
+              :class="{ '-mt-3 sm:-mt-6': index > 0 }"
+              :style="{
+                '--i': index,
+                '--z': index,
+                '--tilt': `${index % 2 ? 1.5 : -1.5}deg`,
+                '--offset': rumor.offset,
+                '--offset-sm': rumor.offsetSm,
+              }"
+            >
+              <span
+                aria-hidden="true"
+                class="absolute -top-3 start-4 font-serif text-5xl leading-none text-(--ui-primary)"
+                >“</span
+              >
+              <p class="text-(--ui-fg-strong)">{{ rumor.text }}</p>
+            </li>
+          </ul>
         </div>
       </section>
 
@@ -243,16 +318,16 @@ const assurances = [
               它靠模拟按键工作，存在被游戏反作弊检测的风险；能不能用、会不会处罚，请自行评估承担。
             </li>
             <li>
-              游戏里请用「游戏模式」，需要安装驱动并以管理员运行；个别反作弊会拦驱动，遇到就切回「通用模式」。
+              游戏里请用「游戏模式」，它会装一个小驱动并以管理员运行；个别游戏会拦它，遇到就切回「通用模式」。
             </li>
-            <li>暂未做代码签名，打开时被 SmartScreen 拦截请点「更多信息 → 仍要运行」。</li>
+            <li>Windows 弹出「已保护你的电脑」时，点「更多信息 → 仍要运行」即可。</li>
           </ul>
         </div>
       </section>
 
       <section class="border-t border-(--ui-border-muted) bg-(--ui-surface-muted)/40">
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-          <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">稳不稳 · 安不安全</h2>
+          <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">用着放心</h2>
           <ul class="mt-8 grid gap-4 sm:grid-cols-2">
             <li v-for="item in assurances" :key="item.title" class="glow-card flex gap-3 p-5">
               <XIcon name="ph:check" class="mt-0.5 size-5 shrink-0 text-(--ui-success)" />

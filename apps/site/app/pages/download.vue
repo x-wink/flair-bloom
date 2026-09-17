@@ -52,8 +52,7 @@ function label(item: MirroredAsset): string {
           <XIcon name="ph:download-simple" class="size-5" />
           没有开始？点这里下载
         </a>
-        <p class="mt-4 text-xs break-all text-(--ui-fg-subtle)">SHA-256：{{ asset.sha256 }}</p>
-        <p v-if="other" class="mt-3 text-sm">
+        <p v-if="other" class="mt-4 text-sm">
           <a
             :href="other.url"
             class="text-(--ui-fg-muted) underline-offset-2 hover:text-(--ui-fg) hover:underline"
