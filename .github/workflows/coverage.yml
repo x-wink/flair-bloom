@@ -1,9 +1,30 @@
 name: Coverage
 
+# 门禁对象是四个共享 crate（加密、配置格式、配置迁移）——这几处出错就是用户配置损坏或
+# 兑换码失效，值得卡死阈值。路径过滤按它们的依赖闭包写：四者只互相依赖，不牵连其他 crate；
+# workspace 清单与 lockfile 会改依赖版本，所以一并算进来。
+# 前端、站点与 Tauri 应用层的改动不该拉起一整套 Rust 工具链跑覆盖率。
+# 两处清单必须手抄一致：GitHub Actions 不支持 YAML 锚点，写 `&`/`*` 会直接解析失败。
 on:
   pull_request:
+    paths:
+      - 'packages/crypto/**'
+      - 'packages/migrate/**'
+      - 'packages/qzh-format/**'
+      - 'packages/qzh-profile/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/coverage.yml'
   push:
     branches: [main]
+    paths:
+      - 'packages/crypto/**'
+      - 'packages/migrate/**'
+      - 'packages/qzh-format/**'
+      - 'packages/qzh-profile/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/coverage.yml'
 
 jobs:
   coverage:
