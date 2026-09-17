@@ -1,5 +1,21 @@
 <script setup lang="ts">
+import { useTheme } from '@xwink/ui';
+
 const { manifest, latest, status } = useReleases();
+const { isDark, preference: themePreference, toggle: toggleTheme } = useTheme();
+
+const themeModes = [
+  { value: 'light', label: '浅色', icon: 'ph:sun-dim' },
+  { value: 'dark', label: '深色', icon: 'ph:moon' },
+  { value: 'auto', label: '跟随系统', icon: 'ph:desktop' },
+] as const;
+
+// 预渲染时读不到本地存的明暗档，服务端只能按「跟随系统」出选中态；水合时 class 不一致 Vue 不纠正会残留。
+// 选中高亮等挂载后再给，挂载前两端都是「无选中」，挂载后是正常的响应式更新
+const mounted = ref(false);
+onMounted(() => {
+  mounted.value = true;
+});
 
 const nsis = computed(() => latest.value?.assets.find((asset) => asset.kind === 'nsis'));
 const msi = computed(() => latest.value?.assets.find((asset) => asset.kind === 'msi'));
@@ -81,7 +97,7 @@ const assurances = [
       <div class="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:px-6">
         <a href="#top" class="flex min-w-0 items-center gap-2 font-semibold text-(--ui-fg-strong)">
           <img src="/icon.png" alt="" class="size-7 rounded-md" />
-          <span class="truncate">气质花按键助手</span>
+          <span class="truncate text-(--ui-primary)">气质花按键助手</span>
         </a>
         <nav class="ms-auto hidden items-center gap-5 text-sm text-(--ui-fg-muted) sm:flex">
           <a href="#features" class="hover:text-(--ui-fg)">功能</a>
@@ -89,15 +105,19 @@ const assurances = [
           <a href="#changelog" class="hover:text-(--ui-fg)">更新公告</a>
           <a href="#support" class="hover:text-(--ui-fg)">支持</a>
         </nav>
-        <div class="ms-auto flex items-center gap-2 sm:ms-0">
-          <!-- 预渲染时读不到本地存的明暗档，只能输出「跟随系统」选中；水合时 class 不一致 Vue 不纠正，
-               旧选中态会残留，所以只在客户端渲染，占位与组件同尺寸免得头部跳动 -->
-          <ClientOnly>
-            <XThemeToggle :modes="['light', 'dark', 'auto']" label="" />
-            <template #fallback><div class="h-[38px] w-[138px]" /></template>
-          </ClientOnly>
-          <BrandColorPicker />
-        </div>
+        <!-- 顶栏只留一键明暗翻转；三档选择与门派色块在功能区卡片里。图标取决于本地存的档位，同样只在客户端渲染 -->
+        <ClientOnly>
+          <button
+            type="button"
+            class="ms-auto flex size-9 items-center justify-center rounded-(--ui-radius) text-(--ui-fg-muted) hover:bg-(--ui-primary)/10 hover:text-(--ui-primary) sm:ms-0"
+            :title="isDark ? '切换到浅色' : '切换到深色'"
+            :aria-label="isDark ? '切换到浅色' : '切换到深色'"
+            @click="toggleTheme"
+          >
+            <XIcon :name="isDark ? 'ph:moon' : 'ph:sun-dim'" class="size-5" />
+          </button>
+          <template #fallback><div class="ms-auto size-9 sm:ms-0" /></template>
+        </ClientOnly>
       </div>
     </header>
 
@@ -195,11 +215,31 @@ const assurances = [
               <div>
                 <h3 class="text-lg font-semibold text-(--ui-fg-strong)">界面好看，门派色随心配</h3>
                 <p class="mt-1 text-sm text-(--ui-fg-muted)">
-                  亮暗模式随手换，20 种门派主题色任你搭。点色块试试，这个页面马上换色，当前是<span
+                  亮暗模式随手换，20 种门派主题色任你搭。就在这儿试试，这个页面马上跟着变，当前是<span
                     class="text-(--ui-fg)"
-                    >{{ currentBrand?.name }}</span
+                    >{{ currentBrand?.sect }} · {{ currentBrand?.name
+                    }}{{ mounted && isDark ? '（黑化版）' : '' }}</span
                   >。
                 </p>
+                <div class="mt-4 flex items-center gap-2">
+                  <button
+                    v-for="mode in themeModes"
+                    :key="mode.value"
+                    type="button"
+                    class="flex size-8 items-center justify-center rounded-full border-2 transition-all hover:scale-110 hover:text-(--ui-primary)"
+                    :class="
+                      mounted && themePreference === mode.value
+                        ? 'border-(--ui-primary) bg-(--ui-primary)/15 text-(--ui-primary)'
+                        : 'border-transparent bg-(--ui-primary)/5 text-(--ui-fg-muted)'
+                    "
+                    :title="mode.label"
+                    :aria-label="mode.label"
+                    :aria-pressed="mounted && themePreference === mode.value"
+                    @click="themePreference = mode.value"
+                  >
+                    <XIcon :name="mode.icon" class="size-4" />
+                  </button>
+                </div>
                 <div class="mt-3 flex flex-wrap gap-1.5">
                   <button
                     v-for="preset in brandPresets"
@@ -212,8 +252,8 @@ const assurances = [
                         : 'border-transparent'
                     "
                     :style="{ background: preset.color }"
-                    :title="preset.name"
-                    :aria-label="`换成${preset.name}`"
+                    :title="`${preset.sect} · ${preset.name}`"
+                    :aria-label="`换成${preset.sect}${preset.name}`"
                     :aria-pressed="preset.color === brandColor"
                     @click="selectBrand(preset.color)"
                   />
