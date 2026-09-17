@@ -58,7 +58,7 @@ export default defineNuxtConfig({
   },
   css: ['~/assets/css/main.css'],
   nitro: {
-    prerender: { crawlLinks: false, routes: ['/'] },
+    prerender: { crawlLinks: false, routes: ['/', '/download'] },
   },
   $development: {
     // 本地先跑 pnpm mirror:dev 把真实发布数据同步进 .mirror，开发服务按线上同一路径提供

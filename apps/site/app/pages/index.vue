@@ -8,6 +8,7 @@ const unavailable = computed(
 );
 
 const REPOSITORY = 'https://github.com/x-wink/flair-bloom';
+const SHA256_PLACEHOLDER = '0'.repeat(64);
 
 const features = [
   {
@@ -91,7 +92,7 @@ const assurances = [
       <section class="mx-auto max-w-5xl px-4 pt-14 pb-16 sm:px-6 sm:pt-20">
         <div class="flex flex-col items-start gap-10 md:flex-row md:items-center">
           <div class="flex-1">
-            <p class="text-sm font-medium text-(--ui-primary)">PVE 打本按键小助手</p>
+            <p class="text-sm font-medium text-(--ui-primary)">PVE 打本按键小助手 · 有效降低输入延迟</p>
             <h1 class="mt-3 text-4xl font-bold tracking-tight text-(--ui-fg-strong) sm:text-5xl">
               气质花 FlairBloom
             </h1>
@@ -103,7 +104,7 @@ const assurances = [
               <a
                 v-if="nsis"
                 :href="nsis.url"
-                class="inline-flex items-center gap-2 rounded-(--ui-radius) bg-(--ui-primary) px-5 py-3 font-semibold text-(--ui-primary-fg) shadow-(--ui-shadow-primary) hover:opacity-90"
+                class="inline-flex items-center gap-2 rounded-(--ui-radius) border border-transparent bg-(--ui-primary) px-5 py-3 font-semibold text-(--ui-primary-fg) shadow-(--ui-shadow-primary) hover:opacity-90"
               >
                 <XIcon name="ph:download-simple" class="size-5" />
                 下载 {{ latest?.tag }}
@@ -120,7 +121,7 @@ const assurances = [
                 :href="`${REPOSITORY}/releases/latest`"
                 target="_blank"
                 rel="noopener"
-                class="inline-flex items-center gap-2 rounded-(--ui-radius) bg-(--ui-primary) px-5 py-3 font-semibold text-(--ui-primary-fg) hover:opacity-90"
+                class="inline-flex items-center gap-2 rounded-(--ui-radius) border border-transparent bg-(--ui-primary) px-5 py-3 font-semibold text-(--ui-primary-fg) hover:opacity-90"
               >
                 前往 GitHub 下载
                 <XIcon name="ph:arrow-up-right" class="size-5" />
@@ -134,20 +135,29 @@ const assurances = [
               </a>
             </div>
 
-            <p v-if="nsis" class="mt-3 text-xs text-(--ui-fg-muted)">
-              Windows 10 / 11（64 位）· {{ formatSize(nsis.size) }} · 发布于
-              {{ formatDate(latest?.publishedAt ?? '') }} ·
-              <a
-                :href="nsis.githubUrl"
-                target="_blank"
-                rel="noopener"
-                class="underline-offset-2 hover:underline"
-                >GitHub 原始链接</a
+            <!-- 清单在浏览器里异步读，读到之前用同样长度的不可见文本占住两行高度，免得读完把下面整页往下推 -->
+            <p class="mt-3 text-xs text-(--ui-fg-muted)">
+              Windows 10 / 11（64 位）<template v-if="nsis">
+                · {{ formatSize(nsis.size) }} · 发布于
+                {{ formatDate(latest?.publishedAt ?? '') }} ·
+                <a
+                  :href="nsis.githubUrl"
+                  target="_blank"
+                  rel="noopener"
+                  class="underline-offset-2 hover:underline"
+                  >GitHub 原始链接</a
+                ></template
+              ><span v-else-if="!unavailable" class="invisible" aria-hidden="true">
+                · 0.0 MB · 发布于 0000-00-00 · GitHub 原始链接</span
               >
             </p>
-            <p v-else class="mt-3 text-xs text-(--ui-fg-muted)">Windows 10 / 11（64 位）</p>
-            <p v-if="nsis" class="mt-1 text-xs break-all text-(--ui-fg-subtle)">
-              SHA-256：{{ nsis.sha256 }}
+            <p
+              v-if="!unavailable"
+              class="mt-1 text-xs break-all text-(--ui-fg-subtle)"
+              :class="{ invisible: !nsis }"
+              :aria-hidden="!nsis"
+            >
+              SHA-256：{{ nsis?.sha256 ?? SHA256_PLACEHOLDER }}
             </p>
           </div>
 
@@ -164,7 +174,27 @@ const assurances = [
       <section id="features" class="border-t border-(--ui-border-muted) bg-(--ui-surface-muted)/40">
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
           <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">能帮剑三玩家干嘛</h2>
-          <ul class="glow-marquee mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <div class="glow-card mt-8 flex flex-col gap-4 p-6 sm:flex-row sm:items-center">
+            <span
+              class="flex size-12 shrink-0 items-center justify-center rounded-full bg-(--ui-primary) text-(--ui-primary-fg) shadow-(--ui-shadow-primary)"
+            >
+              <!-- 组件库离线图标子集没有闪电，内联 Phosphor lightning-fill，避免线上去外网拉图标 -->
+              <svg viewBox="0 0 256 256" class="size-6" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M215.79 118.17a8 8 0 0 0-5-5.66L153.18 90.9l14.66-73.33a8 8 0 0 0-13.69-7l-112 120a8 8 0 0 0 3 13l57.63 21.61l-14.62 73.25a8 8 0 0 0 13.69 7l112-120a8 8 0 0 0 1.94-7.26"
+                />
+              </svg>
+            </span>
+            <div>
+              <h3 class="text-lg font-semibold text-(--ui-fg-strong)">有效降低输入延迟</h3>
+              <p class="mt-1 text-sm text-(--ui-fg-muted)">
+                技能一转好就按出去，不用盯着 CD 手搓抢时机：连发间隔最低
+                10ms，比手指狂按密得多；游戏模式在驱动层注入按键，直接送进游戏。
+              </p>
+            </div>
+          </div>
+          <ul class="glow-marquee mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <li
               v-for="(feature, index) in features"
               :key="feature.title"
