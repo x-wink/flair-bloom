@@ -1,7 +1,9 @@
 <script setup lang="ts">
 // 打印物料会被转发到论坛、群聊，那边对站外链接与二维码有限制：主体只做宣传与说明，
-// 不放二维码、不引导跳转，每页底部只留一行不起眼的纯文本下载地址
-const DOWNLOAD_ADDRESS = 'app.xwink.fun/flair-bloom/download';
+// 不放二维码、不引导跳转，每页底部只留一行不起眼的纯文本下载地址。
+// 地址按打印时所在页面现算：在哪个站点打印就指向哪个站点。预渲染时拿到的是构建机地址，所以挂载后再取
+const baseURL = useRuntimeConfig().app.baseURL;
+const downloadAddress = ref('');
 
 // 海报下半截的留白放三句短的，长句在 A4 宽度里一行摆不下三条
 const posterRumors = [rumors[2], rumors[5], rumors[4]].filter((rumor) => rumor !== undefined);
@@ -26,6 +28,7 @@ function afterPrint() {
 }
 
 onMounted(() => {
+  downloadAddress.value = `${window.location.host}${baseURL}download`;
   window.addEventListener('beforeprint', beforePrint);
   window.addEventListener('afterprint', afterPrint);
 });
@@ -96,7 +99,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
       <p class="relative mt-[3mm] text-center text-[8.5pt] text-(--ui-fg-muted)">
-        下载地址：{{ DOWNLOAD_ADDRESS }}
+        下载地址：{{ downloadAddress }}
       </p>
     </section>
 
@@ -160,7 +163,7 @@ onBeforeUnmount(() => {
         </ul>
       </div>
       <p class="mt-[3mm] text-center text-[8.5pt] text-(--ui-fg-muted)">
-        下载地址：{{ DOWNLOAD_ADDRESS }}
+        下载地址：{{ downloadAddress }}
       </p>
     </section>
   </div>
