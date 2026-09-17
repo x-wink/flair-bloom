@@ -5,8 +5,8 @@
 const baseURL = useRuntimeConfig().app.baseURL;
 const downloadAddress = ref('');
 
-// 海报下半截的留白放三句短的，长句在 A4 宽度里一行摆不下三条
-const posterRumors = [rumors[2], rumors[5], rumors[4]].filter((rumor) => rumor !== undefined);
+// 海报只放前四条作者写的纯骚话，不带摘自群聊的玩家评论；四条一行摆不下，两两错落排两行
+const posterRumors = rumors.slice(0, 4);
 
 // 纸上没有暗色：打印前临时切浅色，打完还原。只动 html 上的属性，不写用户存的偏好
 let previousTheme: string | undefined;
@@ -56,7 +56,7 @@ onBeforeUnmount(() => {
         <p class="mt-3 text-[13pt] text-(--ui-fg-muted)">
           手搓长按等 CD、武学助手 FFF 启动、一键宏启动、多段宏切换……让手指歇会儿。
         </p>
-        <img src="/icon.png" alt="" class="mt-8 size-[58mm] drop-shadow-xl" />
+        <img src="/icon.png" alt="" class="mt-6 size-[48mm] drop-shadow-xl" />
 
         <ul class="mt-8 grid w-full grid-cols-2 gap-[5mm] text-start">
           <li
@@ -72,7 +72,7 @@ onBeforeUnmount(() => {
           </li>
         </ul>
 
-        <ul class="mt-auto flex w-full justify-center gap-[4mm] pt-[6mm]">
+        <ul class="mt-auto flex w-full flex-wrap justify-center gap-x-[4mm] gap-y-[3mm] pt-[5mm]">
           <li
             v-for="(rumor, index) in posterRumors"
             :key="rumor.text"
