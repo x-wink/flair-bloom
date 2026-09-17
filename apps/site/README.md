@@ -28,6 +28,10 @@
 
 `https://app.xwink.fun/flair-bloom/download` 打开即开始下载 Latest 的 exe，加 `?type=msi` 下载 MSI。页面在浏览器里读镜像清单再跳转，新版本同步进镜像后链接自动指向它，不用改地址也不用重发站点。
 
+## 打印海报与说明书
+
+在产品页直接 Cmd+P / Ctrl+P，打印成两张 A4：第一张是宣发海报，第二张是使用说明，都带扫码下载的二维码，配色跟当前选的门派色走。纸张选 A4、勾选「背景图形」，页眉页脚不用手动关。打印排版在 `app/components/PrintKit.vue`，文案与页面共用 `app/utils/content.ts`，改一处两边一起变。
+
 ## 本地开发
 
 ```sh

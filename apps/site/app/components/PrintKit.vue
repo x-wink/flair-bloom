@@ -1,0 +1,176 @@
+<script setup lang="ts">
+import { renderSVG } from 'uqr';
+
+// 二维码固定黑白：部分门派色（流金、缥碧）太浅，拿主题色画码手机扫不出来
+const downloadQr = renderSVG(DOWNLOAD_URL, { border: 1 });
+
+// 海报下半截的留白放三句短的，长句在 A4 宽度里一行摆不下三条
+const posterRumors = [rumors[2], rumors[5], rumors[4]].filter((rumor) => rumor !== undefined);
+
+function shortUrl(url: string): string {
+  return url.replace(/^https:\/\//, '').replace(/\/$/, '');
+}
+
+// 纸上没有暗色：打印前临时切浅色，打完还原。只动 html 上的属性，不写用户存的偏好
+let previousTheme: string | undefined;
+let previousScheme = '';
+
+function beforePrint() {
+  const root = document.documentElement;
+  previousTheme = root.dataset.theme;
+  previousScheme = root.style.colorScheme;
+  root.dataset.theme = 'light';
+  root.style.colorScheme = 'light';
+}
+
+function afterPrint() {
+  const root = document.documentElement;
+  if (previousTheme === undefined) delete root.dataset.theme;
+  else root.dataset.theme = previousTheme;
+  root.style.colorScheme = previousScheme;
+}
+
+onMounted(() => {
+  window.addEventListener('beforeprint', beforePrint);
+  window.addEventListener('afterprint', afterPrint);
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeprint', beforePrint);
+  window.removeEventListener('afterprint', afterPrint);
+});
+</script>
+
+<template>
+  <div class="hidden print:block" aria-hidden="true">
+    <!-- 第一页：宣发海报 -->
+    <section class="print-page flex flex-col">
+      <div class="print-glow" />
+      <div class="relative flex flex-1 flex-col items-center text-center">
+        <p
+          class="rounded-full bg-(--ui-primary)/12 px-4 py-1 text-[11pt] font-medium text-(--ui-primary)"
+        >
+          PVE 打本按键小助手 · 有效降低输入延迟
+        </p>
+        <h1 class="mt-5 text-[40pt] leading-tight font-bold text-(--ui-fg-strong)">
+          气质花 <span class="text-(--ui-primary)">FlairBloom</span>
+        </h1>
+        <p class="mt-3 text-[13pt] text-(--ui-fg-muted)">
+          手搓长按等 CD、武学助手 FFF 启动、一键宏启动、多段宏切换……让手指歇会儿。
+        </p>
+        <img src="/icon.png" alt="" class="mt-8 size-[58mm] drop-shadow-xl" />
+
+        <ul class="mt-8 grid w-full grid-cols-2 gap-[5mm] text-start">
+          <li
+            v-for="item in highlights"
+            :key="item.title"
+            class="glow-card print-avoid flex gap-[4mm] p-[5mm]"
+          >
+            <HighlightIcon :name="item.icon" />
+            <div>
+              <h2 class="text-[13pt] font-semibold text-(--ui-fg-strong)">{{ item.title }}</h2>
+              <p class="mt-1 text-[9.5pt] leading-relaxed text-(--ui-fg-muted)">{{ item.text }}</p>
+            </div>
+          </li>
+        </ul>
+
+        <ul class="mt-auto flex w-full justify-center gap-[4mm] pt-[6mm]">
+          <li
+            v-for="(rumor, index) in posterRumors"
+            :key="rumor.text"
+            class="rounded-(--ui-radius) border border-(--ui-primary)/40 bg-(--ui-primary)/8 px-[4mm] py-[2.5mm] text-[9.5pt] text-(--ui-fg-strong)"
+            :style="{ rotate: `${index % 2 ? 1.5 : -1.5}deg` }"
+          >
+            “{{ rumor.text }}”
+          </li>
+        </ul>
+      </div>
+
+      <div
+        class="relative mt-[6mm] flex items-center gap-[6mm] rounded-(--ui-radius) bg-(--ui-primary) p-[6mm] text-(--ui-primary-fg)"
+      >
+        <div class="flex-1">
+          <p class="text-[20pt] font-bold">扫码免费下载</p>
+          <p class="mt-1 text-[11pt] opacity-90">Windows 10 / 11（64 位）· 国内镜像高速下载</p>
+          <p class="mt-3 text-[12pt] font-semibold tracking-wide">{{ shortUrl(DOWNLOAD_URL) }}</p>
+          <p class="mt-2 text-[9pt] opacity-80">骚话谷出品，必属精品。</p>
+        </div>
+        <div class="size-[34mm] shrink-0 rounded-[3mm] bg-white p-[2mm] [&>svg]:size-full" v-html="downloadQr" />
+      </div>
+    </section>
+
+    <!-- 第二页：说明书 -->
+    <section class="print-page flex flex-col text-[10pt]">
+      <header class="flex items-center gap-[3mm] border-b-2 border-(--ui-primary) pb-[4mm]">
+        <img src="/icon.png" alt="" class="size-[12mm]" />
+        <div class="flex-1">
+          <p class="text-[18pt] font-bold text-(--ui-fg-strong)">气质花 FlairBloom 使用说明</p>
+          <p class="text-[9pt] text-(--ui-fg-muted)">PVE 打本按键小助手 · 最新版本与更新公告见官网</p>
+        </div>
+        <p class="text-[10pt] font-semibold text-(--ui-primary)">{{ shortUrl(SITE_URL) }}</p>
+      </header>
+
+      <h2 class="print-heading">三步上手</h2>
+      <ol class="grid grid-cols-3 gap-[4mm]">
+        <li v-for="(step, index) in steps" :key="step.title" class="glow-card print-avoid p-[4mm]">
+          <p class="flex items-center gap-[2mm] font-semibold text-(--ui-fg-strong)">
+            <span
+              class="flex size-[6mm] items-center justify-center rounded-full bg-(--ui-primary) text-[9pt] text-(--ui-primary-fg)"
+              >{{ index + 1 }}</span
+            >
+            {{ step.title }}
+          </p>
+          <p class="mt-[2mm] text-[9pt] leading-relaxed text-(--ui-fg-muted)">{{ step.text }}</p>
+        </li>
+      </ol>
+
+      <h2 class="print-heading">能帮剑三玩家干嘛</h2>
+      <ul class="grid grid-cols-3 gap-[3mm]">
+        <li v-for="feature in features" :key="feature.title" class="glow-card print-avoid p-[3.5mm]">
+          <p class="font-semibold text-(--ui-fg-strong)">{{ feature.title }}</p>
+          <p class="mt-1 text-[8.5pt] leading-relaxed text-(--ui-fg-muted)">{{ feature.text }}</p>
+        </li>
+      </ul>
+
+      <h2 class="print-heading">用着放心</h2>
+      <ul class="grid grid-cols-2 gap-x-[6mm] gap-y-[2.5mm]">
+        <li v-for="item in assurances" :key="item.title" class="print-avoid flex gap-[2mm]">
+          <span class="font-bold text-(--ui-primary)">✓</span>
+          <p>
+            <span class="font-semibold text-(--ui-fg-strong)">{{ item.title }}：</span
+            ><span class="text-(--ui-fg-muted)">{{ item.text }}</span>
+          </p>
+        </li>
+      </ul>
+
+      <div
+        class="print-avoid mt-[6mm] rounded-(--ui-radius) border border-(--ui-warning) bg-(--ui-warning)/10 p-[4mm]"
+      >
+        <p class="font-semibold text-(--ui-fg-strong)">使用前请知悉</p>
+        <ul class="mt-[1.5mm] list-disc space-y-[1mm] ps-[5mm] text-[9pt] text-(--ui-fg)">
+          <li v-for="caution in cautions" :key="caution">{{ caution }}</li>
+        </ul>
+      </div>
+
+      <div class="mt-auto flex items-end gap-[5mm] border-t border-(--ui-border-muted) pt-[4mm]">
+        <div class="flex-1 space-y-[1.5mm] text-[9pt] text-(--ui-fg-muted)">
+          <p class="text-[11pt] font-semibold text-(--ui-fg-strong)">遇到问题</p>
+          <p>
+            问题反馈：<span class="text-(--ui-fg)">{{ shortUrl(`${REPOSITORY}/issues`) }}</span>
+            （崩溃时应用会提示日志路径，附上日志更好定位）
+          </p>
+          <p>
+            常见问题与完整说明：<span class="text-(--ui-fg)">{{ shortUrl(REPOSITORY) }}</span>
+          </p>
+          <p>
+            下载最新版本：<span class="text-(--ui-fg)">{{ shortUrl(DOWNLOAD_URL) }}</span>
+          </p>
+        </div>
+        <div class="text-center">
+          <div class="size-[24mm] [&>svg]:size-full" v-html="downloadQr" />
+          <p class="mt-1 text-[8pt] text-(--ui-fg-muted)">扫码下载</p>
+        </div>
+      </div>
+    </section>
+  </div>
+</template>

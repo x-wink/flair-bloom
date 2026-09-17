@@ -131,6 +131,61 @@ body {
   }
 }
 
+/* 打印排版：每个 .print-page 占一张 A4。页边距设为 0 才能去掉浏览器自带的页眉页脚（网址、日期），
+   留白改由页内 padding 给；高度留 1mm 余量，避免舍入误差多挤出一张空白页 */
+@page {
+  size: A4;
+  margin: 0;
+}
+
+@media print {
+  html,
+  body {
+    background: #fff;
+  }
+
+  .print-page {
+    position: relative;
+    box-sizing: border-box;
+    width: 210mm;
+    height: 296mm;
+    padding: 14mm;
+    overflow: hidden;
+    break-after: page;
+    print-color-adjust: exact;
+    -webkit-print-color-adjust: exact;
+  }
+
+  .print-page:last-child {
+    break-after: auto;
+  }
+
+  .print-avoid {
+    break-inside: avoid;
+  }
+
+  .print-heading {
+    margin: 6mm 0 3mm;
+    padding-inline-start: 2.5mm;
+    border-inline-start: 1.2mm solid var(--ui-primary);
+    font-size: 13pt;
+    font-weight: 700;
+    color: var(--ui-fg-strong);
+  }
+
+  /* 海报顶部的主题色光晕，纯装饰 */
+  .print-glow {
+    position: absolute;
+    inset: 0 0 auto;
+    height: 150mm;
+    background: radial-gradient(
+      ellipse at 50% 38%,
+      color-mix(in oklab, var(--ui-primary) 22%, transparent),
+      transparent 68%
+    );
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .rumor-card {
     animation: none;
