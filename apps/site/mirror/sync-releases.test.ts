@@ -9,6 +9,7 @@ import type { GithubRelease } from './manifest.ts';
 import { syncReleases, type SyncOptions } from './sync-releases.ts';
 
 const BASE = 'https://app.xwink.fun/flair-bloom/releases';
+const PROXY = 'https://proxy.example/';
 const sha = (content: string) => createHash('sha256').update(content).digest('hex');
 
 interface Fixture {
@@ -17,6 +18,7 @@ interface Fixture {
   files: Map<string, string>;
   failApi?: boolean;
   corrupt?: Set<string>;
+  proxy?: 'ok' | 'down' | 'tampered';
 }
 
 function makeRelease(fixture: Fixture, tag: string, publishedAt: string): GithubRelease {
@@ -64,6 +66,12 @@ function fakeFetch(fixture: Fixture, calls: string[]): typeof fetch {
         return Response.json(fixture.releases.find((entry) => entry.tag_name === fixture.latest));
       }
       return Response.json(fixture.releases);
+    }
+    if (url.startsWith(PROXY)) {
+      if (fixture.proxy === 'down') return new Response('bad gateway', { status: 502 });
+      const content = fixture.files.get(url.slice(PROXY.length));
+      if (content === undefined) return new Response('missing', { status: 404 });
+      return new Response(fixture.proxy === 'tampered' ? `${content}!` : content);
     }
     const content = fixture.files.get(url);
     if (content === undefined) return new Response('missing', { status: 404 });
@@ -183,4 +191,31 @@ test('坏版本转草稿并把 Latest 拨回后，清单回退、坏版本目录
   assert.deepEqual(result.pruned, ['v0.3.2']);
   const updater = JSON.parse(await readFile(join(root, 'latest.json'), 'utf8'));
   assert.equal(updater.version, '0.3.1');
+});
+
+const isDownload = (url: string) => !url.startsWith('https://api.github.com/');
+
+test('配置了代理时安装包只经代理下载', async () => {
+  fixture.proxy = 'ok';
+  await syncReleases({ ...options(), downloadProxy: PROXY });
+  const downloads = calls.filter(isDownload);
+  assert.ok(downloads.length > 0);
+  assert.ok(downloads.every((url) => url.startsWith(PROXY)));
+});
+
+test('代理不可用时回落直连 GitHub，本轮照常完成', async () => {
+  fixture.proxy = 'down';
+  const result = await syncReleases({ ...options(), downloadProxy: PROXY });
+  assert.equal(result.changed, true);
+  assert.ok(calls.some((url) => url.startsWith('https://github.com/')));
+});
+
+test('代理返回被篡改的内容时校验拦下，回落直连后落盘的是正确内容', async () => {
+  fixture.proxy = 'tampered';
+  await syncReleases({ ...options(), downloadProxy: PROXY });
+  assert.equal(
+    await readFile(join(root, 'v0.3.1', 'FlairBloom_0.3.1_x64-setup.exe'), 'utf8'),
+    'exe v0.3.1',
+  );
+  assert.equal(existsSync(join(root, 'v0.3.1', 'FlairBloom_0.3.1_x64-setup.exe.part')), false);
 });

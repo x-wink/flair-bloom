@@ -114,6 +114,6 @@ jobs:
             [ "${CODE}" = "200" ] || { echo "${URL} → ${CODE}" >&2; exit 1; }
             echo "${URL} → 200"
           done
-          # 镜像由服务器定时器维护，新版本首轮要从 GitHub 拉安装包，十分钟级；这里只提示不拦截
+          # 镜像由服务器定时器维护，首次部署时定时器可能还没跑第一轮；这里只提示不拦截
           CODE="$(curl -s -o /dev/null -w '%{http_code}' https://app.xwink.fun/flair-bloom/releases/releases.json || true)"
           [ "${CODE}" = "200" ] || echo "::warning::发布镜像清单暂不可用（${CODE}），确认 flair-bloom-mirror.timer 已启用"

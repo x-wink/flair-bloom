@@ -24,6 +24,8 @@ export interface SyncOptions {
   keepNotes: number;
   keepAssets: number;
   token?: string;
+  /** 下载代理前缀，拼在 GitHub 下载地址前；不传就只直连 */
+  downloadProxy?: string;
   fetch?: typeof fetch;
   now?: () => Date;
   log?: (message: string) => void;
@@ -36,9 +38,13 @@ export interface SyncResult {
   changed: boolean;
 }
 
+export const DEFAULT_DOWNLOAD_PROXY = 'https://gh-proxy.com/';
+
 const API_TIMEOUT_MS = 30_000;
-// 国内服务器直连 GitHub 资产实测约 20 KB/s，9 MB 的 msi 要七分钟左右，留足余量
-const DOWNLOAD_TIMEOUT_MS = 30 * 60_000;
+// 服务器经代理下载 6 MB 实测一秒内；卡住就尽快放弃，回落直连
+const PROXY_TIMEOUT_MS = 5 * 60_000;
+// 只在代理失败时用到：国内服务器直连 GitHub 资产实测约 20 KB/s，9 MB 的 msi 要七分钟左右
+const DIRECT_TIMEOUT_MS = 30 * 60_000;
 
 async function githubJson<T>(options: SyncOptions, path: string): Promise<T> {
   const response = await (options.fetch ?? fetch)(`https://api.github.com${path}`, {
@@ -65,12 +71,18 @@ async function sha256File(path: string): Promise<string | undefined> {
 }
 
 /** 下载到 .part，大小与 sha256 都对上才改名；失败时删掉半截文件，已有的正式文件不受影响 */
-async function download(options: SyncOptions, item: DownloadItem, dest: string): Promise<void> {
+async function download(
+  options: SyncOptions,
+  item: DownloadItem,
+  dest: string,
+  url: string,
+  timeoutMs: number,
+): Promise<void> {
   const part = `${dest}.part`;
-  const response = await (options.fetch ?? fetch)(item.githubUrl, {
+  const response = await (options.fetch ?? fetch)(url, {
     headers: { 'User-Agent': 'flair-bloom-release-mirror' },
     redirect: 'follow',
-    signal: AbortSignal.timeout(DOWNLOAD_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok || !response.body)
     throw new Error(`下载 ${item.tag}/${item.name} → ${response.status}`);
@@ -104,8 +116,29 @@ async function ensureAsset(options: SyncOptions, item: DownloadItem): Promise<bo
   const dest = join(dir, item.name);
   if ((await sha256File(dest)) === item.sha256) return false;
   await mkdir(dir, { recursive: true });
-  await download(options, item, dest);
+  // 第三方代理的可信度由 sha256 兜底：内容被改过也过不了校验，只会触发回落直连，不会落盘
+  if (options.downloadProxy) {
+    try {
+      await download(
+        options,
+        item,
+        dest,
+        `${options.downloadProxy}${item.githubUrl}`,
+        PROXY_TIMEOUT_MS,
+      );
+      return true;
+    } catch (error) {
+      logOf(options)(
+        `代理下载 ${item.tag}/${item.name} 失败，回落直连 GitHub：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  await download(options, item, dest, item.githubUrl, DIRECT_TIMEOUT_MS);
   return true;
+}
+
+function logOf(options: SyncOptions): (message: string) => void {
+  return options.log ?? ((message: string) => console.log(`[mirror] ${message}`));
 }
 
 async function readText(path: string): Promise<string | undefined> {
@@ -122,7 +155,7 @@ function withoutTimestamp(manifest: string | undefined): string | undefined {
 }
 
 export async function syncReleases(options: SyncOptions): Promise<SyncResult> {
-  const log = options.log ?? ((message: string) => console.log(`[mirror] ${message}`));
+  const log = logOf(options);
   const repo = options.repository;
 
   const [releases, latest] = await Promise.all([
@@ -197,6 +230,8 @@ async function main(): Promise<void> {
     keepNotes: integerEnv('MIRROR_KEEP_NOTES', 30),
     keepAssets: integerEnv('MIRROR_KEEP_ASSETS', 3),
     token: process.env.GITHUB_TOKEN || undefined,
+    // 未设置走默认代理；显式设为空字符串则只直连
+    downloadProxy: process.env.MIRROR_DOWNLOAD_PROXY ?? DEFAULT_DOWNLOAD_PROXY,
   });
 }
 
