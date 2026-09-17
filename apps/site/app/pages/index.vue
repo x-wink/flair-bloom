@@ -144,7 +144,7 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
             <li
               v-for="item in highlights"
               :key="item.title"
-              class="glow-card flex flex-col gap-4 p-6 sm:flex-row"
+              class="ui-glow-card flex flex-col gap-4 p-6 sm:flex-row"
             >
               <HighlightIcon :name="item.icon" />
               <div>
@@ -200,12 +200,12 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
               </div>
             </li>
           </ul>
-          <ul class="glow-marquee mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ul class="ui-glow-marquee mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <li
               v-for="(feature, index) in features"
               :key="feature.title"
-              class="glow-card p-5"
-              :style="{ '--i': index }"
+              class="ui-glow-card p-5"
+              :style="{ '--ui-i': index }"
             >
               <h3 class="font-semibold text-(--ui-fg-strong)">{{ feature.title }}</h3>
               <p class="mt-2 text-sm text-(--ui-fg-muted)">{{ feature.text }}</p>
@@ -256,7 +256,7 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
       <section id="start" class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
         <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">三步上手</h2>
         <ol class="mt-8 grid gap-4 md:grid-cols-3">
-          <li v-for="(step, index) in steps" :key="step.title" class="glow-card flex gap-4 p-5">
+          <li v-for="(step, index) in steps" :key="step.title" class="ui-glow-card flex gap-4 p-5">
             <span
               class="flex size-8 shrink-0 items-center justify-center rounded-full bg-(--ui-primary) text-sm font-semibold text-(--ui-primary-fg)"
               >{{ index + 1 }}</span
@@ -282,7 +282,7 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
           <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">用着放心</h2>
           <ul class="mt-8 grid gap-4 sm:grid-cols-2">
-            <li v-for="item in assurances" :key="item.title" class="glow-card flex gap-3 p-5">
+            <li v-for="item in assurances" :key="item.title" class="ui-glow-card flex gap-3 p-5">
               <XIcon name="ph:check" class="mt-0.5 size-5 shrink-0 text-(--ui-success)" />
               <div>
                 <h3 class="font-semibold text-(--ui-fg-strong)">{{ item.title }}</h3>
@@ -353,7 +353,7 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
           <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">支持</h2>
           <div class="mt-8 grid gap-4 sm:grid-cols-2">
-            <div class="glow-card p-5">
+            <div class="ui-glow-card p-5">
               <h3 class="font-semibold text-(--ui-fg-strong)">问题反馈</h3>
               <p class="mt-2 text-sm text-(--ui-fg-muted)">
                 遇到问题或有想法，先到 GitHub Issues
@@ -369,7 +369,7 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
                 <XIcon name="ph:arrow-up-right" class="size-4" />
               </a>
             </div>
-            <div class="glow-card p-5">
+            <div class="ui-glow-card p-5">
               <h3 class="font-semibold text-(--ui-fg-strong)">常见问题</h3>
               <p class="mt-2 text-sm text-(--ui-fg-muted)">
                 剑三里没反应、连太快收不住、旧配置兼容这些问题，使用说明书里都有解答。

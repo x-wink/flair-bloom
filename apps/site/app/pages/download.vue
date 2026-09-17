@@ -35,7 +35,7 @@ function label(item: MirroredAsset): string {
 
 <template>
   <main class="flex min-h-dvh items-center justify-center px-4 py-12">
-    <div class="glow-card w-full max-w-md p-8 text-center">
+    <div class="ui-glow-card w-full max-w-md p-8 text-center">
       <img src="/icon.png" alt="" width="96" height="96" class="mx-auto size-24 drop-shadow-lg" />
 
       <template v-if="asset">

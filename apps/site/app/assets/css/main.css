@@ -1,6 +1,7 @@
 @import 'tailwindcss';
 @import '@xwink/ui/tokens.css';
 @import '@xwink/ui/tailwind.css';
+@import '@xwink/ui/motion.css';
 
 /* 没有脚本时的兜底：应用出厂默认的万花霞紫。有脚本时由首帧脚本与功能区的门派色块按所选门派色内联覆盖。
    必须写在 tokens.css 之后，与其 [data-theme='dark'] 同优先级时后写的生效 */
@@ -25,63 +26,6 @@ html {
 body {
   background: var(--ui-bg);
   color: var(--ui-fg);
-}
-
-@layer components {
-  /* 所有颜色都从 --ui-primary 派生，切换门派色时卡片跟着变，不需要脚本 */
-  .glow-card {
-    --glow-rest-border: color-mix(in oklab, var(--ui-primary) 30%, transparent);
-    --glow-rest-bg: color-mix(in oklab, var(--ui-primary) 6%, transparent);
-    --glow-rest-shadow: 0 0 0 0 transparent;
-    --glow-lit-border: color-mix(in oklab, var(--ui-primary) 75%, transparent);
-    --glow-lit-bg: color-mix(in oklab, var(--ui-primary) 14%, transparent);
-    --glow-lit-shadow: 0 16px 40px -16px color-mix(in oklab, var(--ui-primary) 65%, transparent);
-
-    border-radius: var(--ui-radius);
-    border: 1px solid var(--glow-rest-border);
-    background-color: var(--glow-rest-bg);
-    box-shadow: var(--glow-rest-shadow);
-    transition:
-      transform 0.25s ease,
-      border-color 0.25s ease,
-      background-color 0.25s ease,
-      box-shadow 0.25s ease;
-  }
-
-  .glow-card:hover {
-    transform: translateY(-4px);
-    border-color: var(--glow-lit-border);
-    background-color: var(--glow-lit-bg);
-    box-shadow: var(--glow-lit-shadow);
-  }
-
-  /* 跑马灯：六张卡按内联 --i 错开起点轮流亮起。动画值会盖过 :hover，所以鼠标进网格就撤掉动画，交还给悬停 */
-  .glow-marquee .glow-card {
-    animation: glow-turn 14.4s ease-in-out calc(var(--i) * 2.4s) infinite both;
-  }
-
-  .glow-marquee:hover .glow-card {
-    animation: none;
-  }
-}
-
-/* 一轮 6 格，每格约 16.7%：淡入、停留、淡出，其余时间保持静止态 */
-@keyframes glow-turn {
-  0%,
-  17%,
-  100% {
-    transform: none;
-    border-color: var(--glow-rest-border);
-    background-color: var(--glow-rest-bg);
-    box-shadow: var(--glow-rest-shadow);
-  }
-  3%,
-  14% {
-    transform: translateY(-4px);
-    border-color: var(--glow-lit-border);
-    background-color: var(--glow-lit-bg);
-    box-shadow: var(--glow-lit-shadow);
-  }
 }
 
 @layer components {
@@ -188,14 +132,6 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .rumor-card {
-    animation: none;
-  }
-
-  .glow-card:hover {
-    transform: none;
-  }
-
-  .glow-marquee .glow-card {
     animation: none;
   }
 }

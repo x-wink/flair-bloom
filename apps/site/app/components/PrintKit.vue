@@ -62,7 +62,7 @@ onBeforeUnmount(() => {
           <li
             v-for="item in highlights"
             :key="item.title"
-            class="glow-card print-avoid flex gap-[4mm] p-[5mm]"
+            class="ui-glow-card print-avoid flex gap-[4mm] p-[5mm]"
           >
             <HighlightIcon :name="item.icon" />
             <div>
@@ -115,7 +115,7 @@ onBeforeUnmount(() => {
 
       <h2 class="print-heading">三步上手</h2>
       <ol class="grid grid-cols-3 gap-[4mm]">
-        <li v-for="(step, index) in steps" :key="step.title" class="glow-card print-avoid p-[4mm]">
+        <li v-for="(step, index) in steps" :key="step.title" class="ui-glow-card print-avoid p-[4mm]">
           <p class="flex items-center gap-[2mm] font-semibold text-(--ui-fg-strong)">
             <span
               class="flex size-[6mm] items-center justify-center rounded-full bg-(--ui-primary) text-[9pt] text-(--ui-primary-fg)"
@@ -129,7 +129,7 @@ onBeforeUnmount(() => {
 
       <h2 class="print-heading">能帮剑三玩家干嘛</h2>
       <ul class="grid grid-cols-3 gap-[3mm]">
-        <li v-for="feature in features" :key="feature.title" class="glow-card print-avoid p-[3.5mm]">
+        <li v-for="feature in features" :key="feature.title" class="ui-glow-card print-avoid p-[3.5mm]">
           <p class="font-semibold text-(--ui-fg-strong)">{{ feature.title }}</p>
           <p class="mt-1 text-[8.5pt] leading-relaxed text-(--ui-fg-muted)">{{ feature.text }}</p>
         </li>
