@@ -10,31 +10,28 @@
 
 | 字段 | 内容 |
 |------|------|
-| 占位路径 | `apps/main/src-tauri/icons/icon.png` |
-| 格式 | PNG，多尺寸（32 / 128 / 256 / 512px），另需 `.ico`（Windows）|
-| 使用场景 | 任务栏、开始菜单、安装包、关于页面 |
-| 内容描述 | 一朵风格化的花卉图形，整体圆形构图，花瓣 5-6 片，线条简洁现代。主色调粉紫渐变（#C084FC → #818CF8），背景透明。风格介于扁平与轻拟物之间，适合小尺寸下仍清晰可辨。 |
-| AI 提示词 | `app icon, stylized flower, 5 petals, flat design with subtle depth, pink to purple gradient #C084FC to #818CF8, clean lines, transparent background, recognizable at 32px, modern UI icon style, no text` |
+| 源文件 | `apps/main/src/assets/icon.png` |
+| 格式 | 透明 PNG；`pnpm icon` 生成桌面与移动端尺寸及 `.ico` / `.icns` |
+| 使用场景 | 应用窗口、任务栏、托盘、安装包、网站 |
+| 内容描述 | 青色气场环绕深紫近黑的万花枝羽墨纹，不含宠物和键盘。深浅对比保证小尺寸下纹路仍可辨认。 |
 
 ### 托盘图标 — 启用状态
 
 | 字段 | 内容 |
 |------|------|
-| 占位路径 | `apps/main/src-tauri/icons/tray-active.png` |
-| 格式 | PNG，16×16px 和 32×32px（高 DPI） |
+| 路径 | `apps/main/src-tauri/icons/128x128.png` |
+| 格式 | 透明 PNG，128×128px，由主图标生成 |
 | 使用场景 | 连发功能启用时的系统托盘图标 |
-| 内容描述 | 主图标的简化版本，花卉轮廓清晰，色彩饱和，表示"活跃"状态。花朵中心有细微发光效果或高亮点。 |
-| AI 提示词 | `system tray icon 16x16, stylized flower silhouette, vibrant pink-purple color, glowing center, active/enabled state, pixel-perfect at 16px, transparent background` |
+| 内容描述 | 彩色主图标，由系统按托盘显示尺寸缩放。 |
 
 ### 托盘图标 — 禁用状态
 
 | 字段 | 内容 |
 |------|------|
-| 占位路径 | `apps/main/src-tauri/icons/tray-inactive.png` |
-| 格式 | PNG，16×16px 和 32×32px |
+| 路径 | `apps/main/src-tauri/icons/tray-disabled.png` |
+| 格式 | 透明 PNG，128×128px |
 | 使用场景 | 连发功能全局关闭时的系统托盘图标 |
-| 内容描述 | 与启用状态相同图形，但整体灰度化（#9CA3AF），无发光效果，视觉上明显区别于启用态。 |
-| AI 提示词 | `system tray icon 16x16, stylized flower silhouette, grayscale #9CA3AF, dimmed/disabled state, no glow, transparent background, same shape as active version` |
+| 内容描述 | 彩色托盘图标的灰度版本，保持相同轮廓以便识别。 |
 
 ---
 
@@ -210,9 +207,9 @@
 
 | 资源 | 状态 | 备注 |
 |------|------|------|
-| 主图标 | ⬜ 待生成 | |
-| 托盘图标（启用） | ⬜ 待生成 | |
-| 托盘图标（禁用） | ⬜ 待生成 | |
+| 主图标 | ✅ 已生成 | `apps/main/src/assets/icon.png` |
+| 托盘图标（启用） | ✅ 已生成 | `apps/main/src-tauri/icons/128x128.png` |
+| 托盘图标（禁用） | ✅ 已生成 | `apps/main/src-tauri/icons/tray-disabled.png` |
 | 角色参考立绘 | ⬜ 待生成 | 优先完成，其他动画依赖此设计 |
 | 动画 — Idle | ⬜ 待生成 | |
 | 动画 — Burst | ⬜ 待生成 | |
