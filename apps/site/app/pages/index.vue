@@ -159,12 +159,15 @@ const assurances = [
       <section id="features" class="border-t border-(--ui-border-muted) bg-(--ui-surface-muted)/40">
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
           <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">能帮剑三玩家干嘛</h2>
-          <ul class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <li v-for="feature in features" :key="feature.title">
-              <XCard class="h-full">
-                <h3 class="font-semibold text-(--ui-fg-strong)">{{ feature.title }}</h3>
-                <p class="mt-2 text-sm text-(--ui-fg-muted)">{{ feature.text }}</p>
-              </XCard>
+          <ul class="glow-marquee mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <li
+              v-for="(feature, index) in features"
+              :key="feature.title"
+              class="glow-card p-5"
+              :style="{ '--i': index }"
+            >
+              <h3 class="font-semibold text-(--ui-fg-strong)">{{ feature.title }}</h3>
+              <p class="mt-2 text-sm text-(--ui-fg-muted)">{{ feature.text }}</p>
             </li>
           </ul>
           <p class="mt-6 text-sm text-(--ui-fg-muted)">
@@ -184,7 +187,7 @@ const assurances = [
       <section id="start" class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
         <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">三步上手</h2>
         <ol class="mt-8 grid gap-4 md:grid-cols-3">
-          <li v-for="(step, index) in steps" :key="step.title" class="flex gap-4">
+          <li v-for="(step, index) in steps" :key="step.title" class="glow-card flex gap-4 p-5">
             <span
               class="flex size-8 shrink-0 items-center justify-center rounded-full bg-(--ui-primary) text-sm font-semibold text-(--ui-primary-fg)"
               >{{ index + 1 }}</span
@@ -216,7 +219,7 @@ const assurances = [
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
           <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">稳不稳 · 安不安全</h2>
           <ul class="mt-8 grid gap-4 sm:grid-cols-2">
-            <li v-for="item in assurances" :key="item.title" class="flex gap-3">
+            <li v-for="item in assurances" :key="item.title" class="glow-card flex gap-3 p-5">
               <XIcon name="ph:check" class="mt-0.5 size-5 shrink-0 text-(--ui-success)" />
               <div>
                 <h3 class="font-semibold text-(--ui-fg-strong)">{{ item.title }}</h3>
@@ -245,7 +248,7 @@ const assurances = [
             v-for="(release, index) in manifest?.releases"
             :key="release.tag"
             :open="index === 0"
-            class="group rounded-(--ui-radius) border border-(--ui-border-muted) bg-(--ui-surface)"
+            class="group rounded-(--ui-radius) border border-(--ui-primary)/30 bg-(--ui-primary)/5 transition-colors open:border-(--ui-primary)/60 hover:border-(--ui-primary)/60"
           >
             <summary
               class="flex cursor-pointer list-none items-center gap-3 px-4 py-3 select-none [&::-webkit-details-marker]:hidden"
@@ -260,7 +263,7 @@ const assurances = [
                 formatDate(release.publishedAt)
               }}</span>
             </summary>
-            <div class="border-t border-(--ui-border-muted) px-4 py-4">
+            <div class="border-t border-(--ui-primary)/20 px-4 py-4">
               <ReleaseNotes :source="release.notes" />
               <p class="mt-4 flex flex-wrap gap-x-4 gap-y-1 text-xs text-(--ui-fg-muted)">
                 <a
@@ -287,7 +290,7 @@ const assurances = [
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
           <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">支持</h2>
           <div class="mt-8 grid gap-4 sm:grid-cols-2">
-            <XCard>
+            <div class="glow-card p-5">
               <h3 class="font-semibold text-(--ui-fg-strong)">问题反馈</h3>
               <p class="mt-2 text-sm text-(--ui-fg-muted)">
                 遇到问题或有想法，先到 GitHub Issues
@@ -302,8 +305,8 @@ const assurances = [
                 前往 Issues
                 <XIcon name="ph:arrow-up-right" class="size-4" />
               </a>
-            </XCard>
-            <XCard>
+            </div>
+            <div class="glow-card p-5">
               <h3 class="font-semibold text-(--ui-fg-strong)">常见问题</h3>
               <p class="mt-2 text-sm text-(--ui-fg-muted)">
                 剑三里没反应、连太快收不住、旧配置兼容这些问题，使用说明书里都有解答。
@@ -317,7 +320,7 @@ const assurances = [
                 查看常见问题
                 <XIcon name="ph:arrow-up-right" class="size-4" />
               </a>
-            </XCard>
+            </div>
           </div>
         </div>
       </section>
