@@ -13,7 +13,7 @@ Monorepo 结构，Rust workspace + pnpm workspace 双层管理。
 - 连发速率：注入周期有效下限 `MIN_EFFECTIVE_INTERVAL_MS = 10ms`（结构下限仍为 1ms，旧配置 <10ms 在加载时自动钳到 10ms）；多规则同时连发时按「基础下限 × 活跃规则数」做总并发限速，使总注入速率与规则数无关，避免叠加超发导致停止「收不住」。
 - 配置 schema：`CURRENT_SCHEMA_VERSION = 4`。v1→v2 裸 VK 升级为 `KeyId`；v2→v3 增加滚轮上 / 下；v3→v4 `BurstRule` 新增可选 `group` 字段（Toggle 互斥分组）。
 - 用户协议：`v1.4`（DDHID 由「暂停使用」改为「已移除」，补充存量配置自动回落与卸载文件仍随包分发的说明）。
-- 后续主线：v0.3 体验与稳定性收尾（v0.3.0 落地浮窗 / 横版键鼠图 / 主题换肤，v0.3.1 收敛按键录入与配置装载）、v0.4 桌宠、v0.5 许可证与亲友专属功能、v0.6 落地页与运营基础、v1.0 完整功能。下一阶段聚焦体验打磨与遗留收尾，暂不开新大模块。
+- 后续主线：v0.3 体验与稳定性收尾（v0.3.0 落地浮窗 / 横版键鼠图 / 主题换肤，v0.3.1 收敛按键录入与配置装载）、v0.4 桌宠、v0.5 许可证与亲友专属功能、v0.6 产品页（app.xwink.fun）与运营基础、v1.0 完整功能。下一阶段聚焦体验打磨与遗留收尾，暂不开新大模块。
 - 进度标记：`[x]` 表示当前代码或发布流程已具备，`[ ]` 表示仍在规划或未完成。
 
 ---
@@ -197,23 +197,10 @@ v0.4 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
 │   │   ├── Cargo.toml
 │   │   └── src/main.rs
 │   │
-│   └── release-server/                 # 落地页服务（v0.6 规划，文件托管在 GitHub Releases）
-│       ├── Cargo.toml
-│       ├── config.toml                 # 端口、GitHub repo 信息、站点基础信息
-│       ├── content/
-│       │   └── changelog.toml          # 可由 CHANGELOG.md 转换生成，避免第二内容源
-│       ├── static/                     # 静态资源（rust-embed 内嵌到二进制）
-│       │   ├── index.html              # 落地页（介绍 + 下载入口 → 跳转 GitHub Releases）
-│       │   ├── download.html           # 下载页（展示最新版本，链接指向 GitHub Releases）
-│       │   ├── changelog.html          # 更新日志页
-│       │   └── css/
-│       │       └── style.css
-│       └── src/
-│           ├── main.rs
-│           ├── routes/
-│           │   ├── pages.rs            # GET / /download /changelog → HTML 页面
-│           │   └── health.rs           # GET /health
-│           └── changelog.rs            # 解析更新日志数据，渲染日志页
+│   └── site/                           # 产品页 app.xwink.fun/flair-bloom（独立 pnpm 项目，见其 README）
+│       ├── app/                        # Nuxt SSG 页面；公告解析与门派色板引用 apps/main 同一份源码
+│       ├── mirror/                     # GitHub Releases 镜像同步脚本（服务器 systemd 定时器运行）
+│       └── deploy/                     # 部署脚本、nginx 片段、systemd 单元、主机公钥基线
 │
 └── packages/
     ├── crypto/                         # 加密解密 + 许可证校验（Rust lib crate）
@@ -268,13 +255,12 @@ v0.4 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
 │  └─────────────────┘                                     │
 └──────────────────────────────────────────────────────────┘
                │ HTTPS
-       ┌───────┴────────┐
-       │ GitHub Releases │
-       │ release-server  │
-       └────────────────┘
+       ┌───────┴──────────────────────────────┐
+       │ GitHub Releases ← app.xwink.fun 镜像 │
+       └──────────────────────────────────────┘
 ```
 
-进度：面板窗口、托盘、更新检查、驱动诊断已落地；桌宠窗口、许可证激活和 release-server 分别进入 v0.4 / v0.5 / v0.6。
+进度：面板窗口、托盘、更新检查、驱动诊断已落地；桌宠窗口、许可证激活分别进入 v0.4 / v0.5；产品页与发布镜像代码已就绪、待上线（v0.6）。
 
 ### 发布基础设施
 
@@ -285,7 +271,8 @@ v0.4 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
 | 私钥存储           | GitHub Actions Secrets   | Tauri 签名私钥、Ed25519 许可证私钥，构建 / 签发时注入 |
 | CI/CD 构建         | GitHub Actions           | 推 tag 触发 Windows x64 构建，发布 Draft       |
 | Release 正文       | `CHANGELOG.md`           | `scripts/extract-changelog.ts` 自动提取版本节  |
-| 落地页             | release-server（自托管） | v0.6 规划；仅渲染 HTML，下载链接指向 GitHub Releases |
+| 产品页             | app.xwink.fun/flair-bloom | `apps/site` 纯静态；域名与 server 块归 xwink-console 的 app-site 单元 |
+| 发布镜像           | app.xwink.fun/flair-bloom/releases | 服务器每 10 分钟跟随 Latest 指针同步安装包与改写后的 `latest.json` |
 
 ### Tauri updater 配置
 
@@ -323,14 +310,16 @@ v0.4 规划项，当前尚未创建 `pet.html` 与对应窗口。目标是透明
 
 注：当前 release workflow 只构建 Windows x64；v1.0 前评估 macOS / Linux 构建矩阵。
 
-### release-server 路由（v0.6 规划）
+### 产品页路径（v0.6）
 
-| 路由             | 用途                                                      |
-| ---------------- | --------------------------------------------------------- |
-| `GET /`          | 落地页（介绍 + 功能 + 截图 + 下载按钮 → GitHub Releases） |
-| `GET /download`  | 下载页（最新版本信息，链接指向 GitHub Releases）          |
-| `GET /changelog` | 更新日志页（由 `CHANGELOG.md` 转换 / 提取）               |
-| `GET /health`    | 健康检查                                                  |
+| 路径                                     | 用途                                                        |
+| ---------------------------------------- | ----------------------------------------------------------- |
+| `/flair-bloom/`                          | 介绍、下载（镜像直连，附 sha256 与 GitHub 原始链接）、更新公告、支持入口 |
+| `/flair-bloom/releases/releases.json`    | 公告与安装包清单，页面运行时读取                            |
+| `/flair-bloom/releases/latest.json`      | 下载地址改写为镜像的更新器清单，计划作为更新器第一端点      |
+| `/flair-bloom/releases/<tag>/<安装包>`   | 镜像安装包                                                  |
+
+选型理由：纯静态 + 服务器侧镜像，线上没有常驻进程；公告直接来自 GitHub Release 正文（即 `CHANGELOG.md` 提取结果），不维护第二份内容源。
 
 ---
 
@@ -392,7 +381,7 @@ packages/crypto      packages/migrate
 packages/win-input  ← packages/burst-engine ← apps/main/src-tauri
 packages/win-driver / win-sysinfo / resource-integrity ← apps/main/src-tauri
 
-apps/release-server（v0.6：axum / tokio / rust-embed）
+apps/site（独立 pnpm 项目，消费私有制品 @xwink/ui；引用 apps/main 的 theme.ts 与 markdown-parse.ts）
 ```
 
 ### 数据存储路径约定
@@ -908,11 +897,15 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 
 **目标：** 有对外展示的门面，支撑用户增长。
 
-- [ ] `apps/release-server` Axum 服务，`rust-embed` 内嵌静态资源
-- [ ] 落地页 `/`（介绍 + 截图 + 下载按钮 → GitHub Releases）
-- [ ] 下载页 `/download`（平台 + 版本信息）
-- [ ] 更新日志页 `/changelog`（读取 / 转换 `CHANGELOG.md`，避免维护第二份内容源）
-- [ ] 健康检查 `/health`
+产品页挂在个人站 app.xwink.fun 下，由 xwink-console 仓的「app.xwink.fun 产品门面与 Support」路线图统筹（其 B1 到 B5 卡在本仓执行），原先的自托管 Rust 落地页服务取消。
+
+- [x] `apps/site` 产品页：介绍、下载、更新公告、支持入口，亮暗与门派配色切换与应用一致
+- [x] 发布镜像同步脚本：跟随 Latest 指针、sha256 校验、整轮原子切换、改写 `latest.json`
+- [x] `site-v*` 发布链（`.github/workflows/site.yml`）与服务器开通清单
+- [ ] 服务器开通与首次上线（依赖 xwink-console 的 app-site 单元先上线）
+- [ ] 更新器加镜像端点：`tauri.conf.json` 的 endpoints 以镜像为第一、GitHub 为兜底，随一次应用发版生效
+- [ ] 截图素材按 `docs/ASSETS.md` 实拍后补进产品页
+- [ ] 站内反馈：接入 xwink-console 平台的 Support 挂件（替换当前的 Issues 链接）
 - [ ] 桌宠激活后解锁扩展动画状态
 - [ ] 更新分发降险（缩小坏版本「即时全量铺开」的爆炸半径，让回退预案更从容）：
   - [ ] min-version / kill-switch：远端清单可声明「最低可用版本」或强制下线某版本，客户端启动时校验
@@ -957,7 +950,7 @@ payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `exp
 | 兑换码编解码      | `base32`                                                   |
 | 配置文件变更监听  | `notify`（规划，当前未接入）                              |
 | 手柄输入监听      | `gilrs`（待定低优先级）                                    |
-| HTTP 更新服务     | GitHub Releases + Tauri updater；独立 `axum` 落地页待定    |
+| HTTP 更新服务     | GitHub Releases + Tauri updater；app.xwink.fun 镜像端点（v0.6） |
 | 应用状态持久化    | `tauri-plugin-store`                                       |
 | 开机自启          | `tauri-plugin-autostart`                                   |
 | 前端动画          | CSS 关键帧 + SVG（MVP）/ Lottie（后期）                    |

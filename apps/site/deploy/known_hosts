@@ -1,0 +1,7 @@
+# 部署主机 app.xwink.fun 所在服务器的 SSH 公钥基线，site.yml 以 StrictHostKeyChecking=yes 读它：
+# 指纹对不上就在任何上传前失败。主机公钥不是密钥，可以入仓；私钥只放 GitHub secrets。
+# 基线与 xwink-console 仓 deploy/known_hosts 同源（2026-09-07 带外核对后入仓），换机轮换时两处一起改，
+# 不在 CI 里自动 keyscan——那等于把本次网络连接当成可信来源。
+119.29.89.220 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFQUsW8kJ1S893ghgx7TuOkxO9oNpG+JWaPq8+I4Z3+r
+119.29.89.220 ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBHt5Tl55tzxFnRSeFZ/np3p0YAWdgLMG+kWVrBXa2oP4/mc22CL0cSd/ZWHPJKTU41aheCOoX5yOug9Gi1FQLFQ=
+119.29.89.220 ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC3krmmPRbjxeYCTce+gOz4Q1iz1isZC7Ywt5BmNjoXRcq7+S0tmGhAkCtg4XBAxZC5P6Ea5zNnexOPnXyOeB5fsrqAcCQmKzSXD5t3lDz+ZDTfAruytzAGqrhZ7TQw6i7C8Pjx1rcr3J6vuFQi+hISVEZzCHRwTNjKSGrCBui4fxW53WFNfXSbNa3w7WckjiCxafdoxxThw7rVrvygNGQHmafjPFuUzOjwnrc+hkRdPDb6NKdvBD52qp4MIyomCob+d02LfjS3U3873nA5ZMakQxBsY7fYWi5GsBcOYqIKggU3YW7IcnM225jRR7FEtArAHgdBInA+itLuaUIBxcWnoR+IOMdHMsi31pODdHAsNabUs5i4u+Um5zVsbj0R0PFhFObPmH1oj8H16D+c33/Ndfw7+Jn7JTL8x3fNljipMQsclPsjV+oIQA9EUX86HsserYhKnmzca3DDT6h0yNOnjboozbmGJzhB3GB+1AbupwZfXP8aVWOC4n9BavkQ/s0=

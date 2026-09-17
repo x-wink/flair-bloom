@@ -1,0 +1,28 @@
+@import 'tailwindcss';
+@import '@xwink/ui/tokens.css';
+@import '@xwink/ui/tailwind.css';
+
+/* 没有脚本时的兜底：应用出厂默认的万花霞紫。有脚本时由首帧脚本与色块选择器按所选门派色内联覆盖。
+   必须写在 tokens.css 之后，与其 [data-theme='dark'] 同优先级时后写的生效 */
+:root,
+[data-theme='dark'] {
+  --ui-primary: #6c4de6;
+  --ui-primary-fg: #ffffff;
+  --ui-secondary: #5f44ca;
+  --ui-secondary-fg: #ffffff;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  background: var(--ui-bg);
+  color: var(--ui-fg);
+}

@@ -1,0 +1,26 @@
+{
+  "name": "flair-bloom-site",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "nuxi dev",
+    "build": "nuxi generate",
+    "typecheck": "nuxi typecheck",
+    "preview": "nuxi preview",
+    "postinstall": "nuxi prepare",
+    "mirror:dev": "MIRROR_ROOT=.mirror MIRROR_KEEP_ASSETS=1 MIRROR_PUBLIC_BASE_URL=http://localhost:3900/flair-bloom/releases node mirror/sync-releases.ts",
+    "test": "node --test mirror/*.test.ts"
+  },
+  "dependencies": {
+    "@xwink/ui": "0.1.0-beta.3",
+    "nuxt": "^4.5.1",
+    "vue": "^3.5.30"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.0.0",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9.3",
+    "vue-tsc": "^3.3.9"
+  }
+}

@@ -1,0 +1,15 @@
+# 产品页是独立的 pnpm 项目，不并入仓库根 workspace：根 workspace 的 Tauri 发版流水线会跑
+# pnpm install，并进来就得给那条流水线也配私有制品库凭据。
+packages:
+  - '.'
+
+allowBuilds:
+  esbuild: true
+  '@parcel/watcher': true
+  'vue-demi': false
+
+dedupePeers: true
+
+# pnpm 11 默认拒装发布不足 24 小时的版本，@xwink/* 的 beta 常当天发当天用，整个 scope 豁免
+minimumReleaseAgeExclude:
+  - '@xwink/*'

@@ -1,0 +1,119 @@
+name: Site
+
+# 产品页 app.xwink.fun/flair-bloom/：PR 与 main 只跑检查，推 site-v* tag 才部署。
+# 产品页发版不经 Tauri updater、不触达应用用户，与应用的 v* 发版链互不影响。
+on:
+  pull_request:
+    paths:
+      - 'apps/site/**'
+      - 'apps/main/src/windows/panel/theme.ts'
+      - 'apps/main/src/windows/panel/components/markdown-parse.ts'
+      - '.github/workflows/site.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'apps/site/**'
+      - 'apps/main/src/windows/panel/theme.ts'
+      - 'apps/main/src/windows/panel/components/markdown-parse.ts'
+      - '.github/workflows/site.yml'
+    tags:
+      - 'site-v*'
+
+defaults:
+  run:
+    working-directory: apps/site
+
+jobs:
+  mirror:
+    name: 镜像同步脚本单测
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: node --test mirror/*.test.ts
+
+  build:
+    name: 类型检查与静态构建
+    runs-on: ubuntu-latest
+    # 私有制品库凭据不下发给 fork 的 PR，这类 PR 只跑上面的单测
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: 私有制品库凭据
+        # pnpm 11 不展开项目级 .npmrc 里的环境变量，凭据只能写用户级配置
+        run: pnpm config set --location=user //npm.cnb.cool/x-wink/playground/npm/-/packages/:_authToken "${XWINK_NPM_TOKEN}"
+        env:
+          XWINK_NPM_TOKEN: ${{ secrets.XWINK_NPM_TOKEN }}
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm build
+      - name: 产物断言
+        run: |
+          test -f .output/public/index.html
+          test -n "$(find .output/public/_nuxt -type f | head -1)"
+      - uses: actions/upload-artifact@v4
+        if: startsWith(github.ref, 'refs/tags/site-v')
+        with:
+          name: site-dist
+          path: apps/site/.output/public
+          retention-days: 7
+
+  deploy:
+    name: 部署到 app.xwink.fun
+    needs: [mirror, build]
+    if: startsWith(github.ref, 'refs/tags/site-v')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: site-dist
+          path: apps/site/.output/public
+      - name: 上传并切换版本
+        env:
+          DEPLOY_HOST: ${{ secrets.SITE_DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.SITE_DEPLOY_PORT }}
+          DEPLOY_USER: ${{ secrets.SITE_DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.SITE_DEPLOY_SSH_KEY }}
+        run: |
+          set -eu
+          VERSION="${GITHUB_REF_NAME#site-v}"
+          case "$VERSION" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "tag 不是 site-v<semver>：${GITHUB_REF_NAME}" >&2; exit 1 ;;
+          esac
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "${DEPLOY_SSH_KEY}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          SSH="ssh -i ${HOME}/.ssh/deploy_key -p ${DEPLOY_PORT:-22} -o StrictHostKeyChecking=yes -o UserKnownHostsFile=deploy/known_hosts"
+          ROOT=/opt/flair-bloom
+          NEXT_DIR="${ROOT}/site/releases/${VERSION}.new"
+
+          tar czf - deploy mirror | ${SSH} "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "rm -rf '${ROOT}/upload' && mkdir -p '${ROOT}/upload' && tar xzf - -C '${ROOT}/upload'"
+          ${SSH} "${DEPLOY_USER}@${DEPLOY_HOST}" "rm -rf '${NEXT_DIR}' && mkdir -p '${NEXT_DIR}'"
+          tar czf - -C .output/public . | ${SSH} "${DEPLOY_USER}@${DEPLOY_HOST}" "tar xzf - -C '${NEXT_DIR}'"
+          ${SSH} "${DEPLOY_USER}@${DEPLOY_HOST}" "bash '${ROOT}/upload/deploy/deploy.sh' '${VERSION}'"
+
+      - name: 部署后验收
+        run: |
+          set -eu
+          ASSET="$(cd .output/public && find _nuxt -type f | head -1)"
+          for URL in "https://app.xwink.fun/flair-bloom/" \
+                     "https://app.xwink.fun/flair-bloom/${ASSET}"; do
+            CODE="$(curl -s -o /dev/null -w '%{http_code}' "${URL}" || true)"
+            [ "${CODE}" = "200" ] || { echo "${URL} → ${CODE}" >&2; exit 1; }
+            echo "${URL} → 200"
+          done
+          # 镜像由服务器定时器维护，新版本首轮要从 GitHub 拉安装包，十分钟级；这里只提示不拦截
+          CODE="$(curl -s -o /dev/null -w '%{http_code}' https://app.xwink.fun/flair-bloom/releases/releases.json || true)"
+          [ "${CODE}" = "200" ] || echo "::warning::发布镜像清单暂不可用（${CODE}），确认 flair-bloom-mirror.timer 已启用"

@@ -1,0 +1,9 @@
+{
+  "name": "flair-bloom-release-mirror",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "sync": "node sync-releases.ts",
+    "test": "node --test *.test.ts"
+  }
+}

@@ -73,6 +73,7 @@ apps/main/src/windows/float/    # 浮窗（panel-float.html，常驻置顶胶囊
   FloatApp.tsx / .css           # 显示激活规则 + 全局开关 + 展开主面板
 apps/main/src/assets/icons/     # SVG 图标源文件（currentColor / 1em 尺寸）
 apps/keygen/                    # 兑换码生成 CLI
+apps/site/                      # 产品页 app.xwink.fun/flair-bloom + 发布镜像（独立 pnpm 项目，不在根 workspace，见其 README）
 packages/crypto/src/
   aes.rs                        # AES-256-GCM encrypt/decrypt
   license.rs                    # Ed25519 verify_license + LicensePayload
