@@ -1,8 +1,6 @@
 // 产品页与打印排版（海报、说明书）共用的文案；只在一处改，两边不会说成两套话
 
 export const REPOSITORY = 'https://github.com/x-wink/flair-bloom';
-export const SITE_URL = 'https://app.xwink.fun/flair-bloom/';
-export const DOWNLOAD_URL = 'https://app.xwink.fun/flair-bloom/download';
 
 export type HighlightIconName = 'lightning' | 'palette' | 'keyboard' | 'speaker';
 
@@ -87,6 +85,19 @@ export const cautions: string[] = [
   '它靠模拟按键工作，存在被游戏反作弊检测的风险；能不能用、会不会处罚，请自行评估承担。',
   '游戏里请用「游戏模式」，它会装一个小驱动并以管理员运行；个别游戏会拦它，遇到就切回「通用模式」。',
   'Windows 弹出「已保护你的电脑」时，点「更多信息 → 仍要运行」即可。',
+];
+
+// 取自 README 常见问题；封号风险与 SmartScreen 已在 cautions 里，这里不重复
+export const faqs: TitledText[] = [
+  {
+    title: '剑三里没反应？',
+    text: '先确认右下角是「全局已启用」、规则已勾选；剑三必须用「游戏模式」，按提示授权后重启。',
+  },
+  {
+    title: '连太快、松手了还在按？',
+    text: '间隔别填太小，建议 50ms 左右；多条一起连，软件会自动控速，不会停不下来。',
+  },
+  { title: '旧配置还能用吗？', text: '能，覆盖安装直接兼容。' },
 ];
 
 export const assurances: TitledText[] = [

@@ -1,15 +1,10 @@
 <script setup lang="ts">
-import { renderSVG } from 'uqr';
-
-// 二维码固定黑白：部分门派色（流金、缥碧）太浅，拿主题色画码手机扫不出来
-const downloadQr = renderSVG(DOWNLOAD_URL, { border: 1 });
+// 打印物料会被转发到论坛、群聊，那边对站外链接与二维码有限制：主体只做宣传与说明，
+// 不放二维码、不引导跳转，每页底部只留一行不起眼的纯文本下载地址
+const DOWNLOAD_ADDRESS = 'app.xwink.fun/flair-bloom/download';
 
 // 海报下半截的留白放三句短的，长句在 A4 宽度里一行摆不下三条
 const posterRumors = [rumors[2], rumors[5], rumors[4]].filter((rumor) => rumor !== undefined);
-
-function shortUrl(url: string): string {
-  return url.replace(/^https:\/\//, '').replace(/\/$/, '');
-}
 
 // 纸上没有暗色：打印前临时切浅色，打完还原。只动 html 上的属性，不写用户存的偏好
 let previousTheme: string | undefined;
@@ -90,24 +85,29 @@ onBeforeUnmount(() => {
         class="relative mt-[6mm] flex items-center gap-[6mm] rounded-(--ui-radius) bg-(--ui-primary) p-[6mm] text-(--ui-primary-fg)"
       >
         <div class="flex-1">
-          <p class="text-[20pt] font-bold">扫码免费下载</p>
-          <p class="mt-1 text-[11pt] opacity-90">Windows 10 / 11（64 位）· 国内镜像高速下载</p>
-          <p class="mt-3 text-[12pt] font-semibold tracking-wide">{{ shortUrl(DOWNLOAD_URL) }}</p>
-          <p class="mt-2 text-[9pt] opacity-80">骚话谷出品，必属精品。</p>
+          <p class="text-[20pt] font-bold">骚话谷出品，必属精品</p>
+          <p class="mt-1 text-[11pt] opacity-90">
+            PVE 打本按键小助手 · Windows 10 / 11（64 位）· 免费使用
+          </p>
+          <p class="mt-2 text-[9pt] opacity-80">20 种门派色随心换，这张海报用的就是其中一种。</p>
         </div>
-        <div class="size-[34mm] shrink-0 rounded-[3mm] bg-white p-[2mm] [&>svg]:size-full" v-html="downloadQr" />
+        <div class="size-[30mm] shrink-0 rounded-[4mm] bg-white p-[2mm]">
+          <img src="/icon.png" alt="" class="size-full" />
+        </div>
       </div>
+      <p class="relative mt-[3mm] text-center text-[8.5pt] text-(--ui-fg-muted)">
+        下载地址：{{ DOWNLOAD_ADDRESS }}
+      </p>
     </section>
 
-    <!-- 第二页：说明书 -->
+    <!-- 第二页：使用说明 -->
     <section class="print-page flex flex-col text-[10pt]">
       <header class="flex items-center gap-[3mm] border-b-2 border-(--ui-primary) pb-[4mm]">
         <img src="/icon.png" alt="" class="size-[12mm]" />
         <div class="flex-1">
           <p class="text-[18pt] font-bold text-(--ui-fg-strong)">气质花 FlairBloom 使用说明</p>
-          <p class="text-[9pt] text-(--ui-fg-muted)">PVE 打本按键小助手 · 最新版本与更新公告见官网</p>
+          <p class="text-[9pt] text-(--ui-fg-muted)">PVE 打本按键小助手 · Windows 10 / 11（64 位）</p>
         </div>
-        <p class="text-[10pt] font-semibold text-(--ui-primary)">{{ shortUrl(SITE_URL) }}</p>
       </header>
 
       <h2 class="print-heading">三步上手</h2>
@@ -143,34 +143,25 @@ onBeforeUnmount(() => {
         </li>
       </ul>
 
+      <h2 class="print-heading">常见问题</h2>
+      <ul class="space-y-[2mm]">
+        <li v-for="faq in faqs" :key="faq.title" class="print-avoid">
+          <span class="font-semibold text-(--ui-fg-strong)">{{ faq.title }}</span>
+          <span class="text-(--ui-fg-muted)">{{ faq.text }}</span>
+        </li>
+      </ul>
+
       <div
-        class="print-avoid mt-[6mm] rounded-(--ui-radius) border border-(--ui-warning) bg-(--ui-warning)/10 p-[4mm]"
+        class="print-avoid mt-auto rounded-(--ui-radius) border border-(--ui-warning) bg-(--ui-warning)/10 p-[4mm]"
       >
         <p class="font-semibold text-(--ui-fg-strong)">使用前请知悉</p>
         <ul class="mt-[1.5mm] list-disc space-y-[1mm] ps-[5mm] text-[9pt] text-(--ui-fg)">
           <li v-for="caution in cautions" :key="caution">{{ caution }}</li>
         </ul>
       </div>
-
-      <div class="mt-auto flex items-end gap-[5mm] border-t border-(--ui-border-muted) pt-[4mm]">
-        <div class="flex-1 space-y-[1.5mm] text-[9pt] text-(--ui-fg-muted)">
-          <p class="text-[11pt] font-semibold text-(--ui-fg-strong)">遇到问题</p>
-          <p>
-            问题反馈：<span class="text-(--ui-fg)">{{ shortUrl(`${REPOSITORY}/issues`) }}</span>
-            （崩溃时应用会提示日志路径，附上日志更好定位）
-          </p>
-          <p>
-            常见问题与完整说明：<span class="text-(--ui-fg)">{{ shortUrl(REPOSITORY) }}</span>
-          </p>
-          <p>
-            下载最新版本：<span class="text-(--ui-fg)">{{ shortUrl(DOWNLOAD_URL) }}</span>
-          </p>
-        </div>
-        <div class="text-center">
-          <div class="size-[24mm] [&>svg]:size-full" v-html="downloadQr" />
-          <p class="mt-1 text-[8pt] text-(--ui-fg-muted)">扫码下载</p>
-        </div>
-      </div>
+      <p class="mt-[3mm] text-center text-[8.5pt] text-(--ui-fg-muted)">
+        下载地址：{{ DOWNLOAD_ADDRESS }}
+      </p>
     </section>
   </div>
 </template>
