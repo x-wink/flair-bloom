@@ -55,7 +55,7 @@ const features = [
   },
 ];
 
-// 前四条是作者写的游戏梗，后两条摘自玩家群聊（不署名）；区块标题写明「传闻」，不冒充实名评价。
+// 前四条是作者写的游戏梗，后两条摘自玩家群聊（不署名）；区块标题写明「骚话」，不冒充实名评价。
 // offset 是桌面端左缩进，offsetSm 是手机端，错开摆放拼出互相压边的效果
 const rumors = [
   { text: '终于找到一个能用的，以前过的都是什么苦日子啊 TT', offset: '0%', offsetSm: '0%' },
@@ -307,8 +307,8 @@ const assurances = [
 
       <section id="rumors" class="overflow-hidden border-b border-(--ui-border-muted)">
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-          <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">江湖传闻</h2>
-          <p class="mt-2 text-sm text-(--ui-fg-muted)">纯属传闻，信不信由你。</p>
+          <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">江湖骚话</h2>
+          <p class="mt-2 text-sm text-(--ui-fg-muted)">骚话谷出品，必属精品。</p>
           <ul class="mt-10 flex flex-col">
             <li
               v-for="(rumor, index) in rumors"

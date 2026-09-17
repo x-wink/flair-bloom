@@ -85,7 +85,7 @@ body {
 }
 
 @layer components {
-  /* 江湖传闻：错落、互相压一点边的气泡。底色必须不透明，否则叠在一起的字会互相透出来 */
+  /* 江湖骚话：错落、互相压一点边的气泡。底色必须不透明，否则叠在一起的字会互相透出来 */
   .rumor-card {
     position: relative;
     z-index: var(--z, 0);
