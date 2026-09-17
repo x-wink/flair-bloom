@@ -76,7 +76,12 @@ const assurances = [
           <a href="#support" class="hover:text-(--ui-fg)">支持</a>
         </nav>
         <div class="ms-auto flex items-center gap-2 sm:ms-0">
-          <XThemeToggle :modes="['light', 'dark', 'auto']" label="" />
+          <!-- 预渲染时读不到本地存的明暗档，只能输出「跟随系统」选中；水合时 class 不一致 Vue 不纠正，
+               旧选中态会残留，所以只在客户端渲染，占位与组件同尺寸免得头部跳动 -->
+          <ClientOnly>
+            <XThemeToggle :modes="['light', 'dark', 'auto']" label="" />
+            <template #fallback><div class="h-[38px] w-[138px]" /></template>
+          </ClientOnly>
           <BrandColorPicker />
         </div>
       </div>
