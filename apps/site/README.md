@@ -62,6 +62,8 @@ pnpm typecheck && pnpm build
    systemctl daemon-reload && systemctl enable --now flair-bloom-mirror.timer
    ```
 
-3. GitHub 仓库配置 `production` 环境与 secrets：`SITE_DEPLOY_HOST`、`SITE_DEPLOY_PORT`、`SITE_DEPLOY_USER`（`flair-bloom`）、`SITE_DEPLOY_SSH_KEY`、`XWINK_NPM_TOKEN`（私有制品库只读令牌）。
+3. GitHub 配置 secrets，分两级：
+   - `production` 环境，部署来源只允许 `site-v*` tag：`SITE_DEPLOY_HOST`、`SITE_DEPLOY_PORT`、`SITE_DEPLOY_USER`（`flair-bloom`）、`SITE_DEPLOY_SSH_KEY`。私钥只存在这里，公钥在服务器 `authorized_keys`，本地不留副本。
+   - 仓库级：`XWINK_NPM_TOKEN`，私有制品库只读令牌。构建任务不绑定环境，放进环境就读不到。
 
 4. 推第一个 `site-v*` tag。首次部署后镜像定时器会在两分钟内开始首轮同步。
