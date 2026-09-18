@@ -1,15 +1,15 @@
-# 自动化测试策略
+# 测试策略与已落地的测试层
 
 按键助手的测试难点在于：连发依赖低级 hook（`WH_KEYBOARD_LL`/`WH_MOUSE_LL`）与驱动注入（SendInput / DD / Interception），这些跑在 OS 输入栈上、需要交互式桌面会话，传统 headless CI 跑不了。业界同类工具（[kanata](https://github.com/jtroo/kanata) 的 `simulated_input`、[PowerToys Keyboard Manager](https://github.com/microsoft/PowerToys) 的 `Input` 抽象）的共识是**分层**：能在不碰 OS 的前提下确定性验证的逻辑，全部下沉到模拟测试；真正碰 OS/驱动的那一层才手动或半自动验。
 
 ## 三层
 
-| 层 | 测什么 | 怎么测 | 跑在哪 | 状态 |
-| --- | --- | --- | --- | --- |
-| **L1 引擎逻辑（确定性）** | 连发时序、Hold/Toggle/分组/停止/热键/共享目标/throttle | 虚拟时钟 + 录制 dispatcher，纯 Rust 单测 | CI（`ci.yml`，windows-latest） | ✅ 已落地 |
-| **L1.5 引擎管线** | 按键 → 引擎 → 下发给调度器的命令 + generation | 命令录制替身 | CI（同上） | ✅ 已落地 |
-| **L2 真 OS 冒烟** | SendInput → LL hook → SIM_MARKER 往返 | 自装 hook 捕获并吞掉自注入 | 本机 / 自建 Windows runner（`#[ignore]`） | ✅ SendInput 已落地；DD/Interception 待真机 |
-| **L3 驱动/反作弊** | DD/Interception 真驱动是否打进游戏 | 手动 | 真机 | 不可自动化 |
+| 层                        | 测什么                                                 | 怎么测                                   | 跑在哪                                    | 状态                                        |
+| ------------------------- | ------------------------------------------------------ | ---------------------------------------- | ----------------------------------------- | ------------------------------------------- |
+| **L1 引擎逻辑（确定性）** | 连发时序、Hold/Toggle/分组/停止/热键/共享目标/throttle | 虚拟时钟 + 录制 dispatcher，纯 Rust 单测 | CI（`ci.yml`，windows-latest）            | ✅ 已落地                                   |
+| **L1.5 引擎管线**         | 按键 → 引擎 → 下发给调度器的命令 + generation          | 命令录制替身                             | CI（同上）                                | ✅ 已落地                                   |
+| **L2 真 OS 冒烟**         | SendInput → LL hook → SIM_MARKER 往返                  | 自装 hook 捕获并吞掉自注入               | 本机 / 自建 Windows runner（`#[ignore]`） | ✅ SendInput 已落地；DD/Interception 待真机 |
+| **L3 驱动/反作弊**        | DD/Interception 真驱动是否打进游戏                     | 手动                                     | 真机                                      | 不可自动化                                  |
 
 **核心认知**：当前发版前手动验的边界，80–90% 是 L1/L1.5 引擎逻辑——这些已自动化、已进 CI 门禁。真正不可自动化的只剩 L3「注入有没有真打进游戏」，竞品也是手动验。
 
@@ -25,12 +25,12 @@
 
 脚本 DSL（空白分隔）：
 
-| token | 含义 |
-| --- | --- |
-| `start:<id>` | 启动规则 |
-| `stop:<id>` | 停止规则 |
-| `stopall` | 停止全部 |
-| `t:<ms>` | 推进虚拟时间 N 毫秒 |
+| token        | 含义                |
+| ------------ | ------------------- |
+| `start:<id>` | 启动规则            |
+| `stop:<id>`  | 停止规则            |
+| `stopall`    | 停止全部            |
+| `t:<ms>`     | 推进虚拟时间 N 毫秒 |
 
 输出：`<毫秒>:dn:<键>` / `<毫秒>:up:<键>`，按 (时刻, 抬起, 键) 稳定排序后空格连接。键渲染：键盘 `K<十六进制VK>`，鼠标 `M<按钮名>`。
 
@@ -53,6 +53,18 @@ fn hold_mode_separates_down_and_up_by_hold_duration() {
 
 运行：`cargo test -p burst-engine`（含 sim_tests）。
 
+### 调度器压力测试（干跑，不发真实输入）
+
+`packages/burst-engine/src/bin/scheduler_stress.rs`：把单调度线程、规则计时、StopAll 的 ACK 路径、generation 丢弃路径、同目标键合并跑到极限，用来看 64 条规则 10ms 间隔下调度延迟与线程数是否失控。
+
+```sh
+cargo run -p burst-engine --bin scheduler_stress --release -- --rules 64 --interval-ms 10 --duration-ms 10000   # 单场景
+cargo run -p burst-engine --bin scheduler_stress --release -- --matrix --duration-ms 10000                       # 全矩阵
+cargo run -p burst-engine --bin scheduler_stress --release -- --rules 64 --interval-ms 10 --duration-ms 10000 --same-target   # 同目标键合并
+```
+
+每行输出一条 JSON：`rules` / `interval_ms`、`scheduler_threads`（应为 1）、`hp_degraded`（高精度定时器退化为普通等待时为 true）、`sent_events` / `failed_events`、`injection_rate_per_sec`、`delay_p50_us` … `delay_max_us`（调度截止时刻的延迟）、`stop_ack_us`（StopAll 响应时间）、`process_cpu_ms`（仅 Windows）。
+
 ## L2 已落地：真 OS 往返冒烟
 
 代码：`packages/burst-engine/src/smoke_tests.rs`（`#[cfg(all(test, windows))]` + `#[ignore]`）。
@@ -66,6 +78,16 @@ cargo test -p burst-engine -- --ignored
 **仍待真机/真驱动**：DD-HID / DDSimple / Interception 后端的往返需装对应驱动（且 DD 系列需管理员），同样的 hook + 吞自注入框架可扩展过去，但 GitHub 托管 runner 装不了驱动，需自建带驱动的 Windows runner，或在发版前本机手动跑。
 
 > L1.5（引擎管线确定性）已落地：`BurstEngine` 的调度器抽象成 `scheduler::Scheduler` trait，测试经 `BurstEngine::new_with_scheduler` 注入命令录制替身，断言引擎下发的命令序列。见 `pipeline_tests.rs`。
+
+## L3：发版前真机手动清单
+
+压力测试与冒烟都不发真实输入，发版前在 Windows 真机用 release 包按可用后端（SendInput / DDSimple / Interception）各验一遍：
+
+- 面板聚焦、`trigger == target` 的 Toggle：注入事件必须被中继过滤吞掉，不能反复翻转 Toggle。
+- 物理目标键按住时另一条触发键生效：调度器对该目标键跳过新的模拟 `down`，直到物理键松开。
+- 模拟目标键已按下、再物理按下同键、然后 Stop / StopAll：模拟 `up` 仍必须发出。
+- 64 条规则 10ms：进程线程数不随规则数增长；同目标键的规则只发一次合并的按住。
+- 负载下 StopAll：接受后不再有新的目标 `down`，引擎持有的目标键全部释放。
 
 ## 已知不可自动化的边界
 

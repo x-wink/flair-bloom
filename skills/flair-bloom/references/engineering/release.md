@@ -1,0 +1,74 @@
+# 发版
+
+本项目通过 Tauri updater 向真实用户推送更新，**推 tag 触发真发布必须获得用户明确授权，一次一授**，上一次发版的授权不外推到下一次；全局约定中「演示项目免逐次授权」的项目级例外**不适用**。第 1 到 4 步代理可自主完成，第 5 步停下等指令。
+
+## 更新日志
+
+`CHANGELOG.md`（仓库根）是唯一内容源，格式 `## [版本号] - 日期` + 中文分节（新功能 / 问题修复 / 行为变更 / 升级方式 / 已知问题）。CI 发版时 `scripts/extract-changelog.ts` 提取当前版本节作为 GitHub Release 正文，经 updater 接口的 `update.body` 回到应用内；前端 `panel/changelog.ts` 用同一套分节规则读随包内联的这份文件，菜单里的当前版本公告与 Release 正文一致。
+
+**填写原则**：`[Unreleased]` 记录相较上一个发布版本的**最终净变化**，不是每次提交的流水；同一功能多次迭代只写最终结果，已被撤销的改动不出现。
+
+## 应用名称入口
+
+改名时同步：前端 `apps/main/src/constants.ts` 的 `APP_NAME`（中文）/ `APP_NAME_EN`；Rust `apps/main/src-tauri/src/lib.rs` 的 `APP_NAME` / `APP_NAME_CN`；配置 `tauri.conf.json` 的 `productName` / `title`；`apps/main/src-tauri/Cargo.toml` 的 `name`（标识符，轻易不改）。
+
+## 步骤
+
+1. 在 `CHANGELOG.md` 的 `[Unreleased]` 填写本次内容。
+2. **发版前更新文档**（强制）：逐一核对并使之与本版本实际行为一致——`README.md`（使用说明、界面示意图、「接下来」列表）、本 skill 的 `references/manual/*`（用户可见行为变了就改对应篇，并同步 `tour/tours/<id>.ts`）与 `references/engineering/*`（架构、约束、schema 版本、目录结构）、`THIRD_PARTY.md` / `EULA.md`（引入 / 变更第三方组件或权限说明时）。跑 `pnpm skills:check`。
+3. `pnpm bump-version X.X.X`：自动同步三处版本号并把 `[Unreleased]` 重命名为 `[X.X.X] - 日期`（`scripts/bump-version.ts`）。
+4. 提交：`chore(release): bump version to X.X.X`。
+5. **等用户明确授权**后：`git tag vX.X.X && git push origin main && git push origin vX.X.X`。
+6. tag 推送后 CI（`release.yml`：checkout → pnpm / Node 22 / Rust stable → `pnpm install` → `pnpm check:resources` → 解析上一稳定版本 tag → 提取 changelog → `tauri-action` 构建并创建 Draft Release）；审查后手动发布。当前只构建 Windows x64。
+
+## 护栏
+
+- **高风险版本禁止裸 bump `CURRENT_SCHEMA_VERSION`**：新增字段一律 `#[serde(default)]`，仅重命名 / 移动 / 删除 / 类型变更才递增。原因：若带 schema bump 的版本出问题需「向前滚修复」，用户配置已被写成新 schema，回到旧逻辑会 `TooNew` 拒载、砸用户配置。
+- **风险改动尽量挂运行时开关**：出问题先关开关止血，而不是整版回退。
+- **旧 GitHub Release 不删除**：保留上个稳定版安装包 + `.sig`，确保向前滚修复与手动回退有可用且已签名的产物。
+
+## 应急回退
+
+`tauri-plugin-updater` 仅在远端版本高于本机时更新，永远不会降级，所以「回退」对三类用户含义不同：
+
+| 用户群                          | 能做什么                     | 路径                |
+| ------------------------------- | ---------------------------- | ------------------- |
+| 还没升到坏版本                  | 拦住，别让他们升上去         | A 止血（分钟级）    |
+| 已经升到坏版本                  | 无法降级，只能用更高版本盖掉 | B 向前滚修复        |
+| 已静默下载暂存 `pending_update` | 召不回，下次启动必装         | 只能等 B 的新版覆盖 |
+
+紧急回退实质 = 紧急向前滚一个修复版，不是把版本号往回拨。失败的 tag 不重指，用新版本号补发。
+
+**路径 A：止血。** 更新端点跟着 GitHub 的 Latest 指针走，把 Latest 拨回上个好版本，`latest.json` 就不再分发坏版本；镜像最迟一轮（10 分钟）跟上。
+
+```sh
+gh api repos/x-wink/flair-bloom/releases/latest --jq '.tag_name'   # 确认当前 Latest
+gh release edit v0.2.7 --repo x-wink/flair-bloom --latest            # 上个好版本重新标记为 Latest
+gh release edit v0.2.8 --repo x-wink/flair-bloom --draft=true        # 可选：坏版本转回 Draft，资产与页面下线
+gh api repos/x-wink/flair-bloom/releases/latest --jq '.tag_name'   # 复核已切回
+```
+
+**路径 B：向前滚修复。** 发一个更高版本号的修复版，让自动更新把所有人（含已中招用户）带走。
+
+```sh
+git revert <坏提交SHA>                      # 或手动改回，提交为 fix(...)
+# CHANGELOG.md 的 [Unreleased] 写明本次修复
+pnpm bump-version 0.2.9
+git add -A && git commit -m "chore(release): bump version to 0.2.9"
+git tag v0.2.9                              # 推 tag 前一次一授
+git push origin main && git push origin v0.2.9
+gh run watch <run-id> --exit-status --interval 30
+gh release view v0.2.9 --repo x-wink/flair-bloom --json isDraft,assets --jq '{isDraft,assets:[.assets[].name]}'
+gh release edit v0.2.9 --repo x-wink/flair-bloom --draft=false --latest
+```
+
+**发布后验证速查：**
+
+```sh
+gh run view <run-id> --json status,conclusion --jq '{status,conclusion}'
+gh release view vX.Y.Z --repo x-wink/flair-bloom --json isDraft,isPrerelease,assets --jq '{isDraft,isPrerelease,assets:[.assets[].name]}'
+gh api repos/x-wink/flair-bloom/releases/latest --jq '.tag_name'    # updater 实际会读到的版本
+tmp=$(mktemp -d); gh release download vX.Y.Z --repo x-wink/flair-bloom --pattern latest.json --dir "$tmp"; cat "$tmp/latest.json"
+```
+
+降险基建（远端最低可用版本、分批灰度、静默更新延迟安装）列在 README「接下来」，可缩小坏版本即时全量铺开的爆炸半径。
