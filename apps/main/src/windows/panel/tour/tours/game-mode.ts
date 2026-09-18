@@ -1,0 +1,58 @@
+import type { TourDef } from '../types';
+import { p } from './helpers';
+
+export const gameMode: TourDef = {
+  id: 'game-mode',
+  title: '游戏模式与驱动',
+  summary: '为什么游戏里要装驱动、怎么装',
+  steps: [
+    {
+      id: 'where',
+      target: 'input-mode',
+      title: '先找到输入模式',
+      body: p(
+        '底部中间这个按钮是输入模式，它决定按键用什么方式送出去。',
+        '默认的通用模式只适合普通软件和网页，游戏里通常不生效。',
+      ),
+      // 输入模式按钮在竖版底部栏；横版下这一整组都讲不了
+      prepare: async (host) => {
+        host.closeMenus();
+        await host.setLayout('vertical');
+      },
+    },
+    {
+      id: 'install',
+      target: 'input-mode',
+      title: '选「游戏模式」',
+      body: p(
+        '点开后选「游戏模式」，第一次会提示装一个小驱动：点「安装」、授权同意，中间黑框一闪是正常的。',
+        '这一组只是讲流程，装驱动等教程结束再动手。',
+      ),
+    },
+    {
+      id: 'restart',
+      title: '装完要重启电脑',
+      body: p(
+        '驱动装好后必须重启一次电脑，重新打开气质花再选一次游戏模式。',
+        '把按键送进游戏需要管理员权限，之后每次打开气质花都会先问要不要以管理员重启，同意后才是游戏模式。',
+      ),
+    },
+    {
+      id: 'repair',
+      target: 'menu',
+      title: '装不上怎么办',
+      body: p(
+        '装不上、装完没反应、想卸载，都去 ☰ 菜单 → 诊断修复。',
+        '它会查管理员权限、驱动状态、内核隔离这些前置条件，能修的一键修。',
+      ),
+    },
+    {
+      id: 'risk',
+      title: '提醒一句',
+      body: p(
+        '模拟按键存在被游戏反作弊检测的风险。',
+        '个别反作弊会拦驱动，导致进不去游戏，遇到就切回通用模式。用不用、用在哪请自己权衡。',
+      ),
+    },
+  ],
+};
