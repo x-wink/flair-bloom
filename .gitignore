@@ -38,3 +38,6 @@ Thumbs.db
 
 # Claude Code local config
 .claude/
+
+# 本地参考仓库（jx3anjian / kanata / PowerToys 等克隆），不进版本控制
+/refs/

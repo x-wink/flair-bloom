@@ -34,4 +34,16 @@ if command -v pnpm >/dev/null 2>&1 && [ -f "package.json" ]; then
   fi
 fi
 
+# 文档结构校验（教程 ↔ 说明书一一对应、相对链接不断）
+if command -v pnpm >/dev/null 2>&1 && [ -f "package.json" ]; then
+  doc_files=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.md$|^skills/|^scripts/check-skills\.ts$|^apps/main/src/windows/panel/tour/')
+  if [ -n "$doc_files" ]; then
+    echo "→ pnpm skills:check"
+    pnpm skills:check || {
+      echo "✗ 文档校验失败"
+      exit 1
+    }
+  fi
+fi
+
 exit 0
