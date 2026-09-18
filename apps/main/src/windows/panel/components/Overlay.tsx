@@ -223,17 +223,17 @@ function toPortal(attach: AttachTarget | undefined): HTMLElement | 'parent' {
   return document.body;
 }
 
-const GAP = 6;
-const PAD = 12;
+export const GAP = 6;
+export const PAD = 12;
 
-function clampPos(p: { left: number; top: number }, size: { w: number; h: number }) {
+export function clampPos(p: { left: number; top: number }, size: { w: number; h: number }) {
   return {
     left: Math.max(PAD, Math.min(p.left, window.innerWidth - size.w - PAD)),
     top: Math.max(PAD, Math.min(p.top, window.innerHeight - size.h - PAD)),
   };
 }
 
-function computePos(
+export function computePos(
   targetRect: { left: number; top: number; width: number; height: number } | null,
   loc: Location | undefined,
   offset: [number, number],
@@ -316,7 +316,6 @@ function Overlay({
     position: 'absolute',
     left: 0,
     top: 0,
-    zIndex: 99999,
     visibility: 'hidden',
   });
   const childRef = useRef<HTMLDivElement>(null);
@@ -330,14 +329,14 @@ function Overlay({
 
   useLayoutEffect(() => {
     if (!open) {
-      setAnchored({ position: 'absolute', left: 0, top: 0, zIndex: 99999, visibility: 'hidden' });
+      setAnchored({ position: 'absolute', left: 0, top: 0, visibility: 'hidden' });
       return;
     }
     if (!anchor) return;
 
     // version bump: 仅重算位置，不先隐藏以免闪烁
     if (version === 0) {
-      setAnchored({ position: 'absolute', left: 0, top: 0, zIndex: 99999, visibility: 'hidden' });
+      setAnchored({ position: 'absolute', left: 0, top: 0, visibility: 'hidden' });
     }
 
     const frame = requestAnimationFrame(() => {
@@ -352,7 +351,6 @@ function Overlay({
           position: 'absolute',
           left: pos.left,
           top: pos.top,
-          zIndex: 99999,
           visibility: 'visible',
         });
       } else {
@@ -360,7 +358,6 @@ function Overlay({
           position: 'absolute',
           left: 0,
           top: 0,
-          zIndex: 99999,
           visibility: 'visible',
         });
       }

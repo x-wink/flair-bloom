@@ -167,6 +167,9 @@
   --fb-z-modal: 100;
   --fb-z-overlay-mask: 99990;
   --fb-z-overlay-content: 99999;
+  /* 新手引导要叠在设置等弹窗之上讲页签，故比 overlay 再高一档 */
+  --fb-z-tour-mask: 100010;
+  --fb-z-tour-bubble: 100020;
 }
 
 /* ── 暗色模式：仅覆盖颜色 token，尺寸/字号等沿用 :root ──────────────

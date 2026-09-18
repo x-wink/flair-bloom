@@ -1,0 +1,216 @@
+/* 遮罩：四块拼出镂空，外层裁成面板圆角，否则透明窗口四角会露出黑边 */
+.tour-mask {
+  position: fixed;
+  inset: 0;
+  border-radius: var(--fb-radius-3xl);
+  overflow: hidden;
+  pointer-events: none;
+  z-index: var(--fb-z-tour-mask);
+  animation: tour-fade-in var(--fb-duration-base) ease;
+}
+
+.tour-mask__part,
+.tour-mask__blocker,
+.tour-highlight {
+  position: absolute;
+  box-sizing: border-box;
+}
+
+.tour-mask__part {
+  background: rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+}
+
+.tour-mask__blocker {
+  pointer-events: auto;
+}
+
+.tour-highlight {
+  border-radius: var(--fb-radius-md);
+  box-shadow:
+    0 0 0 2px var(--fb-color-primary),
+    0 0 0 6px rgba(var(--fb-color-primary-rgb), 0.25);
+  pointer-events: none;
+  transition:
+    left var(--fb-duration-fast),
+    top var(--fb-duration-fast),
+    width var(--fb-duration-fast),
+    height var(--fb-duration-fast);
+  animation: tour-pulse 1.6s ease-in-out infinite;
+}
+
+.tour-highlight--done {
+  box-shadow:
+    0 0 0 2px var(--fb-color-success),
+    0 0 0 6px rgba(var(--fb-color-success-rgb), 0.25);
+  animation: none;
+}
+
+/* 气泡 */
+.tour-bubble {
+  position: fixed;
+  z-index: var(--fb-z-tour-bubble);
+  width: max-content;
+  max-width: min(280px, calc(100vw - 2 * 12px));
+  background: var(--fb-surface);
+  color: var(--fb-text-strong);
+  border: 1px solid var(--fb-border-soft);
+  border-radius: var(--fb-radius-xl);
+  box-shadow: var(--fb-shadow-popover);
+  padding: var(--fb-space-5) var(--fb-space-6) var(--fb-space-5);
+  font-size: var(--fb-fs-md);
+  line-height: var(--fb-lh-relaxed);
+  animation: tour-pop var(--fb-duration-slow) ease;
+}
+
+/* 先隐藏着量尺寸，量完再摆到位，避免左上角闪一下 */
+.tour-bubble--measuring {
+  visibility: hidden;
+}
+
+.tour-bubble__arrow {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--fb-surface);
+  border: 1px solid var(--fb-border-soft);
+  transform: translate(-50%, -50%) rotate(45deg);
+}
+
+/* 箭头只保留朝向目标那两条边，另两条藏进气泡里 */
+.tour-bubble--bottom .tour-bubble__arrow {
+  top: 0;
+  border-right: none;
+  border-bottom: none;
+}
+
+.tour-bubble--top .tour-bubble__arrow {
+  top: 100%;
+  border-left: none;
+  border-top: none;
+}
+
+.tour-bubble--right .tour-bubble__arrow {
+  left: 0;
+  border-right: none;
+  border-top: none;
+}
+
+.tour-bubble--left .tour-bubble__arrow {
+  left: 100%;
+  border-left: none;
+  border-bottom: none;
+}
+
+.tour-bubble__head {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-3);
+  margin-bottom: var(--fb-space-3);
+}
+
+.tour-bubble__title {
+  flex: 1;
+  font-size: var(--fb-fs-lg);
+  font-weight: var(--fb-fw-semibold);
+  line-height: var(--fb-lh-snug);
+}
+
+.tour-bubble__progress {
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-faint);
+  white-space: nowrap;
+}
+
+.tour-bubble__close {
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--fb-radius-sm);
+  background: transparent;
+  color: var(--fb-text-weak);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tour-bubble__close:hover {
+  background: var(--fb-color-neutral-soft);
+  color: var(--fb-text-strong);
+}
+
+.tour-bubble__body {
+  color: var(--fb-text-regular);
+}
+
+.tour-bubble__body p + p {
+  margin-top: var(--fb-space-3);
+}
+
+.tour-bubble__note {
+  margin-top: var(--fb-space-3);
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-color-warning);
+}
+
+.tour-bubble__hint {
+  margin-top: var(--fb-space-4);
+  padding: var(--fb-space-2) var(--fb-space-4);
+  border-radius: var(--fb-radius-pill);
+  background: var(--fb-color-primary-soft);
+  color: var(--fb-color-primary);
+  font-size: var(--fb-fs-sm);
+  font-weight: var(--fb-fw-medium);
+  width: fit-content;
+}
+
+.tour-bubble__hint--done {
+  background: var(--fb-color-success-soft);
+  color: var(--fb-color-success);
+}
+
+.tour-bubble__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-3);
+  margin-top: var(--fb-space-5);
+}
+
+.tour-bubble__spacer {
+  flex: 1;
+}
+
+@keyframes tour-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes tour-pop {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes tour-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px var(--fb-color-primary),
+      0 0 0 6px rgba(var(--fb-color-primary-rgb), 0.25);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2px var(--fb-color-primary),
+      0 0 0 10px rgba(var(--fb-color-primary-rgb), 0.1);
+  }
+}
