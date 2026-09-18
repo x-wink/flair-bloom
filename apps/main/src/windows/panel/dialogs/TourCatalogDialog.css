@@ -1,0 +1,74 @@
+.tour-catalog-card {
+  max-width: min(440px, calc(100vw - 32px));
+  max-height: 80vh;
+}
+
+.tour-catalog-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.tour-catalog-row {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-4);
+  padding: var(--fb-space-4) 0;
+  border-bottom: 1px dashed var(--fb-divider);
+}
+
+.tour-catalog-row:last-child {
+  border-bottom: none;
+}
+
+.tour-catalog-mark {
+  flex: 0 0 auto;
+  width: 1.2em;
+  text-align: center;
+  font-size: var(--fb-fs-md);
+  color: var(--fb-text-faint);
+  line-height: var(--fb-lh-tight);
+}
+
+.tour-catalog-mark.done {
+  color: var(--fb-color-success-active);
+}
+
+.tour-catalog-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--fb-space-1);
+}
+
+.tour-catalog-title {
+  font-size: var(--fb-fs-md);
+  color: var(--fb-text-strong);
+  line-height: var(--fb-lh-tight);
+}
+
+.tour-catalog-desc {
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+  line-height: var(--fb-lh-snug);
+}
+
+.tour-catalog-desc.reason {
+  color: var(--fb-color-warning-active);
+}
+
+.tour-catalog-steps {
+  flex: 0 0 auto;
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-faint);
+  white-space: nowrap;
+}
+
+/* aria-disabled 的按钮仍可聚焦与 hover（要让 title 提示出得来），只做视觉降权 */
+.tour-catalog-row.unavailable .fb-btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

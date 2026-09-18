@@ -263,7 +263,7 @@ export default function HorizontalLayout({
 
   return (
     <section className="horizontal-layout">
-      <div className="hkb-keyboard">
+      <div className="hkb-keyboard" data-tour="hkb-keyboard">
         {renderBlock(MAIN_BLOCK, 'hkb-main')}
         {renderBlock(NAV_BLOCK, 'hkb-nav')}
         <div
@@ -328,7 +328,7 @@ export default function HorizontalLayout({
 
         {/* 中：信息栏 —— 图例 / 分组列表（占剩余空间）/ 统一间隔 */}
         <div className="hbottom-center">
-          <div className="hbar-legend">
+          <div className="hbar-legend" data-tour="hbar-legend">
             <span className="hbar-legend-item">
               <span className="hbar-swatch sw-toggle" />
               切换连发
@@ -374,7 +374,7 @@ export default function HorizontalLayout({
             ))}
           </div>
 
-          <div className="hbar-interval">
+          <div className="hbar-interval" data-tour="hbar-interval">
             <span>统一间隔</span>
             <IntervalInput
               value={interval}

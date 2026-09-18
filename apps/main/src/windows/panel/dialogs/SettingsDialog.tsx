@@ -58,7 +58,9 @@ export interface SoundSettings {
 }
 
 interface Props {
-  initialTab?: SettingsTab;
+  // 受控：引导教程要在弹窗已打开时切页签，内部 state 做不到（组件不重挂载）
+  tab: SettingsTab;
+  onTabChange: (tab: SettingsTab) => void;
   appVersion: string;
   inputMode: SettingsInputMode;
   layout: 'vertical' | 'horizontal';
@@ -153,9 +155,17 @@ const CLOSE_BEHAVIOR_OPTIONS: {
   { value: null, label: '关闭时询问', detail: '每次确认' },
 ];
 
-function SettingsSection({ title, children }: { title: string; children: ReactNode }) {
+function SettingsSection({
+  title,
+  children,
+  dataTour,
+}: {
+  title: string;
+  children: ReactNode;
+  dataTour?: string;
+}) {
   return (
-    <section className="settings-section">
+    <section className="settings-section" data-tour={dataTour}>
       <h3 className="settings-section-title">{title}</h3>
       {children}
     </section>
@@ -321,7 +331,7 @@ function SoundStatementRow({
 }
 
 export default function SettingsDialog(props: Props) {
-  const [tab, setTab] = useState<SettingsTab>(props.initialTab ?? 'general');
+  const tab = props.tab;
   const [hotkeyDupNote, setHotkeyDupNote] = useState<string | null>(null);
   const { sound } = props;
   const toast = useToast();
@@ -383,7 +393,11 @@ export default function SettingsDialog(props: Props) {
     }
   };
 
-  const tabsNode = <Tabs tabs={TABS} active={tab} onChange={setTab} variant="pill" grow />;
+  const tabsNode = (
+    <div data-tour="settings-tabs">
+      <Tabs tabs={TABS} active={tab} onChange={props.onTabChange} variant="pill" grow />
+    </div>
+  );
 
   return (
     <DialogShell
@@ -396,7 +410,7 @@ export default function SettingsDialog(props: Props) {
       <div className="settings-body">
         {tab === 'general' && (
           <>
-            <SettingsSection title="外观">
+            <SettingsSection title="外观" dataTour="settings-general-theme">
               <div className="settings-row">
                 <div className="settings-row-main">
                   <span className="settings-row-title">明暗模式</span>
@@ -532,7 +546,7 @@ export default function SettingsDialog(props: Props) {
               <p className="settings-note">驱动安装与卸载操作请前往「诊断修复」。</p>
             </SettingsSection>
 
-            <SettingsSection title="关闭行为">
+            <SettingsSection title="关闭行为" dataTour="settings-general-close">
               <CardList columns="three" role="radiogroup" aria-label="关闭行为">
                 {CLOSE_BEHAVIOR_OPTIONS.map((item) => (
                   <CardListButton
@@ -553,7 +567,7 @@ export default function SettingsDialog(props: Props) {
         )}
 
         {tab === 'hotkeys' && (
-          <SettingsSection title="热键">
+          <SettingsSection title="热键" dataTour="settings-hotkeys">
             <div className="settings-hotkey-list">
               <div className="settings-hotkey-row">
                 <span className="settings-hotkey-label">全局开关</span>
@@ -626,7 +640,7 @@ export default function SettingsDialog(props: Props) {
 
         {tab === 'sound' && (
           <>
-            <SettingsSection title="声音反馈">
+            <SettingsSection title="声音反馈" dataTour="settings-sound">
               <div className="settings-row">
                 <div className="settings-row-main">
                   <span className="settings-row-title">声音反馈</span>
@@ -675,7 +689,7 @@ export default function SettingsDialog(props: Props) {
                   onPreview={() => props.onPreviewSound('end')}
                 />
                 <SoundStatementRow
-                  title="Toggle 开始"
+                  title="切换连发开始"
                   value={sound.toggleStartText}
                   source={sound.toggleStartSource}
                   audioName={sound.toggleStartAudio}
@@ -688,7 +702,7 @@ export default function SettingsDialog(props: Props) {
                   onPreview={() => props.onPreviewSound('toggleStart')}
                 />
                 <SoundStatementRow
-                  title="Toggle 结束"
+                  title="切换连发结束"
                   value={sound.toggleEndText}
                   source={sound.toggleEndSource}
                   audioName={sound.toggleEndAudio}

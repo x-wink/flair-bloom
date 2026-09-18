@@ -12,7 +12,7 @@ import { APP_NAME } from '../../constants';
 import HorizontalLayout from './HorizontalLayout';
 import Button from './components/Button';
 import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
-import { useConfirm } from './components/ConfirmDialog';
+import { useConfirm, useConfirmOpen } from './components/ConfirmDialog';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import IntervalInput from './components/IntervalInput';
 import {
@@ -41,11 +41,16 @@ import Tabs from './components/Tabs';
 import { useToast } from './components/Toast';
 import UpdateProgressBar, { type UpdateDownloadProgress } from './components/UpdateProgressBar';
 import { detectConflicts, severityForKey, severityForRule } from './conflicts';
+import TourRunner from './tour/TourRunner';
+import { findTour, TOURS } from './tour/tours';
+import type { TourDef, TourExitResult, TourHost, TourSnapshot } from './tour/types';
+import { useTourProgress } from './tour/useTourProgress';
 import { useKeyRelay } from './useKeyRelay';
 import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
 import ImportDialog from './dialogs/ImportDialog';
 import RepairDialog from './dialogs/RepairDialog';
+import TourCatalogDialog from './dialogs/TourCatalogDialog';
 import SettingsDialog, {
   type SettingsTab,
   type SoundSettings,
@@ -345,8 +350,17 @@ export default function PanelApp() {
   const [showAgreement, setShowAgreement] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>('general');
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
   const [showAbout, setShowAbout] = useState(false);
+  const [showTourCatalog, setShowTourCatalog] = useState(false);
+  const [activeTour, setActiveTour] = useState<TourDef | undefined>(undefined);
+  // 首启判定只准跑一次：教程里新建规则会让下面那个 effect 因 rules 变化重跑，
+  // 而 introShown 要等教程走完才落盘，没有这道闸就会二次触发。
+  const firstRunHandled = useRef(false);
+  const tourProgress = useTourProgress(settingsStore);
+  // 启动期两条可能弹确认框的链，各自结束（含用户点掉弹窗）时置位；没弹的也会立即置位。
+  const [noticeSettled, setNoticeSettled] = useState(false);
+  const [startupModeSettled, setStartupModeSettled] = useState(false);
   const [showRepair, setShowRepair] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [appVersion, setAppVersion] = useState('');
@@ -446,6 +460,7 @@ export default function PanelApp() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const conflicts = useMemo(() => detectConflicts(rules, hotkeys), [rules, hotkeys]);
   const confirm = useConfirm();
+  const confirmOpen = useConfirmOpen();
   const toast = useToast();
 
   // 按键允许集来自后端（`packages/qzh-profile/src/key_policy.rs` 是唯一的表）。
@@ -530,7 +545,7 @@ export default function PanelApp() {
   }, [confirm]);
 
   useEffect(() => {
-    void showProfileNotice();
+    void showProfileNotice().finally(() => setNoticeSettled(true));
     const un = listen('profile-sanitized', () => {
       void showProfileNotice();
     });
@@ -620,6 +635,34 @@ export default function PanelApp() {
       .then(setAppVersion)
       .catch(() => {});
   }, []);
+
+  // 首启引导（D8）：没有任何规则的才算新用户，老用户升级只静默置位。
+  // 自动开的那一组由 handleTourExit 负责置 introShown，否则中途退出就再也不会弹。
+  // 就绪门只挡这条自动触发：菜单入口不挡，启动头两秒点了没反应比气泡晚两秒更费解，
+  // 手动开的教程遇到确认框由 paused 让路即可。
+  useEffect(() => {
+    if (!tourProgress.loaded || tourProgress.introShown || firstRunHandled.current) return;
+    if (!initialLoadDone.current || showAgreement) return;
+    if (!noticeSettled || !startupModeSettled) return;
+    // 启动期的自动更新检查是后台跑的，update-ready 可能在任何时刻弹。它开着时不能 startTour，
+    // 否则日志会记一次假的 started。update-available 只亮标题栏、update-downloading 只画进度条，
+    // 都不打断用户，不进门。
+    if (updateNotice !== null || applyingUpdate) return;
+    firstRunHandled.current = true;
+    const intro = findTour('getting-started');
+    if (rules.length === 0 && intro) startTour(intro);
+    else tourProgress.markIntroShown().catch(() => {});
+    // startTour / markIntroShown 同样是渲染期新建的函数，纳入依赖会让 effect 每次渲染重跑
+  }, [
+    tourProgress.loaded,
+    tourProgress.introShown,
+    rules,
+    showAgreement,
+    noticeSettled,
+    startupModeSettled,
+    updateNotice,
+    applyingUpdate,
+  ]);
 
   useEffect(() => {
     settingsStore
@@ -737,9 +780,10 @@ export default function PanelApp() {
     invoke<AppStatus>('get_app_status')
       .then((status) => {
         applyAppStatus(status);
-        void reconcileStartupInputMode(status);
+        void reconcileStartupInputMode(status).finally(() => setStartupModeSettled(true));
       })
-      .catch(() => {});
+      // 取状态失败也要放行，否则这条链永远不结束、首启教程再也不会出现
+      .catch(() => setStartupModeSettled(true));
 
     // 启动期：以「activeProfilePath → load_profile」为唯一来源；
     // 没路径或加载失败则回退到 init_default_profile。
@@ -1833,8 +1877,82 @@ export default function PanelApp() {
   function handleShowSettings(tab: SettingsTab = 'general') {
     setMenuOpen(false);
     setProfileMenuOpen(false);
-    setSettingsInitialTab(tab);
+    setSettingsTab(tab);
     setShowSettings(true);
+  }
+
+  function closeMenus() {
+    setMenuOpen(false);
+    setModePickerOpen(false);
+    setProfileMenuOpen(false);
+  }
+
+  function selectTab(mode: BurstMode) {
+    setActiveTab(mode);
+    settingsStore
+      .set(ACTIVE_TAB_KEY, mode)
+      .then(() => settingsStore.save())
+      .catch(() => toast.warning('保存当前标签页失败'));
+  }
+
+  const tourSnapshot: TourSnapshot = useMemo(
+    () => ({
+      rules,
+      globalEnabled,
+      inputMode,
+      layout,
+      activeTab,
+      settingsOpen: showSettings,
+      settingsTab,
+      coincidentToggle: keyPolicies.coincident_toggle,
+    }),
+    [
+      rules,
+      globalEnabled,
+      inputMode,
+      layout,
+      activeTab,
+      showSettings,
+      settingsTab,
+      keyPolicies.coincident_toggle,
+    ],
+  );
+
+  const tourHost: TourHost = useMemo(
+    () => ({
+      snapshot: tourSnapshot,
+      setActiveTab: selectTab,
+      setLayout: switchLayout,
+      openSettings: handleShowSettings,
+      closeSettings: () => setShowSettings(false),
+      closeMenus,
+    }),
+    // 动作都是组件内的普通函数、每次渲染新建，纳入依赖等于每帧换一个 host；
+    // 只让快照变化驱动重建
+    [tourSnapshot],
+  );
+
+  function logTourEvent(id: string, event: string) {
+    invoke('log_from_frontend', { level: 'info', message: `tour ${id} ${event}` }).catch(() => {});
+  }
+
+  function startTour(tour: TourDef) {
+    closeMenus();
+    setShowTourCatalog(false);
+    logTourEvent(tour.id, 'started');
+    setActiveTour(tour);
+  }
+
+  function handleTourExit(result: TourExitResult) {
+    const tour = activeTour;
+    if (tour) {
+      logTourEvent(tour.id, result);
+      if (result === 'completed') {
+        tourProgress.markCompleted(tour.id).catch(() => toast.warning('保存教程进度失败'));
+      }
+    }
+    tourProgress.markIntroShown().catch(() => {});
+    setActiveTour(undefined);
   }
 
   function handleCheckUpdate() {
@@ -1970,6 +2088,7 @@ export default function PanelApp() {
         <div className="window-controls">
           <button
             className="win-btn"
+            data-tour="layout-toggle"
             onClick={() => void switchLayout(layout === 'vertical' ? 'horizontal' : 'vertical')}
             // 用 aria-disabled 而非 disabled：disabled 的按钮不触发 onClick，
             // switchLayout 里的原因提示就永远跑不到，点下去毫无反应。
@@ -2013,6 +2132,7 @@ export default function PanelApp() {
           <button
             ref={menuBtnRef}
             className="win-btn menu-btn"
+            data-tour="menu"
             onClick={() => setMenuOpen((v) => !v)}
             aria-label="菜单"
           >
@@ -2020,6 +2140,7 @@ export default function PanelApp() {
           </button>
           <button
             className="win-btn"
+            data-tour="minimize"
             onClick={() => invoke('minimize_to_float').catch(() => {})}
             aria-label="最小化到浮窗"
           >
@@ -2034,26 +2155,22 @@ export default function PanelApp() {
 
       <section className="rules-section">
         {layout === 'vertical' && (
-          <Tabs
-            tabs={(['hold', 'toggle'] as BurstMode[]).map((mode) => {
-              const groupRules = rules.filter((r) => r.mode === mode);
-              const active = groupRules.filter((r) => r.enabled).length;
-              return {
-                id: mode,
-                label: mode === 'hold' ? '按压连发' : '切换连发',
-                badge: `${active}/${groupRules.length}`,
-              };
-            })}
-            active={activeTab}
-            grow
-            onChange={(mode) => {
-              setActiveTab(mode);
-              settingsStore
-                .set(ACTIVE_TAB_KEY, mode)
-                .then(() => settingsStore.save())
-                .catch(() => toast.warning('保存当前标签页失败'));
-            }}
-          />
+          <div data-tour="tabs">
+            <Tabs
+              tabs={(['hold', 'toggle'] as BurstMode[]).map((mode) => {
+                const groupRules = rules.filter((r) => r.mode === mode);
+                const active = groupRules.filter((r) => r.enabled).length;
+                return {
+                  id: mode,
+                  label: mode === 'hold' ? '按压连发' : '切换连发',
+                  badge: `${active}/${groupRules.length}`,
+                };
+              })}
+              active={activeTab}
+              grow
+              onChange={selectTab}
+            />
+          </div>
         )}
 
         {layout === 'horizontal' && (
@@ -2081,6 +2198,9 @@ export default function PanelApp() {
             if (mode !== activeTab) return null;
             if (mode === 'hold') {
               const holdRules = rules.filter((r) => r.mode === 'hold');
+              // 按 id 认「最后一张」而不是 map 的 idx：切换页签的卡片分散在未分组区与
+              // 各分组容器里，容器内的 idx 不是全列表序号。两个页签统一用这个口径。
+              const latestHoldId = holdRules[holdRules.length - 1]?.id;
               return (
                 <div className="rule-group" key="hold">
                   <div className="rules-list">
@@ -2097,6 +2217,7 @@ export default function PanelApp() {
                         <div
                           key={rule.id}
                           className={`rule-row${rule.enabled ? '' : ' disabled'}${isActive ? ' active' : ''}${isDragging ? ' dragging' : ''}${isDragTarget ? ' drag-target' : ''}`}
+                          data-tour={rule.id === latestHoldId ? 'rule-latest' : undefined}
                           draggable
                           onDragStart={(e) => {
                             draggingIdRef.current = rule.id;
@@ -2137,7 +2258,7 @@ export default function PanelApp() {
                           </button>
                           <div className="rule-body">
                             <div className="rule-main">
-                              <div className="rule-field">
+                              <div className="rule-field" data-tour="rule-key">
                                 <label>连发按键</label>
                                 <KeyCapture
                                   onReject={notifyRuleKeyReject}
@@ -2160,7 +2281,7 @@ export default function PanelApp() {
                                   }
                                 />
                               </div>
-                              <div className="rule-field rule-interval">
+                              <div className="rule-field rule-interval" data-tour="rule-interval">
                                 <label>间隔</label>
                                 <IntervalInput
                                   value={rule.interval_ms}
@@ -2173,6 +2294,7 @@ export default function PanelApp() {
                             <input
                               type="checkbox"
                               className="enable-checkbox"
+                              data-tour="rule-enable"
                               checked={rule.enabled}
                               onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
                               aria-label="启用"
@@ -2195,6 +2317,7 @@ export default function PanelApp() {
                           )}
                           <button
                             className={`expand-btn${showAdvanced ? ' open' : ''}`}
+                            data-tour="rule-advanced"
                             onClick={() => toggleAdvanced(rule.id)}
                             aria-label="高级设置"
                           >
@@ -2212,6 +2335,7 @@ export default function PanelApp() {
                     variant="dashed"
                     tone="primary"
                     block
+                    data-tour="add-hold"
                     onClick={() => addRule('hold')}
                   >
                     + 添加按压连发规则
@@ -2222,6 +2346,7 @@ export default function PanelApp() {
 
             // Toggle tab — 分组容器 UI
             const toggleRules = rules.filter((r) => r.mode === 'toggle');
+            const latestToggleId = toggleRules[toggleRules.length - 1]?.id;
             const ungroupedRules = toggleRules.filter((r) => !r.group);
             const groupNames = [
               ...new Set(toggleRules.filter((r) => r.group).map((r) => r.group as string)),
@@ -2240,6 +2365,7 @@ export default function PanelApp() {
                 <div
                   key={rule.id}
                   className={`rule-row${rule.enabled ? '' : ' disabled'}${isActive ? ' active' : ''}${isDragging ? ' dragging' : ''}${isDragTarget ? ' drag-target' : ''}`}
+                  data-tour={rule.id === latestToggleId ? 'rule-latest' : undefined}
                   draggable
                   onDragStart={(e) => {
                     draggingIdRef.current = rule.id;
@@ -2292,7 +2418,7 @@ export default function PanelApp() {
                         />
                       </div>
                       <span className="rule-arrow">→</span>
-                      <div className="rule-field">
+                      <div className="rule-field" data-tour="rule-key">
                         <label>连发按键</label>
                         <KeyCapture
                           onReject={notifyRuleKeyReject}
@@ -2302,7 +2428,7 @@ export default function PanelApp() {
                           conflict={severityForRule(conflicts, rule.id)}
                         />
                       </div>
-                      <div className="rule-field rule-interval">
+                      <div className="rule-field rule-interval" data-tour="rule-interval">
                         <label>间隔</label>
                         <IntervalInput
                           value={rule.interval_ms}
@@ -2315,6 +2441,7 @@ export default function PanelApp() {
                     <input
                       type="checkbox"
                       className="enable-checkbox"
+                      data-tour="rule-enable"
                       checked={rule.enabled}
                       onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
                       aria-label="启用"
@@ -2336,6 +2463,7 @@ export default function PanelApp() {
                   )}
                   <button
                     className={`expand-btn${showAdvanced ? ' open' : ''}`}
+                    data-tour="rule-advanced"
                     onClick={() => toggleAdvanced(rule.id)}
                     aria-label="高级设置"
                   >
@@ -2616,6 +2744,7 @@ export default function PanelApp() {
                     className="add-btn"
                     variant="dashed"
                     tone="primary"
+                    data-tour="add-toggle"
                     onClick={() => addRule('toggle')}
                   >
                     + 添加切换连发规则
@@ -2624,6 +2753,7 @@ export default function PanelApp() {
                     className="add-btn"
                     variant="dashed"
                     tone="neutral"
+                    data-tour="add-group"
                     onClick={handleNewGroup}
                   >
                     + 新建互斥分组
@@ -2641,6 +2771,7 @@ export default function PanelApp() {
           tone="neutral"
           size="sm"
           appendIcon={<ChevronIcon size={10} />}
+          data-tour="profile"
           onClick={() => setProfileMenuOpen((v) => !v)}
           title={isDefaultProfile ? '默认配置（修改后将自动新建）' : `当前配置：${profileName}`}
         >
@@ -2655,6 +2786,7 @@ export default function PanelApp() {
               size="sm"
               loading={switchingMode}
               appendIcon={<ChevronIcon size={10} />}
+              data-tour="input-mode"
               onClick={() => setModePickerOpen((v) => !v)}
               title="点击选择输入模式"
             >
@@ -2674,6 +2806,7 @@ export default function PanelApp() {
                   : hotkeys.global_toggle;
                 return k ? keyLabel(k) : undefined;
               })()}
+              data-tour="global"
               onClick={toggleGlobal}
             >
               {globalEnabled ? '全局已启用' : '全局已禁用'}
@@ -2767,6 +2900,13 @@ export default function PanelApp() {
             ],
           },
           { type: 'divider' },
+          {
+            label: '新手教程',
+            onClick: () => {
+              setMenuOpen(false);
+              setShowTourCatalog(true);
+            },
+          },
           { label: '检查更新', onClick: handleCheckUpdate },
           {
             // 固定看当前运行版本做了什么，来源是随包内联的 CHANGELOG；
@@ -2795,7 +2935,8 @@ export default function PanelApp() {
 
       <Overlay open={showSettings} onClose={() => setShowSettings(false)}>
         <SettingsDialog
-          initialTab={settingsInitialTab}
+          tab={settingsTab}
+          onTabChange={setSettingsTab}
           appVersion={appVersion}
           inputMode={inputMode}
           layout={layout}
@@ -2874,6 +3015,28 @@ export default function PanelApp() {
           />
         )}
       </Overlay>
+
+      <Overlay open={showTourCatalog} onClose={() => setShowTourCatalog(false)}>
+        <TourCatalogDialog
+          tours={TOURS}
+          completed={tourProgress.completed}
+          snapshot={tourSnapshot}
+          onStart={(id) => {
+            const tour = findTour(id);
+            if (tour) startTour(tour);
+          }}
+          onClose={() => setShowTourCatalog(false)}
+        />
+      </Overlay>
+
+      {activeTour && (
+        <TourRunner
+          tour={activeTour}
+          host={tourHost}
+          paused={showAgreement || updateNotice !== null || confirmOpen}
+          onExit={handleTourExit}
+        />
+      )}
 
       <Overlay open={showAbout} onClose={() => setShowAbout(false)}>
         <AboutDialog
