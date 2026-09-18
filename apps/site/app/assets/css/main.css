@@ -17,6 +17,11 @@ html {
   scroll-behavior: smooth;
 }
 
+/* 极光容器的色相轮换会把门派色转偏，本站的主色就是门派身份，只保留彩带自身的摆动与呼吸 */
+.ui-animate-aurora-hue {
+  animation: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

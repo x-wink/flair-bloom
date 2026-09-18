@@ -13,10 +13,10 @@ const brandTable = Object.fromEntries(
   brandPresets.map((preset) => [preset.color, brandVariables(preset.color)]),
 );
 
-// SSG 首帧没有 data-theme 与所选门派色，等客户端补上会先闪一帧；在样式生效前按已存偏好打上。
-// 明暗存储键与 @xwink/ui 的 useTheme 一致，app.xwink.fun 同源下与产品索引页共享选择；
-// 门派色只认色板里的值，存储被改坏时回落默认色。
-const themeBootstrap = `(function(){try{var d=document.documentElement,p=localStorage.getItem('xwink-ui:theme');if(p!=='light'&&p!=='dark'){p=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}d.setAttribute('data-theme',p);var t=${JSON.stringify(brandTable)},v=t[localStorage.getItem(${JSON.stringify(BRAND_STORAGE_KEY)})]||t[${JSON.stringify(defaultBrandColor)}];for(var k in v)d.style.setProperty(k,v[k])}catch(e){}})()`;
+// SSG 首帧没有所选门派色，等客户端补上会先闪一帧；在样式生效前按已存选择打上。
+// 门派色只认色板里的值，存储被改坏时回落默认色。明暗档不在这里：@xwink/ui/nuxt 按 xwink.fun
+// 全站共享的主题 Cookie 接管首帧，与主站、产品索引页同一份偏好。
+const brandBootstrap = `(function(){try{var d=document.documentElement,t=${JSON.stringify(brandTable)},v=t[localStorage.getItem(${JSON.stringify(BRAND_STORAGE_KEY)})]||t[${JSON.stringify(defaultBrandColor)}];for(var k in v)d.style.setProperty(k,v[k])}catch(e){}})()`;
 
 export default defineNuxtConfig({
   compatibilityDate: '2026-01-01',
@@ -44,7 +44,7 @@ export default defineNuxtConfig({
         { property: 'og:image', content: 'https://app.xwink.fun/flair-bloom/icon.png' },
       ],
       link: [{ rel: 'icon', type: 'image/png', sizes: '32x32', href: `${baseURL}favicon-32.png` }],
-      script: [{ innerHTML: themeBootstrap, tagPosition: 'head' }],
+      script: [{ innerHTML: brandBootstrap, tagPosition: 'head' }],
     },
   },
   typescript: {

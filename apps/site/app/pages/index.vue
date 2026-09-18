@@ -24,6 +24,9 @@ const unavailable = computed(
 );
 
 const { color: brandColor, select: selectBrand } = useBrandColor();
+
+// 同一列表里的卡片错峰进场；封顶是因为长列表后面的卡片等太久，滚到时反而像卡住
+const stagger = (index: number) => 120 + Math.min(index, 4) * 90;
 const currentBrand = computed(() => brandPresets.find((preset) => preset.color === brandColor.value));
 </script>
 
@@ -32,10 +35,9 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
   <!-- 打印时整页换成 PrintKit 的海报加说明书排版，屏幕版不参与打印 -->
   <PrintKit />
   <div class="min-h-dvh print:hidden">
-    <header
-      class="sticky top-0 z-40 border-b border-(--ui-border-muted) bg-(--ui-bg)/85 backdrop-blur"
-    >
-      <div class="mx-auto flex h-14 max-w-5xl items-center gap-3 px-4 sm:px-6">
+    <!-- 覆盖式顶栏：浮在首屏极光之上，随滚动渐进成毛玻璃；高度与首屏上边距、锚点偏移（scroll-mt-16）对应 -->
+    <XGlassHeader>
+      <div class="relative mx-auto flex h-16 max-w-5xl items-center gap-3 px-4 sm:px-6">
         <a href="#top" class="flex min-w-0 items-center gap-2 font-semibold text-(--ui-fg-strong)">
           <img src="/icon.png" alt="" class="size-7 rounded-md" />
           <span class="truncate text-(--ui-primary)">气质花按键助手</span>
@@ -60,20 +62,27 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
           <template #fallback><div class="ms-auto size-9 sm:ms-0" /></template>
         </ClientOnly>
       </div>
-    </header>
+    </XGlassHeader>
 
     <main id="top">
-      <section class="mx-auto max-w-5xl px-4 pt-14 pb-16 sm:px-6 sm:pt-20">
+      <section class="mx-auto max-w-5xl px-4 pt-30 pb-16 sm:px-6 sm:pt-36">
         <div class="flex flex-col items-start gap-10 md:flex-row md:items-center">
           <div class="flex-1">
-            <p class="text-sm font-medium text-(--ui-primary)">PVE 打本按键小助手 · 有效降低输入延迟</p>
-            <h1 class="mt-3 text-4xl font-bold tracking-tight text-(--ui-fg-strong) sm:text-5xl">
-              气质花 FlairBloom
-            </h1>
-            <p class="mt-4 max-w-xl text-lg text-(--ui-fg-muted)">
-              手搓长按等 CD、武学助手 FFF 启动、一键宏启动、多段宏切换……让手指歇会儿。
-            </p>
+            <XReveal>
+              <p class="text-sm font-medium text-(--ui-primary)">
+                PVE 打本按键小助手 · 有效降低输入延迟
+              </p>
+              <h1 class="mt-3 text-4xl font-bold tracking-tight text-(--ui-fg-strong) sm:text-5xl">
+                气质花 FlairBloom
+              </h1>
+            </XReveal>
+            <XReveal :delay="120">
+              <p class="mt-4 max-w-xl text-lg text-(--ui-fg-muted)">
+                手搓长按等 CD、武学助手 FFF 启动、一键宏启动、多段宏切换……让手指歇会儿。
+              </p>
+            </XReveal>
 
+            <XReveal :delay="240">
             <div class="mt-8 flex flex-wrap items-center gap-3">
               <a
                 v-if="nsis"
@@ -125,27 +134,30 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
                 · 0.0 MB · 发布于 0000-00-00 · GitHub 下载</span
               >
             </p>
+            </XReveal>
           </div>
 
-          <img
-            src="/icon.png"
-            alt="气质花图标"
-            width="220"
-            height="220"
-            class="mx-auto size-40 drop-shadow-xl sm:size-56"
-          />
+          <XReveal :delay="360" class="mx-auto">
+            <img
+              src="/icon.png"
+              alt="气质花图标"
+              width="220"
+              height="220"
+              class="size-40 drop-shadow-xl sm:size-56"
+            />
+          </XReveal>
         </div>
       </section>
 
-      <section id="features" class="border-t border-(--ui-border-muted) bg-(--ui-surface-muted)/40">
+      <section id="features" class="scroll-mt-16 border-t border-(--ui-border-muted) bg-(--ui-surface-muted)/40">
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-          <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">能帮剑三玩家干嘛</h2>
+          <XReveal>
+            <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">能帮剑三玩家干嘛</h2>
+          </XReveal>
           <ul class="mt-8 grid gap-4 md:grid-cols-2">
-            <li
-              v-for="item in highlights"
-              :key="item.title"
-              class="ui-glow-card flex flex-col gap-4 p-6 sm:flex-row"
-            >
+            <li v-for="(item, index) in highlights" :key="item.title">
+              <XReveal :delay="stagger(index)" class="h-full">
+              <div class="ui-glow-card flex h-full flex-col gap-4 p-6 sm:flex-row">
               <HighlightIcon :name="item.icon" />
               <div>
                 <h3 class="text-lg font-semibold text-(--ui-fg-strong)">{{ item.title }}</h3>
@@ -198,17 +210,18 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
                 </div>
                 </template>
               </div>
+              </div>
+              </XReveal>
             </li>
           </ul>
           <ul class="ui-glow-marquee mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <li
-              v-for="(feature, index) in features"
-              :key="feature.title"
-              class="ui-glow-card p-5"
-              :style="{ '--ui-i': index }"
-            >
-              <h3 class="font-semibold text-(--ui-fg-strong)">{{ feature.title }}</h3>
-              <p class="mt-2 text-sm text-(--ui-fg-muted)">{{ feature.text }}</p>
+            <li v-for="(feature, index) in features" :key="feature.title">
+              <XReveal :delay="stagger(index)" class="h-full">
+                <div class="ui-glow-card h-full p-5" :style="{ '--ui-i': index }">
+                  <h3 class="font-semibold text-(--ui-fg-strong)">{{ feature.title }}</h3>
+                  <p class="mt-2 text-sm text-(--ui-fg-muted)">{{ feature.text }}</p>
+                </div>
+              </XReveal>
             </li>
           </ul>
           <p class="mt-6 text-sm text-(--ui-fg-muted)">
@@ -224,9 +237,11 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
         </div>
       </section>
 
-      <section id="rumors" class="overflow-hidden border-b border-(--ui-border-muted)">
+      <section id="rumors" class="scroll-mt-16 overflow-hidden border-b border-(--ui-border-muted)">
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-          <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">江湖骚话</h2>
+          <XReveal>
+            <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">江湖骚话</h2>
+          </XReveal>
           <p class="mt-2 text-sm text-(--ui-fg-muted)">骚话谷出品，必属精品。</p>
           <ul class="mt-10 flex flex-col">
             <li
@@ -253,10 +268,14 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
         </div>
       </section>
 
-      <section id="start" class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-        <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">三步上手</h2>
+      <section id="start" class="scroll-mt-16 mx-auto max-w-5xl px-4 py-16 sm:px-6">
+        <XReveal>
+          <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">三步上手</h2>
+        </XReveal>
         <ol class="mt-8 grid gap-4 md:grid-cols-3">
-          <li v-for="(step, index) in steps" :key="step.title" class="ui-glow-card flex gap-4 p-5">
+          <li v-for="(step, index) in steps" :key="step.title">
+            <XReveal :delay="stagger(index)" class="h-full">
+            <div class="ui-glow-card flex h-full gap-4 p-5">
             <span
               class="flex size-8 shrink-0 items-center justify-center rounded-full bg-(--ui-primary) text-sm font-semibold text-(--ui-primary-fg)"
               >{{ index + 1 }}</span
@@ -265,6 +284,8 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
               <h3 class="font-semibold text-(--ui-fg-strong)">{{ step.title }}</h3>
               <p class="mt-1 text-sm text-(--ui-fg-muted)">{{ step.text }}</p>
             </div>
+            </div>
+            </XReveal>
           </li>
         </ol>
 
@@ -280,21 +301,29 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
 
       <section class="border-t border-(--ui-border-muted) bg-(--ui-surface-muted)/40">
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-          <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">用着放心</h2>
+          <XReveal>
+            <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">用着放心</h2>
+          </XReveal>
           <ul class="mt-8 grid gap-4 sm:grid-cols-2">
-            <li v-for="item in assurances" :key="item.title" class="ui-glow-card flex gap-3 p-5">
-              <XIcon name="ph:check" class="mt-0.5 size-5 shrink-0 text-(--ui-success)" />
-              <div>
-                <h3 class="font-semibold text-(--ui-fg-strong)">{{ item.title }}</h3>
-                <p class="mt-1 text-sm text-(--ui-fg-muted)">{{ item.text }}</p>
-              </div>
+            <li v-for="(item, index) in assurances" :key="item.title">
+              <XReveal :delay="stagger(index)" class="h-full">
+                <div class="ui-glow-card flex h-full gap-3 p-5">
+                  <XIcon name="ph:check" class="mt-0.5 size-5 shrink-0 text-(--ui-success)" />
+                  <div>
+                    <h3 class="font-semibold text-(--ui-fg-strong)">{{ item.title }}</h3>
+                    <p class="mt-1 text-sm text-(--ui-fg-muted)">{{ item.text }}</p>
+                  </div>
+                </div>
+              </XReveal>
             </li>
           </ul>
         </div>
       </section>
 
-      <section id="changelog" class="mx-auto max-w-3xl px-4 py-16 sm:px-6">
-        <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">更新公告</h2>
+      <section id="changelog" class="scroll-mt-16 mx-auto max-w-3xl px-4 py-16 sm:px-6">
+        <XReveal>
+          <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">更新公告</h2>
+        </XReveal>
         <p v-if="!manifest && !unavailable" class="mt-6 text-sm text-(--ui-fg-muted)">正在读取…</p>
         <p v-else-if="unavailable" class="mt-6 text-sm text-(--ui-fg-muted)">
           暂时读不到更新公告，可以到
@@ -349,11 +378,13 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
         </div>
       </section>
 
-      <section id="support" class="border-t border-(--ui-border-muted) bg-(--ui-surface-muted)/40">
+      <section id="support" class="scroll-mt-16 border-t border-(--ui-border-muted) bg-(--ui-surface-muted)/40">
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
-          <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">支持</h2>
+          <XReveal>
+            <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">支持</h2>
+          </XReveal>
           <div class="mt-8 grid gap-4 sm:grid-cols-2">
-            <div class="ui-glow-card p-5">
+            <XReveal :delay="stagger(0)" class="ui-glow-card p-5">
               <h3 class="font-semibold text-(--ui-fg-strong)">问题反馈</h3>
               <p class="mt-2 text-sm text-(--ui-fg-muted)">
                 遇到问题或有想法，先到 GitHub Issues
@@ -368,8 +399,8 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
                 前往 Issues
                 <XIcon name="ph:arrow-up-right" class="size-4" />
               </a>
-            </div>
-            <div class="ui-glow-card p-5">
+            </XReveal>
+            <XReveal :delay="stagger(1)" class="ui-glow-card p-5">
               <h3 class="font-semibold text-(--ui-fg-strong)">常见问题</h3>
               <p class="mt-2 text-sm text-(--ui-fg-muted)">
                 剑三里没反应、连太快收不住、旧配置兼容这些问题，使用说明书里都有解答。
@@ -383,7 +414,7 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
                 查看常见问题
                 <XIcon name="ph:arrow-up-right" class="size-4" />
               </a>
-            </div>
+            </XReveal>
           </div>
         </div>
       </section>
