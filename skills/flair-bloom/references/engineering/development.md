@@ -51,6 +51,7 @@ done
 
 - `.rule-row` 只统计当前页签渲染的卡片，数规则数先确认在哪个页签。
 - **不要让应用在验证中途「以管理员重启」**：relaunch 出来的提权实例不继承远程调试环境变量（CDP 断连），在 `tauri dev` 下还会报 `WebView2 error 0x800700AA` 起不来窗口；普通权限的会话也杀不掉提权进程。需要管理员就按第 1 步从管理员终端起，从一开始就是 elevated。
+- **别在 dev 构建上打开「以管理员模式启动」**：该开关把 exe 绝对路径写进 `HKCU\...\AppCompatFlags\Layers`，而 dev 下那个路径是 `target\debug\flair-bloom.exe`，之后 `cargo run` 每次都要求提权、直接失败（`os error 740`）。已经中招就删掉该注册表值：`Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers' -Name '<debug exe 绝对路径>'`。
 
 用 MCP 接同一个端口：仓库 `.mcp.json` 里的 `flair-bloom-app` 是 Playwright MCP 以 `--cdp-endpoint http://127.0.0.1:9222` 连应用（新会话首次加载需确认一次）。`browser_snapshot` 看可访问性树、`browser_click` 按元素点、`browser_press_key` 发真实按键、`browser_take_screenshot` 截图，不必知道选择器；应用必须先起、端口先开，重启后重连一次即可。**不要调导航类工具**，那会把面板页面导航走。快照体积大，数规则、读 settings 这类精确取值仍用 `scripts/cdp.mts`。
 
