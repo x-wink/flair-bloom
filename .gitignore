@@ -41,3 +41,6 @@ Thumbs.db
 
 # 本地参考仓库（jx3anjian / kanata / PowerToys 等克隆），不进版本控制
 /refs/
+
+# 真机验证时 Playwright MCP 落的控制台日志与快照
+.playwright-mcp/
