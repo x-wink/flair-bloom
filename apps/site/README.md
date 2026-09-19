@@ -9,24 +9,19 @@
 | 目录      | 作用                                                                                       |
 | --------- | ------------------------------------------------------------------------------------------ |
 | `app/`    | Nuxt 页面。公告 Markdown 解析与门派色板直接引用 `apps/main` 的同一份源码，网站与应用不会漂 |
-| `mirror/` | 发布镜像同步脚本，服务器上以 Node 24 原生运行 TypeScript，无依赖                           |
-| `deploy/` | 部署脚本、nginx 片段、systemd 单元、服务器主机公钥基线                                     |
+| `deploy/` | 部署脚本、nginx 片段、服务器主机公钥基线                                                   |
 
 为什么不并入仓库根 workspace：根 workspace 的 Tauri 发版流水线会跑 `pnpm install`，并进来就得给那条流水线也配私有制品库凭据。
 
-## 发布镜像
+## 版本数据与下载
 
-国内直连 GitHub 下载很慢，服务器每 10 分钟同步一次：
+页面在浏览器里读 GitHub Releases API（`gh-proxy.com` 代理优先、直连兜底），取最近 10 个稳定版本渲染公告与下载清单；下载地址是加速代理后的 GitHub 地址。安装包流量不经本站服务器，服务器只托管静态页面。
 
-- 跟随 GitHub 的 **Latest 指针**，不按发布时间取最新。主仓 skill `release.md` 「应急回退」的止血动作是把 Latest 拨回好版本，镜像最迟一轮后跟上。
-- 镜像 Latest 所指版本与最近 3 个稳定版本的 exe、msi，公告保留最近 30 个版本。
-- 每个安装包按 GitHub 给的 sha256 校验后才落盘；全部就绪才原子替换 `releases.json` 与 `latest.json`，任一失败整轮放弃、保留上一轮数据。
-- `latest.json` 里的下载地址改写为镜像地址。签名只覆盖安装包内容，改写不影响更新器校验。
-- 安装包经 gh-proxy 下载，失败、超时或校验不过时回落直连 GitHub。服务器实测经代理三个版本 46 MB 共 9 秒，直连约 20 KB/s。第三方代理的可信度由 sha256 兜底，被改过的内容不会落盘。代理前缀用 `MIRROR_DOWNLOAD_PROXY` 覆盖，设为空只直连。API 请求始终直连。
+发版后产品页自动跟上，不用重发站点。两条链路都读不到时页面退回「前往 GitHub 发布页」。应用内更新器走的是同一套加速策略，但端点是 GitHub Releases 的 `latest.json`，与本页无关，见主仓 skill 的 `updater.md`。
 
 ## 分享下载链接
 
-`https://app.xwink.fun/flair-bloom/download` 打开即开始下载 Latest 的 exe，加 `?type=msi` 下载 MSI。页面在浏览器里读镜像清单再跳转，新版本同步进镜像后链接自动指向它，不用改地址也不用重发站点。
+`https://app.xwink.fun/flair-bloom/download` 打开即开始下载最新版的 exe，加 `?type=msi` 下载 MSI。地址固定，指向哪个版本由页面当场从 GitHub 读出来。
 
 ## 打印海报与说明书
 
@@ -41,15 +36,13 @@ cd apps/site
 # 私有制品库凭据写用户级 ~/.npmrc（pnpm 11 不展开项目级 .npmrc 里的环境变量）
 pnpm config set --location=user //npm.cnb.cool/x-wink/playground/npm/-/packages/:_authToken <令牌>
 pnpm install
-pnpm mirror:dev   # 把真实发布数据同步到 .mirror，开发服务按线上路径提供
 pnpm dev          # http://localhost:3900/flair-bloom/
-pnpm test         # 镜像脚本单测
 pnpm typecheck && pnpm build
 ```
 
 ## 发布
 
-推 `site-v<semver>` tag 触发 `.github/workflows/site.yml`：单测、类型检查、构建、上传、原子切换版本、验收。产品页发版不经 Tauri updater，不触达应用用户。回滚在服务器上把 `/opt/flair-bloom/www/flair-bloom` 指回 `/opt/flair-bloom/site/previous` 所指目录。
+推 `site-v<semver>` tag 触发 `.github/workflows/site.yml`：类型检查、构建、上传、原子切换版本、验收。产品页发版不经 Tauri updater，不触达应用用户。回滚在服务器上把 `/opt/flair-bloom/www/flair-bloom` 指回 `/opt/flair-bloom/site/previous` 所指目录。
 
 ## 服务器开通（一次性，需要 root）
 
@@ -59,21 +52,21 @@ pnpm typecheck && pnpm build
 
    ```sh
    useradd --system --create-home --shell /bin/bash flair-bloom
-   install -d -o flair-bloom -g flair-bloom /opt/flair-bloom /opt/flair-bloom/mirror
+   install -d -o flair-bloom -g flair-bloom /opt/flair-bloom
    # 把 CI 部署公钥写进 /home/flair-bloom/.ssh/authorized_keys
    ```
 
-2. 守护式下发 nginx 片段与 systemd 单元。它们几乎不变，不交给 CI：能改它们的密钥就等同 root。
+2. 守护式下发 nginx 片段。它几乎不变，不交给 CI：能改它的密钥就等同 root。
 
    ```sh
    winkops edit /etc/nginx/vhost.d/app.xwink.fun/flair-bloom.conf --file apps/site/deploy/flair-bloom.conf \
      --validate 'nginx -t' --reload 'systemctl reload nginx' -c <连接配置>
-   # 两个单元文件复制到 /etc/systemd/system/ 后：
-   systemctl daemon-reload && systemctl enable --now flair-bloom-mirror.timer
    ```
 
 3. GitHub 配置 secrets，分两级：
    - `production` 环境，部署来源只允许 `site-v*` tag：`SITE_DEPLOY_HOST`、`SITE_DEPLOY_PORT`、`SITE_DEPLOY_USER`（`flair-bloom`）、`SITE_DEPLOY_SSH_KEY`。私钥只存在这里，公钥在服务器 `authorized_keys`，本地不留副本。
    - 仓库级：`XWINK_NPM_TOKEN`，私有制品库只读令牌。构建任务不绑定环境，放进环境就读不到。
 
-4. 推第一个 `site-v*` tag。首次部署后镜像定时器会在两分钟内开始首轮同步。
+4. 推第一个 `site-v*` tag。
+
+已经跑过发布镜像的机器还要收尾一次：`systemctl disable --now flair-bloom-mirror.timer flair-bloom-mirror.service`，删掉 `/etc/systemd/system/flair-bloom-mirror.*` 与 `/opt/flair-bloom/mirror`、`/opt/flair-bloom/mirror-app`。

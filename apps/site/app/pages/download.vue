@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { MirroredAsset } from '~/composables/useReleases';
+import type { InstallerKind, ReleaseAsset } from '~/composables/useReleases';
 
 useHead({ title: '下载气质花按键助手 FlairBloom' });
 
@@ -7,7 +7,7 @@ const route = useRoute();
 const { latest, status } = useReleases();
 
 // 默认发 exe；分享 ?type=msi 给需要走组策略或静默安装的人
-const kind = computed<MirroredAsset['kind']>(() => (route.query.type === 'msi' ? 'msi' : 'nsis'));
+const kind = computed<InstallerKind>(() => (route.query.type === 'msi' ? 'msi' : 'nsis'));
 const asset = computed(() => latest.value?.assets.find((item) => item.kind === kind.value));
 const other = computed(() => latest.value?.assets.find((item) => item.kind !== kind.value));
 const unavailable = computed(
@@ -28,7 +28,7 @@ watch(
   { immediate: true },
 );
 
-function label(item: MirroredAsset): string {
+function label(item: ReleaseAsset): string {
   return item.kind === 'msi' ? 'MSI 安装包' : 'EXE 安装包';
 }
 </script>

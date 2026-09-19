@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useTheme } from '@xwink/ui';
 
-const { manifest, latest, status } = useReleases();
+const { releases, latest, status } = useReleases();
 const { isDark, preference: themePreference, toggle: toggleTheme } = useTheme();
 
 const themeModes = [
@@ -324,7 +324,7 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
         <XReveal>
           <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">更新公告</h2>
         </XReveal>
-        <p v-if="!manifest && !unavailable" class="mt-6 text-sm text-(--ui-fg-muted)">正在读取…</p>
+        <p v-if="!releases.length && !unavailable" class="mt-6 text-sm text-(--ui-fg-muted)">正在读取…</p>
         <p v-else-if="unavailable" class="mt-6 text-sm text-(--ui-fg-muted)">
           暂时读不到更新公告，可以到
           <a
@@ -337,7 +337,7 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
         </p>
         <div v-else class="mt-6 space-y-3">
           <details
-            v-for="(release, index) in manifest?.releases"
+            v-for="(release, index) in releases"
             :key="release.tag"
             :open="index === 0"
             class="group rounded-(--ui-radius) border border-(--ui-primary)/30 bg-(--ui-primary)/5 transition-colors open:border-(--ui-primary)/60 hover:border-(--ui-primary)/60"
@@ -350,7 +350,7 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
                 class="size-4 text-(--ui-fg-muted) transition-transform group-open:rotate-90"
               />
               <span class="font-semibold text-(--ui-fg-strong)">{{ release.tag }}</span>
-              <XBadge v-if="release.tag === manifest?.latest" tone="primary">最新</XBadge>
+              <XBadge v-if="release.tag === latest?.tag" tone="primary">最新</XBadge>
               <span class="ms-auto text-xs text-(--ui-fg-muted)">{{
                 formatDate(release.publishedAt)
               }}</span>

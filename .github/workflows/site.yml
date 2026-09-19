@@ -24,16 +24,6 @@ defaults:
     working-directory: apps/site
 
 jobs:
-  mirror:
-    name: 镜像同步脚本单测
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-      - run: node --test mirror/*.test.ts
-
   build:
     name: 类型检查与静态构建
     runs-on: ubuntu-latest
@@ -68,7 +58,7 @@ jobs:
 
   deploy:
     name: 部署到 app.xwink.fun
-    needs: [mirror, build]
+    needs: [build]
     if: startsWith(github.ref, 'refs/tags/site-v')
     runs-on: ubuntu-latest
     environment: production
@@ -98,7 +88,7 @@ jobs:
           ROOT=/opt/flair-bloom
           NEXT_DIR="${ROOT}/site/releases/${VERSION}.new"
 
-          tar czf - deploy mirror | ${SSH} "${DEPLOY_USER}@${DEPLOY_HOST}" \
+          tar czf - deploy | ${SSH} "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "rm -rf '${ROOT}/upload' && mkdir -p '${ROOT}/upload' && tar xzf - -C '${ROOT}/upload'"
           ${SSH} "${DEPLOY_USER}@${DEPLOY_HOST}" "rm -rf '${NEXT_DIR}' && mkdir -p '${NEXT_DIR}'"
           tar czf - -C .output/public . | ${SSH} "${DEPLOY_USER}@${DEPLOY_HOST}" "tar xzf - -C '${NEXT_DIR}'"
@@ -114,6 +104,3 @@ jobs:
             [ "${CODE}" = "200" ] || { echo "${URL} → ${CODE}" >&2; exit 1; }
             echo "${URL} → 200"
           done
-          # 镜像由服务器定时器维护，首次部署时定时器可能还没跑第一轮；这里只提示不拦截
-          CODE="$(curl -s -o /dev/null -w '%{http_code}' https://app.xwink.fun/flair-bloom/releases/releases.json || true)"
-          [ "${CODE}" = "200" ] || echo "::warning::发布镜像清单暂不可用（${CODE}），确认 flair-bloom-mirror.timer 已启用"
