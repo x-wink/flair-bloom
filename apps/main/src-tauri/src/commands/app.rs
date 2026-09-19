@@ -6,7 +6,7 @@ use tracing::{info, warn};
 
 use crate::bootstrap::{
     agreement::AGREEMENT_VERSION,
-    update::{build_updater, check_and_download, CheckTrigger, UpdateLock},
+    update::{check_and_download, check_with_fallback, CheckTrigger, UpdateLock},
 };
 use crate::commands::engine::EngineState;
 
@@ -28,7 +28,7 @@ pub fn needs_agreement(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn agree_license(app: AppHandle) -> Result<(), String> {
+pub fn agree_license(app: AppHandle, engine: State<EngineState>) -> Result<(), String> {
     let store = app
         .store(crate::STORE_PATH)
         .map_err(|e| format!("无法读取存储: {e}"))?;
@@ -40,6 +40,8 @@ pub fn agree_license(app: AppHandle) -> Result<(), String> {
         serde_json::json!(env!("CARGO_PKG_VERSION")),
     );
     store.save().map_err(|e| format!("保存协议状态失败: {e}"))?;
+    // 启动时因协议未同意而搁置的「启动后自动开全局」，同意之后就该生效——否则用户得再重启一次
+    crate::bootstrap::startup::apply_auto_enable_on_start(&app, &engine.0, false);
     Ok(())
 }
 
@@ -61,21 +63,22 @@ pub fn exit_app(app: AppHandle, engine: State<EngineState>) {
     app.exit(0);
 }
 
+/// 开机自启开关。取设定值而不是取反：界面上三个启动开关互斥，关掉另一个时必须能明确地
+/// 置为 false——取反会在连点里把刚关掉的那个又打开。返回落定后的真实状态。
 #[tauri::command]
-pub fn toggle_autostart(app: AppHandle) -> Result<bool, String> {
+pub fn set_autostart(app: AppHandle, enabled: bool) -> Result<bool, String> {
     use tauri_plugin_autostart::ManagerExt;
     let launch = app.autolaunch();
-    let enabled = launch.is_enabled().unwrap_or(false);
     if enabled {
-        launch
-            .disable()
-            .map_err(|e| format!("禁用开机自启失败: {e}"))?;
-    } else {
         launch
             .enable()
             .map_err(|e| format!("启用开机自启失败: {e}"))?;
+    } else {
+        launch
+            .disable()
+            .map_err(|e| format!("禁用开机自启失败: {e}"))?;
     }
-    Ok(launch.is_enabled().unwrap_or(!enabled))
+    Ok(launch.is_enabled().unwrap_or(enabled))
 }
 
 /// 「以管理员模式启动」开关：给当前 exe 打上 / 去掉兼容性标志。
@@ -84,15 +87,32 @@ pub fn toggle_autostart(app: AppHandle) -> Result<bool, String> {
 /// 与开机自启的互斥由前端保证：`HKCU\Run` 拉起需要提权的程序会被系统直接拦下，
 /// 两个都开等于开机根本不启动，而且没有任何提示。
 /// 取设定值而不是取反：互斥时前端要能明确地把它关掉。
+///
+/// 注册表是生效的那一份，settings.json 只记用户意图，供 `bootstrap::startup::apply_run_as_admin`
+/// 在标志被更新抹掉后自愈；意图写失败不算切换失败，标志本身已经生效了。
 #[tauri::command]
-pub fn set_run_as_admin(enabled: bool) -> Result<(), String> {
+pub fn set_run_as_admin(app: AppHandle, enabled: bool) -> Result<(), String> {
     let exe = current_exe_path()?;
     win_sysinfo::run_as_admin::set_enabled(&exe, enabled)?;
+    if let Err(e) = remember_run_as_admin(&app, enabled) {
+        warn!("记录管理员启动意图失败: {e}");
+    }
     info!(
         "以管理员模式启动：{}",
         if enabled { "已开启" } else { "已关闭" }
     );
     Ok(())
+}
+
+fn remember_run_as_admin(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    let store = app
+        .store(crate::STORE_PATH)
+        .map_err(|e| format!("无法读取存储: {e}"))?;
+    store.set(
+        crate::bootstrap::startup::RUN_AS_ADMIN_KEY,
+        serde_json::json!(enabled),
+    );
+    store.save().map_err(|e| format!("{e}"))
 }
 
 /// 当前 exe 路径。注册表里的值名要与资源管理器写入的一致，verbatim 前缀必须去掉。
@@ -176,15 +196,7 @@ pub async fn try_apply_pending_update(app: &AppHandle) -> bool {
         }
     };
 
-    let updater = match build_updater(app) {
-        Ok(u) => u,
-        Err(e) => {
-            warn!("更新模块不可用: {}", e);
-            return false;
-        }
-    };
-
-    let update = match updater.check().await {
+    let update = match check_with_fallback(app).await {
         Ok(Some(u)) if u.version == saved_version => u,
         Ok(Some(u)) => {
             info!(

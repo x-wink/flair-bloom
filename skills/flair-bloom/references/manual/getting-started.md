@@ -1,6 +1,6 @@
 # 上手三步
 
-对应应用内教程 `getting-started`（`apps/main/src/windows/panel/tour/tours/getting-started.ts`）。目标：安装后五分钟内配好并跑起第一条规则。首次启动、配置里一条规则都没有时自动进入这一组。
+对应应用内教程 `getting-started`（`apps/main/src/windows/panel/tour/tours/getting-started.ts`）。目标：安装后五分钟内配好并跑起第一条规则。教程版本与上次自动展示过的对不上时（新装用户、或教程内容更新后）在启动时自动进入这一组，跑完或中途退出都记下版本，不会反复打扰。
 
 ## 解决什么
 

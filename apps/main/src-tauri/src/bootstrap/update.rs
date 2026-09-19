@@ -91,8 +91,7 @@ pub async fn check_and_download(
     app: &tauri::AppHandle,
     trigger: CheckTrigger,
 ) -> Result<(), String> {
-    let updater = build_updater(app).map_err(|e| format!("更新模块不可用: {e}"))?;
-    let mut update = match updater.check().await {
+    let mut update = match check_with_fallback(app).await {
         Ok(Some(u)) => u,
         Ok(None) => {
             info!("已是最新版本");
@@ -188,10 +187,61 @@ pub fn save_pending_update(
     Ok(())
 }
 
-/// 端点顺序就是兜底顺序：`tauri.conf.json` 里第一条是代理后的清单地址、第二条是 GitHub
-/// 原始地址，updater 会按序试到第一条读通为止，这里不再改写它们。
-pub fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
-    app.updater_builder().build().map_err(|e| format!("{e}"))
+/// 逐个端点检查更新，第一个读通的说了算；全失败才返回错误。
+///
+/// 不把两条端点一起丢给插件自己轮：它在「HTTP 200 但响应体不是 JSON」时是
+/// `res.json().await?`，直接从 check 返回、不会 continue 到下一条（tauri-plugin-updater
+/// 的 check 循环）。而代理限流最常见的形态恰恰是 200 加一张 HTML 错误页，那样第二条
+/// 直连端点永远轮不上。一个端点一个 updater，任何失败形态都能落到下一条。
+pub async fn check_with_fallback(
+    app: &tauri::AppHandle,
+) -> Result<Option<tauri_plugin_updater::Update>, String> {
+    let mut last_error = None;
+    for endpoint in configured_update_endpoints(app)? {
+        let updater = match build_updater_for(app, endpoint.clone()) {
+            Ok(updater) => updater,
+            Err(e) => {
+                last_error = Some(e);
+                continue;
+            }
+        };
+        match updater.check().await {
+            Ok(update) => return Ok(update),
+            Err(e) => {
+                warn!("更新端点 {} 不可用: {}", endpoint, e);
+                last_error = Some(format!("{e}"));
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| "没有可用的更新端点".to_string()))
+}
+
+fn build_updater_for(
+    app: &tauri::AppHandle,
+    endpoint: tauri::Url,
+) -> Result<tauri_plugin_updater::Updater, String> {
+    app.updater_builder()
+        .endpoints(vec![endpoint])
+        .map_err(|e| format!("{e}"))?
+        .build()
+        .map_err(|e| format!("{e}"))
+}
+
+/// `tauri.conf.json` 里的端点顺序就是兜底顺序：第一条代理后的清单地址、第二条 GitHub 原始地址。
+fn configured_update_endpoints(app: &tauri::AppHandle) -> Result<Vec<tauri::Url>, String> {
+    let config = app.config();
+    let endpoints = config
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|updater| updater.get("endpoints"))
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "缺少 updater.endpoints 配置".to_string())?;
+    endpoints
+        .iter()
+        .filter_map(|endpoint| endpoint.as_str())
+        .map(|url| tauri::Url::parse(url).map_err(|e| format!("无效的更新地址: {e}")))
+        .collect()
 }
 
 pub async fn download_update(
@@ -375,8 +425,8 @@ mod tests {
         assert_eq!(proxy_github_url(&url, "https://gh-proxy.com/"), url);
     }
 
-    /// 两条端点必须是同一份清单的「代理版 + 原始版」：少了第二条，代理挂掉就没有兜底；
-    /// 两条指向不同清单则会出现版本漂移。
+    /// `check_with_fallback` 按配置顺序逐条试，所以两条端点必须是同一份清单的
+    /// 「代理版 + 原始版」：少了第二条，代理挂掉就没有兜底；两条指向不同清单会出现版本漂移。
     #[test]
     fn configured_endpoints_are_proxy_then_direct() {
         let config: serde_json::Value =

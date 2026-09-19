@@ -92,7 +92,7 @@
 
 | 主题             | 学什么                                                                | 说明书                                                                     |
 | ---------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| 上手三步         | 添加第一条规则、录键、打开总开关（首次启动自动进入）                  | [getting-started](skills/flair-bloom/references/manual/getting-started.md) |
+| 上手三步         | 添加第一条规则、录键、打开总开关（首次启动、教程更新后自动进入）      | [getting-started](skills/flair-bloom/references/manual/getting-started.md) |
 | 游戏模式与驱动   | 为什么游戏里要装驱动、怎么装、装不上怎么办                            | [game-mode](skills/flair-bloom/references/manual/game-mode.md)             |
 | 规则玩法         | 按压 / 切换连发、"开始键"和"被连的键"分开、多段宏互斥分组、⚠ 冲突提醒 | [rules](skills/flair-bloom/references/manual/rules.md)                     |
 | 横版键鼠图与浮窗 | 在键盘 / 鼠标示意图上点键设连发，收进右下角常驻悬浮条                 | [layouts](skills/flair-bloom/references/manual/layouts.md)                 |

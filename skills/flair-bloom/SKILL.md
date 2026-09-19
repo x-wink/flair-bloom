@@ -25,7 +25,7 @@ description: 气质花（FlairBloom）按键助手的项目文档单一来源：
 
 | id                | 篇                                                | 内容                                             |
 | ----------------- | ------------------------------------------------- | ------------------------------------------------ |
-| `getting-started` | [上手三步](references/manual/getting-started.md)  | 添加第一条规则、录键、打开总开关（首启自动进入） |
+| `getting-started` | [上手三步](references/manual/getting-started.md)  | 添加第一条规则、录键、打开总开关（按教程版本自动进入） |
 | `game-mode`       | [游戏模式与驱动](references/manual/game-mode.md)  | 为什么游戏里要装驱动、怎么装、装完做什么         |
 | `rules`           | [规则玩法](references/manual/rules.md)            | 按压 / 切换连发、高级设置、互斥分组、冲突提醒    |
 | `layouts`         | [横版键鼠图与浮窗](references/manual/layouts.md)  | 横版点键三态、图例、统一间隔、收进浮窗           |

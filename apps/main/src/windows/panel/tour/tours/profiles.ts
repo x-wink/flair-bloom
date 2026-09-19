@@ -43,6 +43,8 @@ export const profiles: TourDef = {
     {
       id: 'finish',
       title: '分享给朋友',
+      // 教程是自己开的设置弹窗，走完顺手收掉，别把它留在屏幕上
+      prepare: (host) => host.closeSettings(),
       body: p(
         '导出的 .qzh 发给朋友，对方点「导入配置」选中就能用。',
         '文件是加密的，别的软件打不开。全局热键也存在配置里，换配置会跟着一起换。',

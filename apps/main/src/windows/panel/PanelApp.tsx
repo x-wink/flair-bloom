@@ -357,9 +357,11 @@ export default function PanelApp() {
   const [showAbout, setShowAbout] = useState(false);
   const [showTourCatalog, setShowTourCatalog] = useState(false);
   const [activeTour, setActiveTour] = useState<TourDef | undefined>(undefined);
-  // 首启判定只准跑一次：教程里新建规则会让下面那个 effect 因 rules 变化重跑，
-  // 而 introShown 要等教程走完才落盘，没有这道闸就会二次触发。
+  // 首启判定只准跑一次：版本位要等教程走完（或退出）才落盘，期间 effect 会因其它依赖重跑，
+  // 没有这道闸就会二次触发。
   const firstRunHandled = useRef(false);
+  // 连发按键录入计数，教程实操判定用（见 TourSnapshot.keyCaptureSeq）
+  const [keyCaptureSeq, setKeyCaptureSeq] = useState(0);
   const tourProgress = useTourProgress(settingsStore);
   // 启动期两条可能弹确认框的链，各自结束（含用户点掉弹窗）时置位；没弹的也会立即置位。
   const [noticeSettled, setNoticeSettled] = useState(false);
@@ -644,12 +646,12 @@ export default function PanelApp() {
       .catch(() => {});
   }, []);
 
-  // 首启引导（D8）：没有任何规则的才算新用户，老用户升级只静默置位。
-  // 自动开的那一组由 handleTourExit 负责置 introShown，否则中途退出就再也不会弹。
+  // 首启引导（D8）：按 TOUR_INTRO_VERSION 判定，与用户协议同一套语义——存的版本对不上就自动跑
+  // 一遍「上手三步」。自动开的那一组由 handleTourExit 负责记版本，否则中途退出就再也不会弹。
   // 就绪门只挡这条自动触发：菜单入口不挡，启动头两秒点了没反应比气泡晚两秒更费解，
   // 手动开的教程遇到确认框由 paused 让路即可。
   useEffect(() => {
-    if (!tourProgress.loaded || tourProgress.introShown || firstRunHandled.current) return;
+    if (!tourProgress.loaded || tourProgress.introSeen || firstRunHandled.current) return;
     if (!initialLoadDone.current || showAgreement) return;
     if (!noticeSettled || !startupModeSettled) return;
     // 启动期的自动更新检查是后台跑的，update-ready 可能在任何时刻弹。它开着时不能 startTour，
@@ -658,13 +660,12 @@ export default function PanelApp() {
     if (updateNotice !== null || applyingUpdate) return;
     firstRunHandled.current = true;
     const intro = findTour('getting-started');
-    if (rules.length === 0 && intro) startTour(intro);
-    else tourProgress.markIntroShown().catch(() => {});
-    // startTour / markIntroShown 同样是渲染期新建的函数，纳入依赖会让 effect 每次渲染重跑
+    if (intro) startTour(intro);
+    else tourProgress.markIntroSeen().catch(() => {});
+    // startTour / markIntroSeen 同样是渲染期新建的函数，纳入依赖会让 effect 每次渲染重跑
   }, [
     tourProgress.loaded,
-    tourProgress.introShown,
-    rules,
+    tourProgress.introSeen,
     showAgreement,
     noticeSettled,
     startupModeSettled,
@@ -1269,40 +1270,55 @@ export default function PanelApp() {
     persistTheme({ color });
   }
 
-  /** 写 settings.json 并回写本地状态；失败时回滚，让界面永远等于盘上的值。 */
+  // ── 三个启动开关：两两互斥，且都取「置值」而不是「取反」──
+  // 取反 + 可能过期的 React 状态，在连点里会把刚关掉的那个又打开。置值最坏是重复设同一个值。
+  // 互斥的第二步各自 try：它失败不能报成第一步失败，那时第一步其实已经生效了。
+
+  /** 写 settings.json 并回写本地状态；失败时回滚并抛出，由调用方决定要不要继续互斥处理。 */
   async function persistAutoEnableOnStart(next: boolean) {
     const previous = autoEnableOnStart;
     setAutoEnableOnStart(next);
     try {
       await settingsStore.set(AUTO_ENABLE_ON_START_KEY, next);
       await settingsStore.save();
-    } catch {
+    } catch (e) {
       setAutoEnableOnStart(previous);
-      toast.warning('保存「启动后自动开全局」失败');
+      throw e;
     }
   }
 
-  async function disableAutostart() {
-    const next = await invoke<boolean>('toggle_autostart');
-    setSysInfo((prev) => ({ ...prev, autostart_enabled: next }));
+  /** 返回落定后的真实状态：写注册表可能被策略拦下，界面要跟实际走。 */
+  async function applyAutostart(next: boolean) {
+    const actual = await invoke<boolean>('set_autostart', { enabled: next });
+    setSysInfo((prev) => ({ ...prev, autostart_enabled: actual }));
+    return actual;
+  }
+
+  async function applyRunAsAdmin(next: boolean) {
+    await invoke('set_run_as_admin', { enabled: next });
+    setSysInfo((prev) => ({ ...prev, run_as_admin: next }));
   }
 
   async function handleToggleAutostart() {
     if (togglingAutostart) return;
     setTogglingAutostart(true);
     try {
-      const next = await invoke<boolean>('toggle_autostart');
-      setSysInfo((prev) => ({ ...prev, autostart_enabled: next }));
-      if (!next) return;
-      // 开机自启与另外两个启动开关互斥，理由见各自的 toast
+      if (!(await applyAutostart(!sysInfo.autostart_enabled))) return;
       if (autoEnableOnStart) {
-        await persistAutoEnableOnStart(false);
-        toast.info('已关闭「启动后自动开全局」：开机就在后台连发容易误触发');
+        try {
+          await persistAutoEnableOnStart(false);
+          toast.info('已关闭「启动后自动开全局」：开机就在后台连发容易误触发');
+        } catch {
+          toast.warning('「启动后自动开全局」没能关掉，开机可能直接开始连发');
+        }
       }
       if (sysInfo.run_as_admin) {
-        await invoke('set_run_as_admin', { enabled: false });
-        setSysInfo((prev) => ({ ...prev, run_as_admin: false }));
-        toast.info('已关闭「以管理员模式启动」：开机自启拉不起需要提权的程序');
+        try {
+          await applyRunAsAdmin(false);
+          toast.info('已关闭「以管理员模式启动」：开机自启拉不起需要提权的程序');
+        } catch {
+          toast.warning('「以管理员模式启动」没能关掉，开机自启可能拉不起应用');
+        }
       }
     } catch {
       toast.error('切换开机自启失败');
@@ -1312,10 +1328,16 @@ export default function PanelApp() {
   }
 
   async function handleToggleAutoEnableOnStart(next: boolean) {
-    await persistAutoEnableOnStart(next);
+    try {
+      await persistAutoEnableOnStart(next);
+    } catch {
+      // 设置都没存上，不能顺手把用户的开机自启关掉
+      toast.warning('保存「启动后自动开全局」失败');
+      return;
+    }
     if (!next || !sysInfo.autostart_enabled) return;
     try {
-      await disableAutostart();
+      await applyAutostart(false);
       toast.info('已关闭「开机自启」：开机就在后台连发容易误触发');
     } catch {
       toast.error('关闭开机自启失败');
@@ -1327,11 +1349,14 @@ export default function PanelApp() {
     const next = !sysInfo.run_as_admin;
     setTogglingRunAsAdmin(true);
     try {
-      await invoke('set_run_as_admin', { enabled: next });
-      setSysInfo((prev) => ({ ...prev, run_as_admin: next }));
+      await applyRunAsAdmin(next);
       if (!next || !sysInfo.autostart_enabled) return;
-      await disableAutostart();
-      toast.info('已关闭「开机自启」：开机自启拉不起需要提权的程序');
+      try {
+        await applyAutostart(false);
+        toast.info('已关闭「开机自启」：开机自启拉不起需要提权的程序');
+      } catch {
+        toast.warning('开机自启没能关掉，它和管理员模式同时开着会导致开机起不来');
+      }
     } catch (e) {
       toast.error(`切换管理员模式失败：${e}`);
     } finally {
@@ -1973,6 +1998,7 @@ export default function PanelApp() {
       inputMode,
       layout,
       activeTab,
+      keyCaptureSeq,
       settingsOpen: showSettings,
       settingsTab,
       coincidentToggle: keyPolicies.coincident_toggle,
@@ -1983,6 +2009,7 @@ export default function PanelApp() {
       inputMode,
       layout,
       activeTab,
+      keyCaptureSeq,
       showSettings,
       settingsTab,
       keyPolicies.coincident_toggle,
@@ -2022,7 +2049,7 @@ export default function PanelApp() {
         tourProgress.markCompleted(tour.id).catch(() => toast.warning('保存教程进度失败'));
       }
     }
-    tourProgress.markIntroShown().catch(() => {});
+    tourProgress.markIntroSeen().catch(() => {});
     setActiveTour(undefined);
   }
 
@@ -2346,6 +2373,7 @@ export default function PanelApp() {
                                     const patch: Partial<BurstRule> = { target_key: vk };
                                     if (!showAdvanced) patch.trigger_key = vk;
                                     updateRule(rule.id, patch);
+                                    setKeyCaptureSeq((n) => n + 1);
                                   }}
                                   conflict={
                                     !showAdvanced ? severityForRule(conflicts, rule.id) : null
@@ -2495,7 +2523,11 @@ export default function PanelApp() {
                           onReject={notifyRuleKeyReject}
                           policy={keyPolicies.target}
                           value={rule.target_key}
-                          onChange={(vk) => vk && updateRule(rule.id, { target_key: vk })}
+                          onChange={(vk) => {
+                            if (!vk) return;
+                            updateRule(rule.id, { target_key: vk });
+                            setKeyCaptureSeq((n) => n + 1);
+                          }}
                           conflict={severityForRule(conflicts, rule.id)}
                         />
                       </div>

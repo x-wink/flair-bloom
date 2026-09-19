@@ -17,13 +17,13 @@ use bootstrap::{
     input::{init_input_backend, wait_for_predecessor_exit},
     logging,
     profile::load_or_init_profile,
-    startup::apply_auto_enable_on_start,
+    startup::{apply_auto_enable_on_start, apply_run_as_admin},
     update::{check_for_updates, UpdateLock},
 };
 use commands::{
     app::{
         agree_license, apply_pending_update, check_update, exit_app, minimize_to_float,
-        needs_agreement, set_run_as_admin, show_main_panel, toggle_autostart,
+        needs_agreement, set_autostart, set_run_as_admin, show_main_panel,
     },
     ddhid_diagnostic::export_dd_hid_diagnostic_report,
     driver::{
@@ -180,7 +180,7 @@ pub fn run() {
             exit_app,
             show_main_panel,
             minimize_to_float,
-            toggle_autostart,
+            set_autostart,
             set_run_as_admin,
             log_from_frontend,
             open_app_dir,
@@ -238,7 +238,8 @@ pub fn run() {
             load_or_init_profile(app.handle(), &burst_engine);
             init_input_backend(app.handle());
             // 托盘菜单与图标按全局开关的当前值构建，自动开全局必须排在建托盘之前
-            apply_auto_enable_on_start(app.handle(), &burst_engine);
+            apply_auto_enable_on_start(app.handle(), &burst_engine, need_agreement);
+            apply_run_as_admin(app.handle());
             tray::setup_tray(app.handle(), engine_for_tray)?;
 
             if let Some(panel) = app.get_webview_window("panel") {

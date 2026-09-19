@@ -1,4 +1,3 @@
-import { keyEq } from '../../components/KeyCapture';
 import type { TourDef } from '../types';
 import { lastRule, p } from './helpers';
 
@@ -41,11 +40,9 @@ export const gettingStarted: TourDef = {
       ),
       // 上一步「添加规则」被跳过且列表仍为空：这一步和下一步没有卡可指，直接跳过
       prepare: (host) => (host.snapshot.rules.length === 0 ? 'skip' : undefined),
-      done: (now, entered) => {
-        const current = lastRule(now);
-        const before = lastRule(entered);
-        return !!current && (!before || !keyEq(current.target_key, before.target_key));
-      },
+      // 按「录入过一次」判定而不是比较键值：新规则的连发按键默认就是 Q，
+      // 照提示按 Q 的用户键值不变，会卡在这一步出不去。
+      done: (now, entered) => now.keyCaptureSeq > entered.keyCaptureSeq,
       actionHint: '等你按一个键…',
     },
     {

@@ -73,6 +73,8 @@ export const settings: TourDef = {
       id: 'finish',
       title: '热键跟着配置走',
       body: p('全局热键存在当前配置里，换一套配置热键也会跟着换。'),
+      // 教程是自己开的设置弹窗，走完顺手收掉，别把它留在屏幕上
+      prepare: (host) => host.closeSettings(),
     },
   ],
 };

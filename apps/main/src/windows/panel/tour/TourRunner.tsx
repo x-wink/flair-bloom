@@ -154,7 +154,10 @@ export default function TourRunner({ tour, host, paused = false, onExit }: Props
       const result = await step.prepare?.(hostRef.current);
       if (cancelled) return;
       if (result === 'skip') {
-        go(directionRef.current);
+        // 第 0 步往回退没有去处：go(-1) 既不换步也不退出，整层会停在 preparing 只剩 Esc 能救。
+        // 这种情况改向前找下一个能展示的步骤。
+        const back = indexRef.current === 0 && directionRef.current === -1;
+        go(back ? 1 : directionRef.current);
         return;
       }
       enteredRef.current = hostRef.current.snapshot;

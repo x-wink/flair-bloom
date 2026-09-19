@@ -2,6 +2,15 @@ import type { ReactNode } from 'react';
 import type { KeyId } from '../components/KeyCapture';
 import type { Location } from '../components/Overlay';
 
+/**
+ * 首启教程的内容版本，与用户协议的 `AGREEMENT_VERSION` 同一套语义：存进 settings.json 的
+ * `tours.introVersion`，对不上就在下次启动自动跑一遍「上手三步」，跑过（或中途退出）记回当前值。
+ *
+ * 教程内容有实质改动时 bump 它，老用户会再看一次。不按「有没有规则」判新老用户——
+ * 新装配置自带两条未启用的出厂规则，那个口径对新用户永远为假。
+ */
+export const TOUR_INTRO_VERSION = '1';
+
 /** 教程只关心规则的这几个字段；与 PanelApp 的 BurstRule 结构兼容，不反向依赖它。 */
 export interface TourRule {
   id: string;
@@ -19,6 +28,11 @@ export interface TourSnapshot {
   inputMode: 'sendinput' | 'interception' | 'ddsimple';
   layout: 'vertical' | 'horizontal';
   activeTab: 'hold' | 'toggle';
+  /**
+   * 每成功录入一次「连发按键」+1。实操判定用它而不是比较键值：新建规则的连发按键默认
+   * 就是 Q，用户照着提示按 Q 时键值不变，比较键值会让人永远停在「等你按一个键…」。
+   */
+  keyCaptureSeq: number;
   settingsOpen: boolean;
   settingsTab: 'general' | 'hotkeys' | 'sound' | 'profiles';
   /** 后端能力位：为 false（DD 系列）时横版键鼠图不可用。 */
