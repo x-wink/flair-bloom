@@ -73,6 +73,9 @@ interface Props {
   ddHidInstalled: DriverStatus;
   autostartEnabled: boolean;
   togglingAutostart: boolean;
+  autoEnableOnStart: boolean;
+  runAsAdmin: boolean;
+  togglingRunAsAdmin: boolean;
   autoUpdate: boolean;
   sound: SoundSettings;
   availableVoices: string[];
@@ -98,6 +101,8 @@ interface Props {
     panel_toggle?: KeyId | null;
   }) => void;
   onToggleAutostart: () => void;
+  onToggleAutoEnableOnStart: (next: boolean) => void;
+  onToggleRunAsAdmin: () => void;
   onToggleAutoUpdate: (next: boolean) => void;
   onSoundChange: (patch: Partial<SoundSettings>) => void;
   onPreviewSound: (slot: SoundSlot) => void;
@@ -475,6 +480,23 @@ export default function SettingsDialog(props: Props) {
               </div>
               <div className="settings-row">
                 <div className="settings-row-main">
+                  <span className="settings-row-title">启动后自动开全局</span>
+                  <span className="settings-row-desc">
+                    {props.autoEnableOnStart
+                      ? '打开应用即开始连发，与开机自启互斥'
+                      : '打开应用后仍需手动开全局'}
+                  </span>
+                </div>
+                <input
+                  type="checkbox"
+                  className="enable-checkbox"
+                  checked={props.autoEnableOnStart}
+                  onChange={(e) => props.onToggleAutoEnableOnStart(e.target.checked)}
+                  aria-label="启动后自动开全局"
+                />
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-main">
                   <span className="settings-row-title">开机自启</span>
                   <span className="settings-row-desc">
                     {props.autostartEnabled ? '登录后自动启动' : '不自动启动'}
@@ -487,6 +509,24 @@ export default function SettingsDialog(props: Props) {
                   onClick={props.onToggleAutostart}
                 >
                   {props.autostartEnabled ? '已启用' : '已禁用'}
+                </Button>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-main">
+                  <span className="settings-row-title">以管理员模式启动</span>
+                  <span className="settings-row-desc">
+                    {props.runAsAdmin
+                      ? '下次启动自动请求管理员权限，游戏模式不用再提权重启'
+                      : '普通权限启动，游戏模式需要时再提权重启'}
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  tone={props.runAsAdmin ? 'primary' : 'neutral'}
+                  loading={props.togglingRunAsAdmin}
+                  onClick={props.onToggleRunAsAdmin}
+                >
+                  {props.runAsAdmin ? '已启用' : '已禁用'}
                 </Button>
               </div>
               <div className="settings-row">

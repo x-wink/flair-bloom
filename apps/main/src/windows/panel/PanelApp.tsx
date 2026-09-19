@@ -94,6 +94,8 @@ const THEME_KEY = 'theme';
 const LAYOUT_KEY = 'layout';
 // 与后端 bootstrap/update.rs 的 AUTO_UPDATE_KEY 同名，双方读同一份 settings.json
 const AUTO_UPDATE_KEY = 'autoUpdate';
+// 与后端 bootstrap/startup.rs 的 AUTO_ENABLE_ON_START_KEY 同名
+const AUTO_ENABLE_ON_START_KEY = 'autoEnableOnStart';
 
 // 面板布局：竖版规则列表 / 横版键鼠图。两者各自定尺寸，切换时 setSize + center。
 type PanelLayout = 'vertical' | 'horizontal';
@@ -202,6 +204,7 @@ interface AppStatus {
   log_dir: string;
   app_data_dir: string;
   autostart_enabled: boolean;
+  run_as_admin: boolean;
   resources_ok: boolean;
   missing_resources: string[];
 }
@@ -395,6 +398,7 @@ export default function PanelApp() {
     log_dir: string;
     app_data_dir: string;
     autostart_enabled: boolean;
+    run_as_admin: boolean;
     resources_ok: boolean;
     missing_resources: string[];
     scheduler_hp_degraded: boolean;
@@ -409,11 +413,14 @@ export default function PanelApp() {
     log_dir: '',
     app_data_dir: '',
     autostart_enabled: false,
+    run_as_admin: false,
     resources_ok: true,
     missing_resources: [],
     scheduler_hp_degraded: false,
   });
   const [togglingAutostart, setTogglingAutostart] = useState(false);
+  const [togglingRunAsAdmin, setTogglingRunAsAdmin] = useState(false);
+  const [autoEnableOnStart, setAutoEnableOnStart] = useState(false);
   const [sound, setSound] = useState<SoundSettings>(DEFAULT_SOUND);
   const soundRef = useRef<SoundSettings>(DEFAULT_SOUND);
   const audioUrlCache = useRef(new Map<string, string>());
@@ -569,6 +576,7 @@ export default function PanelApp() {
       log_dir: status.log_dir,
       app_data_dir: status.app_data_dir,
       autostart_enabled: status.autostart_enabled,
+      run_as_admin: status.run_as_admin,
       resources_ok: status.resources_ok,
       missing_resources: status.missing_resources,
       scheduler_hp_degraded: status.scheduler_hp_degraded,
@@ -669,6 +677,12 @@ export default function PanelApp() {
       .get<boolean>(AUTO_UPDATE_KEY)
       .then((v) => {
         if (typeof v === 'boolean') setAutoUpdate(v);
+      })
+      .catch(() => {});
+    settingsStore
+      .get<boolean>(AUTO_ENABLE_ON_START_KEY)
+      .then((v) => {
+        if (typeof v === 'boolean') setAutoEnableOnStart(v);
       })
       .catch(() => {});
   }, []);
@@ -1255,16 +1269,73 @@ export default function PanelApp() {
     persistTheme({ color });
   }
 
+  /** 写 settings.json 并回写本地状态；失败时回滚，让界面永远等于盘上的值。 */
+  async function persistAutoEnableOnStart(next: boolean) {
+    const previous = autoEnableOnStart;
+    setAutoEnableOnStart(next);
+    try {
+      await settingsStore.set(AUTO_ENABLE_ON_START_KEY, next);
+      await settingsStore.save();
+    } catch {
+      setAutoEnableOnStart(previous);
+      toast.warning('保存「启动后自动开全局」失败');
+    }
+  }
+
+  async function disableAutostart() {
+    const next = await invoke<boolean>('toggle_autostart');
+    setSysInfo((prev) => ({ ...prev, autostart_enabled: next }));
+  }
+
   async function handleToggleAutostart() {
     if (togglingAutostart) return;
     setTogglingAutostart(true);
     try {
       const next = await invoke<boolean>('toggle_autostart');
       setSysInfo((prev) => ({ ...prev, autostart_enabled: next }));
+      if (!next) return;
+      // 开机自启与另外两个启动开关互斥，理由见各自的 toast
+      if (autoEnableOnStart) {
+        await persistAutoEnableOnStart(false);
+        toast.info('已关闭「启动后自动开全局」：开机就在后台连发容易误触发');
+      }
+      if (sysInfo.run_as_admin) {
+        await invoke('set_run_as_admin', { enabled: false });
+        setSysInfo((prev) => ({ ...prev, run_as_admin: false }));
+        toast.info('已关闭「以管理员模式启动」：开机自启拉不起需要提权的程序');
+      }
     } catch {
       toast.error('切换开机自启失败');
     } finally {
       setTogglingAutostart(false);
+    }
+  }
+
+  async function handleToggleAutoEnableOnStart(next: boolean) {
+    await persistAutoEnableOnStart(next);
+    if (!next || !sysInfo.autostart_enabled) return;
+    try {
+      await disableAutostart();
+      toast.info('已关闭「开机自启」：开机就在后台连发容易误触发');
+    } catch {
+      toast.error('关闭开机自启失败');
+    }
+  }
+
+  async function handleToggleRunAsAdmin() {
+    if (togglingRunAsAdmin) return;
+    const next = !sysInfo.run_as_admin;
+    setTogglingRunAsAdmin(true);
+    try {
+      await invoke('set_run_as_admin', { enabled: next });
+      setSysInfo((prev) => ({ ...prev, run_as_admin: next }));
+      if (!next || !sysInfo.autostart_enabled) return;
+      await disableAutostart();
+      toast.info('已关闭「开机自启」：开机自启拉不起需要提权的程序');
+    } catch (e) {
+      toast.error(`切换管理员模式失败：${e}`);
+    } finally {
+      setTogglingRunAsAdmin(false);
     }
   }
 
@@ -2948,8 +3019,11 @@ export default function PanelApp() {
           interceptionInstalled={interceptionInstalled}
           ddHidInstalled={ddHidInstalled}
           autostartEnabled={sysInfo.autostart_enabled}
+          autoEnableOnStart={autoEnableOnStart}
+          runAsAdmin={sysInfo.run_as_admin}
           autoUpdate={autoUpdate}
           togglingAutostart={togglingAutostart}
+          togglingRunAsAdmin={togglingRunAsAdmin}
           sound={sound}
           availableVoices={availableVoices}
           profiles={profileList}
@@ -2975,6 +3049,8 @@ export default function PanelApp() {
           onToggleGlobal={() => void toggleGlobal()}
           onSetCloseBehavior={persistCloseBehavior}
           onToggleAutostart={() => void handleToggleAutostart()}
+          onToggleAutoEnableOnStart={(next) => void handleToggleAutoEnableOnStart(next)}
+          onToggleRunAsAdmin={() => void handleToggleRunAsAdmin()}
           onToggleAutoUpdate={handleToggleAutoUpdate}
           onSoundChange={persistSound}
           onPreviewSound={previewSound}

@@ -5,6 +5,7 @@
 
 pub mod prereq;
 pub mod registry;
+pub mod run_as_admin;
 
 /// 操作系统版本描述字符串，例如 `"Windows 11 23H2 (Build 22631.4317)"`。
 #[cfg(windows)]

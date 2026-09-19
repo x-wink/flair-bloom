@@ -78,6 +78,34 @@ pub fn toggle_autostart(app: AppHandle) -> Result<bool, String> {
     Ok(launch.is_enabled().unwrap_or(!enabled))
 }
 
+/// 「以管理员模式启动」开关：给当前 exe 打上 / 去掉兼容性标志。
+///
+/// 游戏模式（Interception / DD 驱动）必须以管理员运行，否则每次都要点一次「提权重启」。
+/// 与开机自启的互斥由前端保证：`HKCU\Run` 拉起需要提权的程序会被系统直接拦下，
+/// 两个都开等于开机根本不启动，而且没有任何提示。
+/// 取设定值而不是取反：互斥时前端要能明确地把它关掉。
+#[tauri::command]
+pub fn set_run_as_admin(enabled: bool) -> Result<(), String> {
+    let exe = current_exe_path()?;
+    win_sysinfo::run_as_admin::set_enabled(&exe, enabled)?;
+    info!(
+        "以管理员模式启动：{}",
+        if enabled { "已开启" } else { "已关闭" }
+    );
+    Ok(())
+}
+
+/// 当前 exe 路径。注册表里的值名要与资源管理器写入的一致，verbatim 前缀必须去掉。
+pub(crate) fn current_exe_path() -> Result<String, String> {
+    std::env::current_exe()
+        .map(|path| {
+            win_driver::path_util::strip_verbatim(path)
+                .to_string_lossy()
+                .into_owned()
+        })
+        .map_err(|e| format!("无法获取程序路径: {e}"))
+}
+
 /// 用户主动检查更新：一律走「检查 → 下载 → 弹公告」，与「自动更新」开关无关——
 /// 开关只决定启动时要不要自动下载，用户点了就是表达了要更新的意图。
 #[tauri::command]

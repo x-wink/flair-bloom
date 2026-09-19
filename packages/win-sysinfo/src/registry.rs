@@ -240,3 +240,94 @@ pub fn is_interception_service(name: &str, expected_sys: &str) -> bool {
         None => false,
     }
 }
+
+/// 在指定根键下写入 REG_SZ 值，子键不存在则创建。
+#[cfg(windows)]
+pub fn write_reg_sz(root: RegRoot, subkey: &str, name: &str, value: &str) -> Result<(), String> {
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegCreateKeyExW, RegSetValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
+        KEY_SET_VALUE, KEY_WOW64_64KEY, REG_OPTION_NON_VOLATILE, REG_SZ,
+    };
+
+    let (hroot, flags) = match root {
+        RegRoot::Hklm => (HKEY_LOCAL_MACHINE, KEY_SET_VALUE),
+        RegRoot::HklmWow64_64 => (HKEY_LOCAL_MACHINE, KEY_SET_VALUE | KEY_WOW64_64KEY),
+        RegRoot::Hkcu => (HKEY_CURRENT_USER, KEY_SET_VALUE),
+    };
+    let wsub = wide(subkey);
+    let mut hkey: HKEY = std::ptr::null_mut();
+    // SAFETY: wsub NUL 结尾；hkey 是栈上出参；class / security / disposition 传 null 表示默认
+    let r = unsafe {
+        RegCreateKeyExW(
+            hroot,
+            wsub.as_ptr(),
+            0,
+            std::ptr::null_mut(),
+            REG_OPTION_NON_VOLATILE,
+            flags,
+            std::ptr::null(),
+            &mut hkey,
+            std::ptr::null_mut(),
+        )
+    };
+    if r != 0 {
+        return Err(format!("打开注册表项失败（错误码 {r}）"));
+    }
+
+    let wname = wide(name);
+    let wvalue = wide(value);
+    let bytes = std::mem::size_of_val(wvalue.as_slice()) as u32;
+    // SAFETY: hkey 有效；wname / wvalue 均 NUL 结尾；bytes 就是 wvalue 的字节数
+    let r = unsafe {
+        RegSetValueExW(
+            hkey,
+            wname.as_ptr(),
+            0,
+            REG_SZ,
+            wvalue.as_ptr() as *const u8,
+            bytes,
+        )
+    };
+    // SAFETY: hkey 是上面成功返回的句柄
+    unsafe { RegCloseKey(hkey) };
+    if r != 0 {
+        return Err(format!("写入注册表值失败（错误码 {r}）"));
+    }
+    Ok(())
+}
+
+/// 删除指定根键下的一个值。值或子键本就不存在时视为成功。
+#[cfg(windows)]
+pub fn delete_reg_value(root: RegRoot, subkey: &str, name: &str) -> Result<(), String> {
+    use windows_sys::Win32::Foundation::ERROR_FILE_NOT_FOUND;
+    use windows_sys::Win32::System::Registry::{
+        RegCloseKey, RegDeleteValueW, RegOpenKeyExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
+        KEY_SET_VALUE, KEY_WOW64_64KEY,
+    };
+
+    let (hroot, flags) = match root {
+        RegRoot::Hklm => (HKEY_LOCAL_MACHINE, KEY_SET_VALUE),
+        RegRoot::HklmWow64_64 => (HKEY_LOCAL_MACHINE, KEY_SET_VALUE | KEY_WOW64_64KEY),
+        RegRoot::Hkcu => (HKEY_CURRENT_USER, KEY_SET_VALUE),
+    };
+    let wsub = wide(subkey);
+    let mut hkey: HKEY = std::ptr::null_mut();
+    // SAFETY: wsub NUL 结尾；hkey 是栈上出参
+    let r = unsafe { RegOpenKeyExW(hroot, wsub.as_ptr(), 0, flags, &mut hkey) };
+    if r == ERROR_FILE_NOT_FOUND {
+        return Ok(());
+    }
+    if r != 0 {
+        return Err(format!("打开注册表项失败（错误码 {r}）"));
+    }
+
+    let wname = wide(name);
+    // SAFETY: hkey 有效；wname NUL 结尾
+    let r = unsafe { RegDeleteValueW(hkey, wname.as_ptr()) };
+    // SAFETY: hkey 是上面成功返回的句柄
+    unsafe { RegCloseKey(hkey) };
+    if r != 0 && r != ERROR_FILE_NOT_FOUND {
+        return Err(format!("删除注册表值失败（错误码 {r}）"));
+    }
+    Ok(())
+}

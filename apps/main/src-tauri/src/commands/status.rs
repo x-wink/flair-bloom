@@ -41,6 +41,7 @@ pub struct AppStatus {
     pub log_dir: String,
     pub app_data_dir: String,
     pub autostart_enabled: bool,
+    pub run_as_admin: bool,
     pub resources_ok: bool,
     pub missing_resources: Vec<String>,
 }
@@ -72,6 +73,7 @@ impl AppStatus {
                 .map(|p| p.to_string_lossy().into_owned())
                 .unwrap_or_default(),
             autostart_enabled: collect_autostart_enabled(app),
+            run_as_admin: collect_run_as_admin(),
             resources_ok,
             missing_resources,
         }
@@ -177,6 +179,12 @@ fn collect_autostart_enabled(app: &AppHandle) -> bool {
     app.autolaunch().is_enabled().unwrap_or(false)
 }
 
+/// 当前 exe 是否被标记为以管理员身份启动。取不到自身路径时按未标记处理。
+fn collect_run_as_admin() -> bool {
+    crate::commands::app::current_exe_path()
+        .is_ok_and(|exe| win_sysinfo::run_as_admin::is_enabled(&exe))
+}
+
 /// 资源完整性自检：检查驱动安装器是否齐全且未被换行转换 / 杀软改写。
 ///
 /// Windows 安装包会把这些 exe 落到 `<resource_dir>/resources/`，杀软误删或解压不全
@@ -233,6 +241,7 @@ mod tests {
             log_dir: r"C:\Users\me\AppData\Local\fun.xwink.flairbloom\logs".to_string(),
             app_data_dir: r"C:\Users\me\AppData\Roaming\fun.xwink.flairbloom".to_string(),
             autostart_enabled: false,
+            run_as_admin: false,
             resources_ok: true,
             missing_resources: Vec::new(),
         }
@@ -260,6 +269,7 @@ mod tests {
             "log_dir",
             "app_data_dir",
             "autostart_enabled",
+            "run_as_admin",
             "resources_ok",
             "missing_resources",
         ] {
