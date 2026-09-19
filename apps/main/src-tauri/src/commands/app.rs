@@ -6,9 +6,7 @@ use tracing::{info, warn};
 
 use crate::bootstrap::{
     agreement::AGREEMENT_VERSION,
-    update::{
-        build_updater, check_and_download, proxy_github_download_url, CheckTrigger, UpdateLock,
-    },
+    update::{build_updater, check_and_download, CheckTrigger, UpdateLock},
 };
 use crate::commands::engine::EngineState;
 
@@ -158,7 +156,7 @@ pub async fn try_apply_pending_update(app: &AppHandle) -> bool {
         }
     };
 
-    let mut update = match updater.check().await {
+    let update = match updater.check().await {
         Ok(Some(u)) if u.version == saved_version => u,
         Ok(Some(u)) => {
             info!(
@@ -178,8 +176,8 @@ pub async fn try_apply_pending_update(app: &AppHandle) -> bool {
             return false;
         }
     };
-    proxy_github_download_url(app, &mut update);
 
+    // 安装包已经在本地，install 不走网络，不需要改写下载地址
     match update.install(saved_bytes) {
         Ok(_) => {
             info!("更新安装完成，应用即将重启");

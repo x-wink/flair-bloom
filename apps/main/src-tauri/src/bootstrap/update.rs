@@ -122,7 +122,7 @@ pub async fn check_and_download(
         return Ok(());
     }
 
-    proxy_github_download_url(app, &mut update);
+    let direct_url = proxy_github_download_url(app, &mut update);
     // silent=true 时前端只画进度条不弹 toast：启动期自动下载不该主动打断用户
     let _ = app.emit(
         "update-downloading",
@@ -132,9 +132,7 @@ pub async fn check_and_download(
         }),
     );
 
-    let bytes = download_update(app, &update, &version)
-        .await
-        .map_err(|e| format!("下载更新失败: {e}"))?;
+    let bytes = download_with_fallback(app, &mut update, &version, direct_url).await?;
 
     save_pending_update(app, &version, &bytes)?;
     let _ = app.emit(
@@ -142,6 +140,35 @@ pub async fn check_and_download(
         serde_json::json!({ "version": version, "notes": notes }),
     );
     Ok(())
+}
+
+/// 先走代理下载，失败了用 `direct_url`（改写前的 GitHub 原始地址）再试一次。
+///
+/// 代理是第三方免费服务，限流或抽风都会让下载失败，而 GitHub 直连在国内虽慢却仍可用，
+/// 比「有新版本但装不上」强。失败事件只在两条路都走不通时才发给前端——回退成功还弹一个
+/// 「下载失败」只会吓人。
+async fn download_with_fallback(
+    app: &tauri::AppHandle,
+    update: &mut tauri_plugin_updater::Update,
+    version: &str,
+    direct_url: Option<tauri::Url>,
+) -> Result<Vec<u8>, String> {
+    let first = match download_update(app, update, version).await {
+        Ok(bytes) => return Ok(bytes),
+        Err(e) => e,
+    };
+
+    let Some(direct_url) = direct_url else {
+        emit_update_download_failed(app, version, &first.to_string());
+        return Err(format!("下载更新失败: {first}"));
+    };
+
+    warn!("代理下载失败，回退 GitHub 直连: {}", first);
+    update.download_url = direct_url;
+    download_update(app, update, version).await.map_err(|e| {
+        emit_update_download_failed(app, version, &e.to_string());
+        format!("下载更新失败: {e}")
+    })
 }
 
 /// 把下载好的安装包落盘，等待用户点「重启并更新」或下次启动时安装。
@@ -161,20 +188,10 @@ pub fn save_pending_update(
     Ok(())
 }
 
+/// 端点顺序就是兜底顺序：`tauri.conf.json` 里第一条是代理后的清单地址、第二条是 GitHub
+/// 原始地址，updater 会按序试到第一条读通为止，这里不再改写它们。
 pub fn build_updater(app: &tauri::AppHandle) -> Result<tauri_plugin_updater::Updater, String> {
-    let Some(proxy_prefix) = github_proxy_prefix(app) else {
-        return app.updater_builder().build().map_err(|e| format!("{e}"));
-    };
-    let endpoints = configured_update_endpoints(app)?
-        .into_iter()
-        .map(|url| proxy_github_url(&url, &proxy_prefix))
-        .collect();
-
-    app.updater_builder()
-        .endpoints(endpoints)
-        .map_err(|e| format!("{e}"))?
-        .build()
-        .map_err(|e| format!("{e}"))
+    app.updater_builder().build().map_err(|e| format!("{e}"))
 }
 
 pub async fn download_update(
@@ -217,41 +234,40 @@ pub async fn download_update(
         )
         .await;
 
-    match result {
-        Ok(bytes) => {
-            let final_size = bytes.len() as u64;
-            emit_update_download_progress(
-                app,
-                version,
-                final_size,
-                last_total.or(Some(final_size)),
-                true,
-            );
-            Ok(bytes)
-        }
-        Err(e) => {
-            let _ = app.emit(
-                UPDATE_DOWNLOAD_FAILED_EVENT,
-                serde_json::json!({ "version": version, "message": e.to_string() }),
-            );
-            Err(e)
-        }
-    }
+    // 失败事件由 download_with_fallback 在最后一条路也走不通时才发
+    result.inspect(|bytes| {
+        let final_size = bytes.len() as u64;
+        emit_update_download_progress(
+            app,
+            version,
+            final_size,
+            last_total.or(Some(final_size)),
+            true,
+        );
+    })
 }
 
+/// 把安装包地址改写成代理地址，返回改写前的原始地址供下载失败时回退。
+/// 未改写（非 GitHub 地址，或本来就是代理地址）时返回 `None`。
 pub fn proxy_github_download_url(
     app: &tauri::AppHandle,
     update: &mut tauri_plugin_updater::Update,
-) {
-    let Some(proxy_prefix) = github_proxy_prefix(app) else {
-        return;
-    };
+) -> Option<tauri::Url> {
+    let proxy_prefix = github_proxy_prefix(app)?;
 
     let proxied = proxy_github_url(&update.download_url, &proxy_prefix);
-    if proxied != update.download_url {
-        info!("update download routed through GitHub proxy: {proxy_prefix}");
-        update.download_url = proxied;
+    if proxied == update.download_url {
+        return None;
     }
+    info!("update download routed through GitHub proxy: {proxy_prefix}");
+    Some(std::mem::replace(&mut update.download_url, proxied))
+}
+
+fn emit_update_download_failed(app: &tauri::AppHandle, version: &str, message: &str) {
+    let _ = app.emit(
+        UPDATE_DOWNLOAD_FAILED_EVENT,
+        serde_json::json!({ "version": version, "message": message }),
+    );
 }
 
 fn emit_update_download_progress(
@@ -282,29 +298,6 @@ fn emit_update_download_progress(
 
 fn github_proxy_prefix(_app: &tauri::AppHandle) -> Option<String> {
     Some(DEFAULT_GITHUB_PROXY.to_string())
-}
-
-fn configured_update_endpoints(app: &tauri::AppHandle) -> Result<Vec<tauri::Url>, String> {
-    let config = app.config();
-    let updater = config
-        .plugins
-        .0
-        .get("updater")
-        .ok_or_else(|| "缺少 updater 配置".to_string())?;
-    let endpoints = updater
-        .get("endpoints")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| "缺少 updater.endpoints 配置".to_string())?;
-    let endpoints = endpoints
-        .iter()
-        .filter_map(|endpoint| endpoint.as_str())
-        .map(parse_url)
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(endpoints)
-}
-
-fn parse_url(url: &str) -> Result<tauri::Url, String> {
-    tauri::Url::parse(url).map_err(|e| format!("无效的更新地址: {e}"))
 }
 
 fn normalize_proxy_prefix(prefix: &str) -> String {
@@ -380,5 +373,25 @@ mod tests {
         .unwrap();
 
         assert_eq!(proxy_github_url(&url, "https://gh-proxy.com/"), url);
+    }
+
+    /// 两条端点必须是同一份清单的「代理版 + 原始版」：少了第二条，代理挂掉就没有兜底；
+    /// 两条指向不同清单则会出现版本漂移。
+    #[test]
+    fn configured_endpoints_are_proxy_then_direct() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../../tauri.conf.json")).unwrap();
+        let endpoints = config["plugins"]["updater"]["endpoints"]
+            .as_array()
+            .expect("updater.endpoints 必须存在");
+
+        assert_eq!(endpoints.len(), 2, "端点应为「代理 + 直连」两条");
+        let direct = endpoints[1].as_str().unwrap();
+        assert!(direct.starts_with("https://github.com/"), "第二条应是直连");
+        assert_eq!(
+            endpoints[0].as_str().unwrap(),
+            format!("{DEFAULT_GITHUB_PROXY}{direct}"),
+            "第一条应是同一清单的代理版"
+        );
     }
 }
