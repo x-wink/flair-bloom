@@ -50,11 +50,21 @@ export const settings: TourDef = {
       prepare: (host) => host.openSettings('general'),
     },
     {
+      id: 'startup',
+      target: 'settings-general-startup',
+      title: '启动与权限',
+      body: p(
+        '「启动后自动开全局」打开应用就开始连发；「以管理员模式启动」省掉进游戏模式时的提权重启。',
+        '这两个都和「开机自启」互斥，开一个会自动关掉另一个——开机就连发容易误触发，而需要管理员权限的程序开机自启拉不起来。',
+      ),
+      prepare: (host) => host.openSettings('general'),
+    },
+    {
       id: 'general',
       target: 'settings-general-close',
-      title: '关闭行为与自启',
+      title: '关闭行为',
       body: p(
-        '点 ✕ 时是退出还是收进浮窗，在这里选，还能设开机自启。',
+        '点 ✕ 时是退出还是收进浮窗，在这里选。最小化不用选：任何方式收起来都进浮窗，不会只剩托盘图标。',
         '自动更新关掉后只在标题栏提示新版本，菜单里的「检查更新」仍然会下载。',
       ),
       prepare: (host) => host.openSettings('general'),

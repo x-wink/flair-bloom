@@ -39,7 +39,7 @@
 
 紧急回退实质 = 紧急向前滚一个修复版，不是把版本号往回拨。失败的 tag 不重指，用新版本号补发。
 
-**路径 A：止血。** 更新端点跟着 GitHub 的 Latest 指针走，把 Latest 拨回上个好版本，`latest.json` 就不再分发坏版本；镜像最迟一轮（10 分钟）跟上。
+**路径 A：止血。** 更新端点跟着 GitHub 的 Latest 指针走，把 Latest 拨回上个好版本，`latest.json` 就不再分发坏版本。代理端点读的是同一份清单，跟随时间取决于 gh-proxy 的缓存，分钟级。
 
 ```sh
 gh api repos/x-wink/flair-bloom/releases/latest --jq '.tag_name'   # 确认当前 Latest

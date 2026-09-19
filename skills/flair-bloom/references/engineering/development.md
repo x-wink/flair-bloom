@@ -99,7 +99,7 @@ apps/main/src/windows/panel/    # 面板窗口（React）
 apps/main/src/windows/float/    # 浮窗（panel-float.html）
 apps/main/src/assets/           # EULA.md、图标（SVG 源文件 currentColor / 1em）
 apps/keygen/                    # 兑换码生成 CLI
-apps/site/                      # 产品页 + 发布镜像（独立 pnpm 项目，不在根 workspace，见其 README）
+apps/site/                      # 产品页（独立 pnpm 项目，不在根 workspace，见其 README）
 packages/crypto/src/            # aes.rs（AES-256-GCM）、license.rs（Ed25519 verify_license + LicensePayload）
 packages/migrate/src/lib.rs     # run_migrations() 泛型迁移运行器
 packages/qzh-format/src/        # header.rs（FileHeader）、lib.rs（read_encrypted / write_encrypted）

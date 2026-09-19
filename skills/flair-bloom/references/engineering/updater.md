@@ -8,6 +8,12 @@
 - `update-downloading` 带 `silent` 标志，启动期自动下载只画进度条不弹 toast。`UpdateLock` 防止重入。
 - 更新器只升不降：坏版本无法「降级召回」，应急路径见 [release](release.md) 的「应急回退」。
 
+## 加速代理与兜底
+
+`tauri.conf.json` 的 updater endpoints 是同一份 `latest.json` 的两条地址：`gh-proxy.com` 代理版在前、GitHub 原始地址在后，updater 按序试到读通为止，`build_updater` 不在运行时改写它们（有单测钉住这两条的对应关系）。安装包地址由 `proxy_github_download_url` 改写成代理地址并交回原始地址，下载失败时用原始地址再试一次；`update-download-failed` 只在两条路都走不通时才发给前端，否则回退成功也会弹一个吓人的失败提示。
+
+⚖️ gh-proxy 是第三方免费服务，它挂了就退到 GitHub 直连（国内约 20 KB/s，基本等于不可用）。选它是为了零带宽成本与零同步基础设施——自建镜像那套已撤除，要回来按 git 历史恢复。
+
 ## 更新公告的两个来源不能混
 
 菜单 / 关于里的「更新公告」（`UpdateNoticeDialog` 的 `mode='current'`）取 `panel/changelog.ts` 从随包内联的 `CHANGELOG.md` 切出的**当前运行版本**那一节，回答「我现在这版做了什么」；`mode='ready'` 才是刚下载完、还没装上的新版本的 `update.body`（来自 updater 接口）。两者若共用一个状态，用户在菜单里会看到一份自己还没装上的公告。
@@ -26,6 +32,6 @@
 | CI 构建      | GitHub Actions `release.yml`       | 推 `v*` tag 触发 Windows x64 构建、发布 Draft                                                                                                      |
 | Release 正文 | `CHANGELOG.md`                     | `scripts/extract-changelog.ts` 提取当前版本节                                                                                                      |
 | 产品页       | app.xwink.fun/flair-bloom          | `apps/site` 纯静态 SSG；域名与 server 块归 xwink-console 仓的 app-site 单元                                                                        |
-| 发布镜像     | app.xwink.fun/flair-bloom/releases | 服务器每 10 分钟跟随 Latest 指针同步安装包，sha256 校验、整轮原子切换、改写 `latest.json` 的下载地址为镜像（签名只覆盖安装包内容，改写不影响校验） |
+| 下载加速     | gh-proxy.com                       | 更新清单、安装包、产品页下载链接一律代理优先、GitHub 直连兜底；自家服务器不托管安装包                                                             |
 
-`tauri.conf.json` 的 updater endpoints 当前只指向 GitHub `releases/latest/download/latest.json`；镜像端点作为第一端点、GitHub 兜底的切换待随一次应用发版生效（见 README「接下来」）。产品页路径：`/flair-bloom/`（介绍、下载、公告、支持）、`/releases/releases.json`（公告与安装包清单）、`/releases/latest.json`、`/releases/<tag>/<安装包>`；`/flair-bloom/download` 打开即下载 Latest 的 exe（`?type=msi` 下 MSI）。产品页发版走 `site-v*` tag 与 `.github/workflows/site.yml`，不经 Tauri updater，详见 `apps/site/README.md`。
+产品页只有 `/flair-bloom/`（介绍、下载、公告、支持）一条路径，版本数据在浏览器里直读 GitHub Releases API（同样代理优先）；`/flair-bloom/download` 打开即下载最新版 exe（`?type=msi` 下 MSI）。产品页发版走 `site-v*` tag 与 `.github/workflows/site.yml`，不经 Tauri updater，详见 `apps/site/README.md`。

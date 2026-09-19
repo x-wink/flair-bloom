@@ -6,9 +6,9 @@
 
 | 模式                       | 现状                                                                                                                                                  |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 面板（`panel.html`）       | 全功能配置界面。标题栏最小化走系统最小化；关闭按钮按用户偏好退出或隐藏到托盘 / 浮窗；面板显隐热键用最小化 / 恢复语义，方便从任务栏手动唤回            |
+| 面板（`panel.html`）       | 全功能配置界面。一切最小化路径都收进浮窗——标题栏按钮、面板显隐热键，以及系统级最小化（Win+D / 任务栏 / Aero Shake，由 `on_window_event` 的 Resized + `is_minimized` 接管，先 `unminimize` 再进浮窗模式）；关闭按钮按用户偏好退出或收进浮窗 |
 | 浮窗（`panel-float.html`） | 常驻置顶胶囊，显示激活规则、全局开关、展开主面板                                                                                                      |
-| 托盘                       | 面板隐藏后进程常驻，连发继续有效。托盘菜单：全局开关、切换配置（动态菜单项）、打开面板、退出；托盘双击与再次启动应用都唤回面板；启用 / 禁用态切换图标 |
+| 托盘                       | 面板隐藏后进程常驻，连发继续有效。托盘菜单：全局开关、切换配置（动态菜单项）、打开面板、退出；托盘双击与再次启动应用都唤回面板；启用 / 禁用态切换图标。托盘是辅助入口而不是唯一入口：浮窗不占任务栏位，若面板也缩进任务栏，应用就只剩一个会被折叠起来的托盘图标 |
 | 桌宠（`pet.html`）         | 未实现，设计见 `docs/roadmaps/pet-mode.md`（draft）                                                                                                   |
 
 ## 进程模型
@@ -20,7 +20,7 @@ FlairBloom.exe（单一 Tauri 进程）
       ├── 面板 WebView（panel.html）
       └── 浮窗 WebView（panel-float.html）
            │ HTTPS
-   GitHub Releases ← app.xwink.fun 镜像
+   GitHub Releases ← gh-proxy.com 加速（直连兜底）
 ```
 
 **单进程多窗口**：面板与浮窗是同一进程的独立 WebView，通过 `app.emit_all()` 事件通信（`float-active` / `global-enabled-changed` / `theme-changed` / `app-status-changed` / `update-*`），无 Named Pipe。窗口显隐统一走 `lib.rs` 的 `enter_panel_mode`（显示面板、隐藏浮窗）/ `enter_float_mode`（先显示浮窗再隐藏面板，浮窗缺失则保留面板）。激活态规则当前由前端轮询 `get_active_rules`。
@@ -101,7 +101,7 @@ AltGr 布局（德语 / 法语 / 波兰语等）把右 Alt 当 AltGr，键盘驱
 | 日志               | `{app_log_dir}/`（Windows `%LOCALAPPDATA%\fun.xwink.flairbloom\logs`） | 按天滚动，保留 7 天，`cleanup_old_logs` 清理               |
 | 崩溃日志           | `{app_log_dir}/crash-{unix_ts}.log`                                    | panic hook 写入                                            |
 
-路径由 Tauri `PathResolver` 跨平台解析；日志目录由 `bootstrap/logging.rs` 显式定义。卸载时用户配置、设置与日志保留（Windows 惯例），注册表自启动项由安装器清除。
+路径由 Tauri `PathResolver` 跨平台解析；日志目录由 `bootstrap/logging.rs` 显式定义。卸载时用户配置、设置与日志保留（Windows 惯例），注册表自启动项与「以管理员模式启动」的兼容性标志（`HKCU\...\AppCompatFlags\Layers`，值名是 exe 路径）由安装器清除。
 
 ## 日志与崩溃
 

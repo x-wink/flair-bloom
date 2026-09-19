@@ -12,4 +12,7 @@
 
 !macro NSIS_HOOK_PREUNINSTALL
   Delete "$INSTDIR\interception.dll"
+  ; 「以管理员模式启动」写在当前用户的兼容性标志里，卸载时清掉，
+  ; 免得注册表留一条指向已不存在的 EXE 的记录。
+  DeleteRegValue HKCU "Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers" "$INSTDIR\FlairBloom.exe"
 !macroend

@@ -461,7 +461,7 @@ export default function SettingsDialog(props: Props) {
               </div>
             </SettingsSection>
 
-            <SettingsSection title="运行">
+            <SettingsSection title="运行" dataTour="settings-general-startup">
               <div className="settings-row">
                 <div className="settings-row-main">
                   <span className="settings-row-title">全局开关</span>

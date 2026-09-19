@@ -35,7 +35,7 @@
 | 3              | `MouseButton` 新增 `WheelUp` / `WheelDown`                                  | v0.2.4   |
 | 4              | `BurstRule` 新增可选 `group` 字段（Toggle 互斥分组）                        | v0.2.5   |
 
-`tauri-plugin-store` 的 `settings.json` 复用同一迁移基础设施。已知键：`closeBehavior`、`activeTab`、`sound`、`theme`、`layout`、`autoUpdate`（与后端 `bootstrap/update.rs` 同名同读）、`tours`（`{ completed: string[], introShown: boolean }`）、当前激活配置路径。
+`tauri-plugin-store` 的 `settings.json` 复用同一迁移基础设施。已知键：`closeBehavior`、`activeTab`、`sound`、`theme`、`layout`、`autoUpdate`（与后端 `bootstrap/update.rs` 同名同读）、`autoEnableOnStart`（与 `bootstrap/startup.rs` 同名同读）、`tours`（`{ completed: string[], introShown: boolean }`）、当前激活配置路径。开机自启与「以管理员模式启动」不在这里：前者由 `tauri-plugin-autostart` 写 `HKCU\Run`，后者写 `HKCU\...\AppCompatFlags\Layers`，都以注册表为准，界面只读回显。
 
 ## 输入约束
 
