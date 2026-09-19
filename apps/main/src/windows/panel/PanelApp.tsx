@@ -521,6 +521,9 @@ export default function PanelApp() {
   const updateProgressDoneTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const updateDownloadFailedRef = useRef(false);
   const initialLoadDone = useRef(false);
+  // 与 initialLoadDone 同步的 state 版：ref 置位不会触发重渲染，首启教程那条 effect 需要一个
+  // 能进依赖数组的「配置已装载」信号。（曾经靠 rules 变化顺带重跑，删掉 rules 依赖后教程就再也不弹了。）
+  const [initialLoadSettled, setInitialLoadSettled] = useState(false);
   const startupInputModeHandledRef = useRef(false);
   const profileNameRef = useRef(profileName);
   // 供挂载期注册的事件监听调用最新的 switchToProfile（避免闭包锁死首帧版本）
@@ -652,7 +655,7 @@ export default function PanelApp() {
   // 手动开的教程遇到确认框由 paused 让路即可。
   useEffect(() => {
     if (!tourProgress.loaded || tourProgress.introSeen || firstRunHandled.current) return;
-    if (!initialLoadDone.current || showAgreement) return;
+    if (!initialLoadSettled || showAgreement) return;
     if (!noticeSettled || !startupModeSettled) return;
     // 启动期的自动更新检查是后台跑的，update-ready 可能在任何时刻弹。它开着时不能 startTour，
     // 否则日志会记一次假的 started。update-available 只亮标题栏、update-downloading 只画进度条，
@@ -666,6 +669,7 @@ export default function PanelApp() {
   }, [
     tourProgress.loaded,
     tourProgress.introSeen,
+    initialLoadSettled,
     showAgreement,
     noticeSettled,
     startupModeSettled,
@@ -826,6 +830,7 @@ export default function PanelApp() {
             await refreshList();
             queueMicrotask(() => {
               initialLoadDone.current = true;
+              setInitialLoadSettled(true);
             });
             return;
           } catch {
@@ -848,6 +853,7 @@ export default function PanelApp() {
       } finally {
         queueMicrotask(() => {
           initialLoadDone.current = true;
+          setInitialLoadSettled(true);
         });
       }
     })();
@@ -1728,6 +1734,7 @@ export default function PanelApp() {
       saveTimer.current = undefined;
     }
     initialLoadDone.current = false;
+    setInitialLoadSettled(false);
     try {
       const profile = await invoke<Profile>('load_profile', { path });
       setRules(profile.rules);
@@ -1745,6 +1752,7 @@ export default function PanelApp() {
     } finally {
       queueMicrotask(() => {
         initialLoadDone.current = true;
+        setInitialLoadSettled(true);
       });
     }
   }
@@ -1857,7 +1865,10 @@ export default function PanelApp() {
       clearTimeout(saveTimer.current);
       saveTimer.current = undefined;
     }
-    if (name === profileName) initialLoadDone.current = false;
+    if (name === profileName) {
+      initialLoadDone.current = false;
+      setInitialLoadSettled(false);
+    }
     try {
       const fallback = await invoke<Profile | null>('delete_profile', { name });
       if (fallback) {
@@ -1878,6 +1889,7 @@ export default function PanelApp() {
     } finally {
       queueMicrotask(() => {
         initialLoadDone.current = true;
+        setInitialLoadSettled(true);
       });
     }
   }
@@ -1893,6 +1905,7 @@ export default function PanelApp() {
       saveTimer.current = undefined;
     }
     initialLoadDone.current = false;
+    setInitialLoadSettled(false);
     try {
       // 后端完成解密 / 迁移 / 校验，复制进配置目录并立即激活
       const profile = await invoke<Profile>('import_qzh_profile', { path });
@@ -1912,6 +1925,7 @@ export default function PanelApp() {
     } finally {
       queueMicrotask(() => {
         initialLoadDone.current = true;
+        setInitialLoadSettled(true);
       });
     }
   }
@@ -3219,6 +3233,7 @@ export default function PanelApp() {
             setShowImport(false);
             // 导入后以新配置名重新加载（后端已切换 activeProfilePath）
             initialLoadDone.current = false;
+            setInitialLoadSettled(false);
             try {
               const activePath = await invoke<string | null>('get_active_profile_path');
               if (activePath) {
@@ -3240,6 +3255,7 @@ export default function PanelApp() {
             } finally {
               queueMicrotask(() => {
                 initialLoadDone.current = true;
+                setInitialLoadSettled(true);
               });
             }
           }}
