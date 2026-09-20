@@ -258,7 +258,10 @@ export default function TourRunner({ tour, host, paused = false, onExit }: Props
 
   // Esc 退出整组。挂 capture 阶段并截断传播，OverlayRoot 的根级 Escape（冒泡阶段）才不会
   // 顺手关掉教程正在讲的设置弹窗；按键框录入中除外，那时 Esc 是用户在录一个键。
+  // 教程被挡住（确认框、协议、更新公告）时不挂：那会儿气泡根本不可见，截断传播会让用户
+  // 按 Esc 关不掉眼前的对话框，还把背后的教程悄悄跳掉。
   useEffect(() => {
+    if (paused || phase === 'preparing') return;
     function onKey(e: KeyboardEvent) {
       if (e.key !== 'Escape') return;
       const active = document.activeElement;
@@ -269,7 +272,7 @@ export default function TourRunner({ tour, host, paused = false, onExit }: Props
     }
     window.addEventListener('keydown', onKey, { capture: true });
     return () => window.removeEventListener('keydown', onKey, { capture: true });
-  }, []);
+  }, [paused, phase]);
 
   if (paused || phase === 'preparing') return null;
 

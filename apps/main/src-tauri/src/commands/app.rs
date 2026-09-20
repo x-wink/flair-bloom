@@ -1,6 +1,6 @@
 //! 协议同意 / 检查更新 / 退出。
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tracing::{info, warn};
 
@@ -40,8 +40,13 @@ pub fn agree_license(app: AppHandle, engine: State<EngineState>) -> Result<(), S
         serde_json::json!(env!("CARGO_PKG_VERSION")),
     );
     store.save().map_err(|e| format!("保存协议状态失败: {e}"))?;
-    // 启动时因协议未同意而搁置的「启动后自动开全局」，同意之后就该生效——否则用户得再重启一次
-    crate::bootstrap::startup::apply_auto_enable_on_start(&app, &engine.0, false);
+    // 启动时因协议未同意而搁置的「启动后自动开全局」，同意之后就该生效——否则用户得再重启一次。
+    // 这条路径上面板和托盘都已经建好，开关又是后台悄悄开的，得补一次同步，
+    // 否则引擎已经在注入按键，面板和托盘还显示「全局已禁用」
+    if crate::bootstrap::startup::apply_auto_enable_on_start(&app, &engine.0, false) {
+        crate::tray::refresh_menu(&app);
+        let _ = app.emit("global-enabled-changed", true);
+    }
     Ok(())
 }
 

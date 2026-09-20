@@ -30,20 +30,28 @@ pub fn auto_enable_on_start(app: &AppHandle) -> bool {
 /// 两道闸：协议没同意不开——协议弹窗还挡在前面，引擎却已经在注入按键，那道门就形同虚设；
 /// 开机自启时不开——登录即在后台连发，用户人可能都不在电脑前。后者在设置界面里是互斥的，
 /// 这里是 settings.json 被手工改坏时的兜底。
-pub fn apply_auto_enable_on_start(app: &AppHandle, engine: &BurstEngine, need_agreement: bool) {
+///
+/// 返回是否真的开了。`set_global_enabled` 不通知任何人，启动期无所谓（面板和托盘都还没建），
+/// 但同意协议那条补开路径两者都在了，调用方得据此补一次状态同步。
+pub fn apply_auto_enable_on_start(
+    app: &AppHandle,
+    engine: &BurstEngine,
+    need_agreement: bool,
+) -> bool {
     if !auto_enable_on_start(app) {
-        return;
+        return false;
     }
     if need_agreement {
         info!("用户协议待同意，暂不自动打开全局开关");
-        return;
+        return false;
     }
     if app.autolaunch().is_enabled().unwrap_or(false) {
         warn!("开机自启已启用，跳过「启动后自动开全局」");
-        return;
+        return false;
     }
     info!("按设置在启动时打开全局开关");
     engine.set_global_enabled(true, true);
+    true
 }
 
 /// 把注册表里的管理员启动标志对齐到 settings.json 记下的意图。
