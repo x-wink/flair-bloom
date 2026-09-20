@@ -435,7 +435,7 @@ checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
 name = "burst-engine"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "qzh-profile",
  "tracing",
@@ -712,7 +712,7 @@ checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
 
 [[package]]
 name = "crypto"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "aes-gcm",
  "base32",
@@ -1257,7 +1257,7 @@ checksum = "5baebc0774151f905a1a2cc41989300b1e6fbb29aff0ceffa1064fdd3088d582"
 
 [[package]]
 name = "flair-bloom"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "burst-engine",
  "crypto",
@@ -2270,7 +2270,7 @@ dependencies = [
 
 [[package]]
 name = "keygen"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "crypto",
  "serde_json",
@@ -2410,7 +2410,7 @@ dependencies = [
 
 [[package]]
 name = "migrate"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "serde_json",
  "thiserror 2.0.18",
@@ -3157,7 +3157,7 @@ dependencies = [
 
 [[package]]
 name = "qzh-format"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "crypto",
  "serde",
@@ -3167,7 +3167,7 @@ dependencies = [
 
 [[package]]
 name = "qzh-profile"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "crypto",
  "migrate",
@@ -3354,7 +3354,7 @@ dependencies = [
 
 [[package]]
 name = "resource-integrity"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "sha2",
  "tempfile",
@@ -5438,7 +5438,7 @@ dependencies = [
 
 [[package]]
 name = "win-driver"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "serde",
  "thiserror 2.0.18",
@@ -5449,7 +5449,7 @@ dependencies = [
 
 [[package]]
 name = "win-input"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "interception-sys",
  "qzh-profile",
@@ -5460,7 +5460,7 @@ dependencies = [
 
 [[package]]
 name = "win-sysinfo"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "tokio",
  "windows-sys 0.59.0",
