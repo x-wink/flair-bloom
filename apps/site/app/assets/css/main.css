@@ -67,6 +67,104 @@ body {
     box-shadow: 0 18px 44px -18px color-mix(in oklab, var(--ui-primary) 75%, transparent);
     animation-play-state: paused;
   }
+
+  /* 教学引导的步骤轴：节点之间一段一段地连，一只气泡在节点之间循环飘——页面上直接把
+     应用里的「气泡贴着界面讲」演一遍。线段停在圆边缘外 0.25rem，不从节点底下穿过去：
+     节点填的是 --ui-bg，卡片底是半透明的，穿过去会露出一截色差。
+     轴有两种形态：窄屏与 md 起的右侧窄列都竖排，只有中间那档（sm~md）是三列横排 */
+  .tour-rail-seg {
+    display: none;
+  }
+
+  /* 竖排：自本节点圆下方向下连到下一个节点圆上方。行距 1.25rem，节点 2.5rem 高 */
+  .tour-rail-stem {
+    position: absolute;
+    top: 2.75rem;
+    bottom: -1.5rem;
+    left: 1.25rem;
+    width: 2px;
+    translate: -50% 0;
+    background: color-mix(in oklab, var(--ui-primary) 35%, transparent);
+  }
+
+  /* 气泡从节点右上角冒出来，沿轴往下跳。往上提一个身位是为了躲开 ps-14 那列文字，
+     顺便落进上一步留下的行距里。z-index 要给：它在 DOM 里排在节点列表之前，
+     不抬一层就被节点圆压在底下 */
+  .tour-rail-bubble {
+    position: absolute;
+    z-index: 1;
+    top: 1.25rem;
+    left: 2.25rem;
+    translate: 0 -95%;
+    color: var(--ui-primary);
+    animation: tour-hop-down 9s ease-in-out infinite;
+  }
+
+  /* 中间档：教学轴横着通栏，三步一列一个 */
+  @media (min-width: 40rem) and (max-width: 47.999rem) {
+    .tour-rail-stem {
+      display: none;
+    }
+
+    /* 自上一个节点圆右缘连到本节点圆左缘。上一个圆心在本列的 -50% 再减一道列间距
+       （ol 用 gap-4 = 1rem），圆半径 1.25rem 再留 0.25rem 呼吸 */
+    .tour-rail-seg {
+      display: block;
+      position: absolute;
+      top: 1.25rem;
+      left: calc(-50% - 1rem + 1.5rem);
+      right: calc(50% + 1.5rem);
+      height: 2px;
+      background: color-mix(in oklab, var(--ui-primary) 40%, transparent);
+    }
+
+    .tour-rail-bubble {
+      top: -0.5rem;
+      left: 16.666%;
+      translate: -50% 0;
+      animation-name: tour-hop-right;
+    }
+  }
+}
+
+/* 在每个节点上停一会儿再飘向下一个，停顿比移动长，才像「讲完这步再讲下一步」。
+   横排沿 left 跳、竖排沿 top 跳，三个节点分别落在 1/6、3/6、5/6 */
+@keyframes tour-hop-right {
+  0%,
+  26% {
+    left: 16.666%;
+  }
+  33%,
+  59% {
+    left: 50%;
+  }
+  66%,
+  92% {
+    left: 83.333%;
+  }
+  100% {
+    left: 16.666%;
+  }
+}
+
+/* 竖排的落点不能用 1/6、3/6、5/6：三行等高（grid-rows-3）时节点圆钉在每行顶部，
+   圆心是「行顶 + 半径」而不是行中心。行高 =（容器高 - 两道 1.25rem 行距）/ 3 */
+@keyframes tour-hop-down {
+  0%,
+  26% {
+    top: 1.25rem;
+  }
+  33%,
+  59% {
+    top: calc((100% - 2.5rem) / 3 + 2.5rem);
+  }
+  66%,
+  92% {
+    top: calc(2 * (100% - 2.5rem) / 3 + 3.75rem);
+  }
+  100% {
+    top: 1.25rem;
+  }
 }
 
 /* 用独立的 translate 属性浮动，和 rotate、scale 各管各的，不会互相覆盖 */
@@ -136,7 +234,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rumor-card {
+  .rumor-card,
+  .tour-rail-bubble {
     animation: none;
   }
 }

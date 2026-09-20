@@ -2,84 +2,86 @@
 
 export const REPOSITORY = 'https://github.com/x-wink/flair-bloom';
 
-export type HighlightIconName = 'lightning' | 'palette' | 'keyboard' | 'speaker';
+// 作者个人站首页；app.xwink.fun 是产品索引页，页脚「更多产品」指那儿，两者不是一回事
+export const HOMEPAGE = 'https://xwink.fun';
+
+export type HighlightIconName = 'lightning' | 'palette' | 'keyboard' | 'gear' | 'float' | 'modes';
 
 export interface TitledText {
   title: string;
   text: string;
 }
 
-export interface Highlight extends TitledText {
+// 亮点卡一张讲一批事，每条要点单列一行——挤成一整段话，读的人一条都记不住
+export interface Highlight {
   icon: HighlightIconName;
+  title: string;
+  points: string[];
 }
 
-// 玩家群里反复被夸的几点，单独放大，不做评价墙也不署名
+// 玩家群里反复被夸的几点，单独放大，不做评价墙也不署名。
+// 顺序即版面顺序：错落网格按这个次序排，换位置要连带改 HIGHLIGHT_SPANS
 export const highlights: Highlight[] = [
   {
-    icon: 'lightning',
-    title: '有效降低输入延迟',
-    text: '技能一转好就按出去，不用盯着 CD 手搓抢时机。连发间隔最低 10ms，比手指狂按密得多。',
-  },
-  {
     icon: 'palette',
-    title: '界面好看，门派色随心配',
-    text: '亮暗模式随手换，20 种门派主题色任你搭。',
+    title: '颜值能打，外观随心配',
+    points: ['追随光明，坠入黑暗', '20 种门派主题色任你挑'],
   },
   {
-    icon: 'keyboard',
-    title: '右 Alt 也能当热键',
-    text: '一键开关、收起窗口这些热键，Shift、Ctrl、Alt、Win 都能绑，左右分开认。顺手的右 Alt 终于用上了，游戏里直接按。',
+    icon: 'gear',
+    title: '配置灵活可定制',
+    points: [
+      '键盘鼠标按键全支持',
+      '提示语音随心所欲',
+      '连发规则为所欲为',
+      '多套规则一键切换',
+    ],
   },
   {
-    icon: 'speaker',
-    title: '语音提示自己定',
-    text: '开关连发时念一句，不用盯屏幕。台词随便写，比如「我准备好库库按了」；也能换成自己的音频文件，mp3、wav 这些都行。',
+    icon: 'float',
+    title: '多形态布局',
+    points: [
+      '竖版界面·最灵活',
+      '横版界面·最直观',
+      '悬浮窗口·超薄无感',
+      '任务栏托盘·快捷入口',
+    ],
+  },
+  {
+    icon: 'modes',
+    title: '三模式覆盖',
+    points: [
+      '长按连发·手搓循环不浪费每一个GCD，挤挤总是会有的',
+      '切换连发·一键宏、武学助手启动！DPS面板关闭！',
+      '规则分组·多段宏无缝丝滑切换，争当时间管理大师',
+    ],
   },
 ];
 
-export const features: TitledText[] = [
-  { title: '武学助手 FFF', text: '开了武学助手只管狂按 F？让它替你自动连 F，手指解放。' },
-  { title: '一键宏启动', text: '一长串技能宏，按一下就持续触发，不用反复戳。' },
-  { title: '手搓循环', text: '输出循环要一直按同一个键时，按住就交给它连，松手就停。' },
-  {
-    title: '多段宏分组',
-    text: '几条切换连发放进同一分组，组内同一时刻只跑一条，按 2 自动停掉 1。',
-  },
-  {
-    title: '所有键都能连',
-    text: '键盘、鼠标左右中、两个侧键、滚轮上下随意组合，比如按住侧键连左键。',
-  },
-  {
-    title: '多套配置随手切',
-    text: '不同角色、心法各存一套，托盘右键就能切；导出 .qzh 文件分享给朋友。',
-  },
+// 应用内的新手教程，页面上排成一条步骤轴
+export const tourGuide: TitledText = {
+  title: '萌新别懵逼，这里有教学',
+  text: '教程指哪打哪，忘记了还可以再来一遍！',
+};
+
+export const tourSteps: TitledText[] = [
+  { title: '初入江湖', text: '安装完就自动开始「上手三步」教学，不用抠脑壳。' },
+  { title: '江湖秘籍', text: '各种用法手把手教学，学不会不要钱，学会了也不要钱。' },
+  { title: '温故知新', text: '多主题教程打开右上角主菜单随时重新学习。' },
 ];
+
 
 // 前四条是作者写的游戏梗，后两条摘自玩家群聊（不署名）；区块标题写明「骚话」，不冒充实名评价。
 // offset 是桌面端左缩进，offsetSm 是手机端，错开摆放拼出互相压边的效果
 export const rumors = [
-  { text: '终于找到一个能用的，以前过的都是什么苦日子啊 TT', offset: '0%', offsetSm: '0%' },
-  { text: '原来还能换门派色吗？紫色还是最有韵味～', offset: '42%', offsetSm: '10%' },
-  { text: '把作者抓起来吧，我怀疑他私藏重器', offset: '18%', offsetSm: '4%' },
+  { text: '没用气质花之前过的都是什么苦日子啊 TAT', offset: '0%', offsetSm: '0%' },
+  { text: '<p style="display: flex;">妹妹说的对！还是紫色最有韵味～<span style="margin-left: auto;">--许嵩</span></p>', offset: '42%', offsetSm: '10%' },
+  { text: '花间游悟，你终于舍得把焚诀交出来了！', offset: '18%', offsetSm: '4%' },
   { text: '我劝你们别在测试服用，会影响正式服强度', offset: '4%', offsetSm: '0%' },
-  { text: '我最喜欢的右 Alt 终于可以使用了', offset: '38%', offsetSm: '10%' },
-  { text: '界面已经遥遥领先了', offset: '14%', offsetSm: '4%' },
+  { text: 'Alt键能绑定了，鼠标滚轮和侧键也能连发了，好耶！~', offset: '38%', offsetSm: '10%' },
+  { text: '<p style="display: flex;">遥遥领先<span style="margin-left: auto;">--玄武 meta1024</span></p>', offset: '14%', offsetSm: '4%' },
 ];
 
-export const steps: TitledText[] = [
-  {
-    title: '安装助手',
-    text: '下载安装包双击安装，首次打开同意协议。玩游戏请切到「游戏模式」，按提示授权后重启一次。',
-  },
-  {
-    title: '设置规则',
-    text: '在「按压连发」页点「+」，点输入框后直接按要连的那个键（键盘、鼠标、滚轮都行），打开右侧开关。',
-  },
-  {
-    title: '打开总开关',
-    text: '点右下角「全局已禁用」让它变成「已启用」，按住那个键自动连发，松手停。',
-  },
-];
 
 export const cautions: string[] = [
   '它靠模拟按键工作，存在被游戏反作弊检测的风险；能不能用、会不会处罚，请自行评估承担。',

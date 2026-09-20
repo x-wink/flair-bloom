@@ -67,7 +67,10 @@ onBeforeUnmount(() => {
             <HighlightIcon :name="item.icon" />
             <div>
               <h2 class="text-[13pt] font-semibold text-(--ui-fg-strong)">{{ item.title }}</h2>
-              <p class="mt-1 text-[9.5pt] leading-relaxed text-(--ui-fg-muted)">{{ item.text }}</p>
+              <!-- 海报按纸面排，要点连成一段读着更省地方，页面上才逐条列 -->
+              <p class="mt-1 text-[9.5pt] leading-relaxed text-(--ui-fg-muted)">
+                {{ item.points.join('') }}
+              </p>
             </div>
           </li>
         </ul>
@@ -113,25 +116,13 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <h2 class="print-heading">三步上手</h2>
-      <ol class="grid grid-cols-3 gap-[4mm]">
-        <li v-for="(step, index) in steps" :key="step.title" class="ui-glow-card print-avoid p-[4mm]">
-          <p class="flex items-center gap-[2mm] font-semibold text-(--ui-fg-strong)">
-            <span
-              class="flex size-[6mm] items-center justify-center rounded-full bg-(--ui-primary) text-[9pt] text-(--ui-primary-fg)"
-              >{{ index + 1 }}</span
-            >
-            {{ step.title }}
-          </p>
-          <p class="mt-[2mm] text-[9pt] leading-relaxed text-(--ui-fg-muted)">{{ step.text }}</p>
-        </li>
-      </ol>
-
       <h2 class="print-heading">能帮剑三玩家干嘛</h2>
       <ul class="grid grid-cols-3 gap-[3mm]">
-        <li v-for="feature in features" :key="feature.title" class="ui-glow-card print-avoid p-[3.5mm]">
-          <p class="font-semibold text-(--ui-fg-strong)">{{ feature.title }}</p>
-          <p class="mt-1 text-[8.5pt] leading-relaxed text-(--ui-fg-muted)">{{ feature.text }}</p>
+        <li v-for="item in highlights" :key="item.title" class="ui-glow-card print-avoid p-[3.5mm]">
+          <p class="font-semibold text-(--ui-fg-strong)">{{ item.title }}</p>
+          <p class="mt-1 text-[8.5pt] leading-relaxed text-(--ui-fg-muted)">
+            {{ item.points.join('') }}
+          </p>
         </li>
       </ul>
 
