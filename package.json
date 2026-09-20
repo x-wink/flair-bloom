@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "dev": "pnpm --filter main tauri dev",
+    "site": "pnpm --filter site dev",
     "build": "pnpm --filter main tauri build",
     "check:resources": "tsx scripts/check-ddhid-resources.ts",
     "lint": "oxlint apps/main/src",

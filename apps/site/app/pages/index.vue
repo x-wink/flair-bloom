@@ -43,10 +43,10 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
           <span class="truncate text-(--ui-primary)">气质花按键助手</span>
         </a>
         <nav class="ms-auto hidden items-center gap-5 text-sm text-(--ui-fg-muted) sm:flex">
-          <a href="#features" class="hover:text-(--ui-fg)">功能</a>
-          <a href="#start" class="hover:text-(--ui-fg)">上手</a>
+          <a href="#features" class="hover:text-(--ui-fg)">功能介绍</a>
+          <a href="#start" class="hover:text-(--ui-fg)">使用教程</a>
           <a href="#changelog" class="hover:text-(--ui-fg)">更新公告</a>
-          <a href="#support" class="hover:text-(--ui-fg)">支持</a>
+          <a href="#support" class="hover:text-(--ui-fg)">反馈&支持</a>
         </nav>
         <!-- 顶栏只留一键明暗翻转；三档选择与门派色块在功能区卡片里。图标取决于本地存的档位，同样只在客户端渲染 -->
         <ClientOnly>

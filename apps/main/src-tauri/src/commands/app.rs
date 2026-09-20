@@ -58,9 +58,8 @@ pub fn minimize_to_float(app: AppHandle) {
 }
 
 #[tauri::command]
-pub fn exit_app(app: AppHandle, engine: State<EngineState>) {
-    engine.0.shutdown();
-    app.exit(0);
+pub fn exit_app(app: AppHandle) {
+    crate::shutdown_and_exit(&app);
 }
 
 /// 开机自启开关。取设定值而不是取反：界面上三个启动开关互斥，关掉另一个时必须能明确地

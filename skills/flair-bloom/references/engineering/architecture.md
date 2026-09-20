@@ -6,8 +6,8 @@
 
 | 模式                       | 现状                                                                                                                                                  |
 | -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 面板（`panel.html`）       | 全功能配置界面。一切最小化路径都收进浮窗——标题栏按钮、面板显隐热键，以及系统级最小化（Win+D / 任务栏 / Aero Shake，由 `on_window_event` 的 Resized + `is_minimized` 接管，先 `unminimize` 再进浮窗模式）；关闭按钮按用户偏好退出或收进浮窗 |
-| 浮窗（`panel-float.html`） | 常驻置顶胶囊，显示激活规则、全局开关、展开主面板                                                                                                      |
+| 面板（`panel.html`）       | 全功能配置界面。一切最小化路径都收进浮窗——标题栏按钮、面板显隐热键，以及系统级最小化（Win+D / 任务栏 / Aero Shake，由 `on_window_event` 的 Resized + `is_minimized` 接管，先 `unminimize` 再进浮窗模式）；关闭按钮与 Alt+F4 都走 `handleClose`，按 `closeBehavior` 偏好收进浮窗或退出，未设偏好时每次询问（默认） |
+| 浮窗（`panel-float.html`） | 常驻置顶胶囊，显示激活规则、全局开关、展开主面板。Alt+F4 关浮窗 = 退出应用（`CloseRequested` 被 `prevent_close` 后转 `shutdown_and_exit`）：浮窗只有一行胶囊大小，放不下确认对话框，而放任它销毁会让收起状态的应用只剩托盘，且窗口销毁后无法再 `show` 回来 |
 | 托盘                       | 面板隐藏后进程常驻，连发继续有效。托盘菜单：全局开关、切换配置（动态菜单项）、打开面板、退出；托盘双击与再次启动应用都唤回面板；启用 / 禁用态切换图标。托盘是辅助入口而不是唯一入口：浮窗不占任务栏位，若面板也缩进任务栏，应用就只剩一个会被折叠起来的托盘图标 |
 | 桌宠（`pet.html`）         | 未实现，设计见 `docs/roadmaps/pet-mode.md`（draft）                                                                                                   |
 
@@ -22,6 +22,10 @@ FlairBloom.exe（单一 Tauri 进程）
            │ HTTPS
    GitHub Releases ← gh-proxy.com 加速（直连兜底）
 ```
+
+**两态不变量**：运行时面板与浮窗恰有一个可见，不存在「两个都藏起来只剩托盘」的中间态——托盘会被用户折叠，那时应用等于失踪。守住它的是三处：系统级最小化被 `on_window_event` 接管进浮窗模式、浮窗的关闭请求转为退出、`enter_float_mode` 在浮窗缺失时保留面板。
+
+**退出只有一个出口**：`lib.rs` 的 `shutdown_and_exit`（先 `engine.shutdown()` 再 `app.exit(0)`），托盘「退出」、`exit_app` 命令（面板关闭选「直接退出」、协议对话框「不同意并退出」）、浮窗关闭请求都走它。不走 `window.destroy()`：销毁面板时浮窗窗口仍在窗口表里，进程不会退出，引擎也不会停，结果是窗口全没了但连发还在后台跑。`RunEvent::Exit` 里再 `shutdown()` 一次，兜住不经此函数的退出路径。
 
 **单进程多窗口**：面板与浮窗是同一进程的独立 WebView，通过 `app.emit_all()` 事件通信（`float-active` / `global-enabled-changed` / `theme-changed` / `app-status-changed` / `update-*`），无 Named Pipe。窗口显隐统一走 `lib.rs` 的 `enter_panel_mode`（显示面板、隐藏浮窗）/ `enter_float_mode`（先显示浮窗再隐藏面板，浮窗缺失则保留面板）。激活态规则当前由前端轮询 `get_active_rules`。
 

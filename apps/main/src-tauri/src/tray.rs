@@ -132,8 +132,7 @@ pub fn setup_tray(app: &AppHandle, engine: Arc<BurstEngine>) -> tauri::Result<()
                     crate::enter_panel_mode(app);
                 }
                 "quit" => {
-                    engine_clone.shutdown();
-                    app.exit(0);
+                    crate::shutdown_and_exit(app);
                 }
                 _ => {}
             }

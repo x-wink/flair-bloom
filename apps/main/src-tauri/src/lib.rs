@@ -93,6 +93,13 @@ pub(crate) fn enter_float_mode<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
+/// 退出应用：先停引擎再退进程。所有"退出应用"入口都应走这里——引擎不停就退，
+/// 钩子线程可能在进程收尾期间还在注入按键。
+pub(crate) fn shutdown_and_exit<R: Runtime>(app: &AppHandle<R>) {
+    app.state::<EngineState>().0.shutdown();
+    app.exit(0);
+}
+
 pub fn log_dir() -> std::path::PathBuf {
     logging::log_dir()
 }
@@ -123,22 +130,30 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_dialog::init())
         .on_window_event(|window, event| {
-            // 系统级最小化（Win+D、任务栏按钮、Aero Shake）也收进浮窗，与标题栏的最小化按钮
-            // 一致。否则面板缩进任务栏、浮窗又不占任务栏位，应用就只剩一个托盘图标，
-            // 托盘一折叠用户就找不回来了。没有 Minimized 事件，最小化表现为 Resized。
-            if window.label() != PANEL_LABEL || !matches!(event, tauri::WindowEvent::Resized(_)) {
-                return;
+            match (window.label(), event) {
+                // 系统级最小化（Win+D、任务栏按钮、Aero Shake）也收进浮窗，与标题栏的最小化按钮
+                // 一致。否则面板缩进任务栏、浮窗又不占任务栏位，应用就只剩一个托盘图标，
+                // 托盘一折叠用户就找不回来了。没有 Minimized 事件，最小化表现为 Resized。
+                (PANEL_LABEL, tauri::WindowEvent::Resized(_)) => {
+                    if !window.is_minimized().unwrap_or(false) {
+                        return;
+                    }
+                    let window = window.clone();
+                    tauri::async_runtime::spawn(async move {
+                        // 先取消最小化：隐藏一个仍处于最小化状态的窗口，下次 show 会再缩回去；
+                        // 也让这次 hide 不再触发一轮 Resized + is_minimized。
+                        let _ = window.unminimize();
+                        enter_float_mode(window.app_handle());
+                    });
+                }
+                // 浮窗被 Alt+F4 关掉 = 关掉应用。浮窗太小放不下确认对话框，而放任它销毁会让
+                // 收起状态下的应用只剩托盘图标，且窗口销毁后无法再 show 回来。
+                (FLOAT_LABEL, tauri::WindowEvent::CloseRequested { api, .. }) => {
+                    api.prevent_close();
+                    shutdown_and_exit(window.app_handle());
+                }
+                _ => {}
             }
-            if !window.is_minimized().unwrap_or(false) {
-                return;
-            }
-            let window = window.clone();
-            tauri::async_runtime::spawn(async move {
-                // 先取消最小化：隐藏一个仍处于最小化状态的窗口，下次 show 会再缩回去；
-                // 也让这次 hide 不再触发一轮 Resized + is_minimized。
-                let _ = window.unminimize();
-                enter_float_mode(window.app_handle());
-            });
         })
         .manage(EngineState(burst_engine.clone()))
         .manage(ProfileNotice::default())
