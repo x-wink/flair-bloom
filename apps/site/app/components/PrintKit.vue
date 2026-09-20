@@ -69,7 +69,7 @@ onBeforeUnmount(() => {
               <h2 class="text-[13pt] font-semibold text-(--ui-fg-strong)">{{ item.title }}</h2>
               <!-- 海报按纸面排，要点连成一段读着更省地方，页面上才逐条列 -->
               <p class="mt-1 text-[9.5pt] leading-relaxed text-(--ui-fg-muted)">
-                {{ item.points.join('') }}
+                {{ item.points.join('，') }}
               </p>
             </div>
           </li>
@@ -82,7 +82,8 @@ onBeforeUnmount(() => {
             class="rounded-(--ui-radius) border border-(--ui-primary)/40 bg-(--ui-primary)/8 px-[4mm] py-[2.5mm] text-[9.5pt] text-(--ui-fg-strong)"
             :style="{ rotate: `${index % 2 ? 1.5 : -1.5}deg` }"
           >
-            “{{ rumor.text }}”
+            <span>“{{ rumor.text }}”</span>
+            <span v-if="rumor.author" class="ps-[2mm]">{{ rumor.author }}</span>
           </li>
         </ul>
       </div>
@@ -121,7 +122,7 @@ onBeforeUnmount(() => {
         <li v-for="item in highlights" :key="item.title" class="ui-glow-card print-avoid p-[3.5mm]">
           <p class="font-semibold text-(--ui-fg-strong)">{{ item.title }}</p>
           <p class="mt-1 text-[8.5pt] leading-relaxed text-(--ui-fg-muted)">
-            {{ item.points.join('') }}
+            {{ item.points.join('，') }}
           </p>
         </li>
       </ul>

@@ -72,14 +72,23 @@ export const tourSteps: TitledText[] = [
 
 
 // 前四条是作者写的游戏梗，后两条摘自玩家群聊（不署名）；区块标题写明「骚话」，不冒充实名评价。
-// offset 是桌面端左缩进，offsetSm 是手机端，错开摆放拼出互相压边的效果
-export const rumors = [
+// offset 是桌面端左缩进，offsetSm 是手机端，错开摆放拼出互相压边的效果。
+// 署名单独一个字段：混在正文里就得靠标签排版，页面和打印两处都得 v-html 才印得对
+export interface Rumor {
+  text: string;
+  /** 有署名的那几条，落在同一行的右端 */
+  author?: string;
+  offset: string;
+  offsetSm: string;
+}
+
+export const rumors: Rumor[] = [
   { text: '没用气质花之前过的都是什么苦日子啊 TAT', offset: '0%', offsetSm: '0%' },
-  { text: '<p style="display: flex;">妹妹说的对！还是紫色最有韵味～<span style="margin-left: auto;">--许嵩</span></p>', offset: '42%', offsetSm: '10%' },
+  { text: '妹妹说的对！还是紫色最有韵味～', author: '--许嵩', offset: '42%', offsetSm: '10%' },
   { text: '花间游悟，你终于舍得把焚诀交出来了！', offset: '18%', offsetSm: '4%' },
   { text: '我劝你们别在测试服用，会影响正式服强度', offset: '4%', offsetSm: '0%' },
   { text: 'Alt键能绑定了，鼠标滚轮和侧键也能连发了，好耶！~', offset: '38%', offsetSm: '10%' },
-  { text: '<p style="display: flex;">遥遥领先<span style="margin-left: auto;">--玄武 meta1024</span></p>', offset: '14%', offsetSm: '4%' },
+  { text: '遥遥领先', author: '--玄武 meta1024', offset: '14%', offsetSm: '4%' },
 ];
 
 

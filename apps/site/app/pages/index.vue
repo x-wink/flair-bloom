@@ -343,10 +343,10 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
                 class="absolute -top-3 start-4 font-serif text-5xl leading-none text-(--ui-primary)"
                 >“</span
               >
-              <!-- 容器必须是 div：骚话文案里带 <p>（署名那几条靠它右对齐），<p> 套 <p> 会被浏览器
-                   拆成兄弟节点，SSR 的 DOM 就比客户端 vdom 多出节点，水合当场报不匹配 -->
-              <!-- eslint-disable-next-line vue/no-v-html -- 文案是仓内写死的，不含外部输入 -->
-              <div class="text-(--ui-fg-strong)" v-html="rumor.text"></div>
+              <div class="flex flex-wrap items-baseline gap-x-4 text-(--ui-fg-strong)">
+                <span>{{ rumor.text }}</span>
+                <span v-if="rumor.author" class="ms-auto">{{ rumor.author }}</span>
+              </div>
             </li>
           </ul>
         </div>
