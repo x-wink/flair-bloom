@@ -50,7 +50,8 @@ fn hold_mode_separates_down_and_up_by_hold_duration() {
 
 - 调度器层（`scheduler/sim_tests.rs`）：点按档(1ms)同拍 down+up、Hold 档 down/up 按时长分离、节拍稳定、interval 边界(2ms 仍有 1ms 按下)、停止释放按住的目标键、间隔期停止不补多余 up、共享目标只发一次 down、共享目标 stopall 只释放一次、多目标 stopall 全释放、停止其一不影响其余、停止后干净重启、鼠标目标键。
 - 引擎状态机层（`burst-engine/src/lib.rs` `#[cfg(test)] mod tests`）：Hold 首按启动/松开停止、Toggle 切换、Toggle 独立停止键、分组互斥顶替 + 顶替后复位重启、热键长按去重、鼠标键去重、专用停止键先于去重 100% 触发、停止复位物理账本、全局禁用拦截启动。
-- 引擎管线层（`burst-engine/src/pipeline_tests.rs`）：注入命令录制替身，断言「按键 → 引擎 → 实际下发给调度器的命令 + generation」——Hold 启停、Toggle 同键开关、分组顶替先 stop 旧再 start 新、关全局开关 / 专用停止键下发 stop_all 且 generation 递增。抓 `active_ids` 测不到的引擎↔调度契约 bug。
+- 引擎管线层（`burst-engine/src/pipeline_tests.rs`）：注入命令录制替身，断言「按键 → 引擎 → 实际下发给调度器的命令 + generation」——Hold 启停、Toggle 同键开关、分组顶替先 stop 旧再 start 新、关全局开关 / 专用停止键下发 stop_all 且 generation 递增。抓 `active_ids` 测不到的引擎↔调度契约 bug。替身与规则构造器在 `test_support.rs` 共用。
+- 组内插队层（`burst-engine/src/preempt_tests.rs`）：对应「长按插队，切换让位；松手恢复」行为表——插队先停后启、松手恢复、多长按嵌套逐个松开、栈中间先松只出栈、暂停期间停止键 / 同组替换（被暂停的不发 stop、新规则保持暂停）、无分组与跨组互不影响、滚轮长按不插队、全局关闭 / 切后端 / 退出清栈，以及 `get_rule_states` 分区。
 - 纯逻辑层（共享 crate，覆盖率门槛 ≥85%）：`KeyId`、profile 校验、schema 迁移、AES/Ed25519、注入回灌过滤队列、throttle 升降数学。
 
 运行：`cargo test -p burst-engine`（含 sim_tests）。

@@ -91,9 +91,11 @@ AltGr 布局（德语 / 法语 / 波兰语等）把右 Alt 当 AltGr，键盘驱
 ## 前端结构要点
 
 - 面板根组件 `PanelApp.tsx`：竖版规则列表 + 横版键鼠图（`HorizontalLayout.tsx`，键位表在 `keyboardLayout.ts`），布局各自定窗口尺寸（竖版 405×720、横版 1060×580），切换时 `setSize + center`。
+- 竖版是一个统一列表：按规则数组顺序渲染，分组在其第一个成员的位置整体渲染为 `RuleGroup`（组头语义句 + 运行 / 暂停状态区），单卡是 `RuleCard`（纯展示 + 回调，不碰 `invoke`）。筛选只影响显示、不持久化；会改变分组成员的写入都经 `pushGroupMove`，某组第一次同时含长按与切换时提示一次插队语义。
+- 横版悬停走线：`hkbWires.ts` 是纯函数（边集合、曼哈顿 + 45° 切角路由、扇出偏移），`WireOverlay.tsx` 只量键帽位置画 SVG；几何断言在 `scripts/hkb-wires.test.ts`（`pnpm test:ui`）。
 - 设计 Token 在 `theme.css`，主题预设色板与亮 / 暗 / 跟随系统在 `theme.ts`（写 `data-theme` 到根元素）。所有组件通过变量取色取尺寸。
 - `components/Overlay.tsx` 提供锚定定位（12 方位 + 视口钳位）与遮罩；Toast / ConfirmDialog / ContextMenu 都建在它上面。层级 Token：`--fb-z-overlay-*` 供弹窗，`--fb-z-tour-*` 供新手引导（要叠在设置弹窗上）。
-- 新手引导 `tour/`：`TourRunner.tsx` 是唯一有 DOM 逻辑的文件（四块遮罩镂空、锚定气泡、实操判定），教程内容在 `tour/tours/<id>.ts`，只经 `TourHost` 接口操作宿主；进度存 `settings.json` 的 `tours` 键：`completed` 是学过的教程，`introVersion` 是已自动展示过的首启教程版本——与用户协议同一套语义，`TOUR_INTRO_VERSION`（`tour/types.ts`）一 bump，老用户下次启动会再自动看一遍。判定刻意不看「有没有规则」：新装配置自带两条未启用的出厂规则，那个口径对新用户永远为假。说明书大纲在本 skill 的 `references/manual/<id>.md`，`pnpm skills:check` 钉住一一对应。
+- 新手引导 `tour/`：`TourRunner.tsx` 是唯一有 DOM 逻辑的文件（四块遮罩镂空、锚定气泡、实操判定），教程内容在 `tour/tours/<id>.ts`，只经 `TourHost` 接口操作宿主（含互斥组教程用的 `createSampleGroup` / `deleteGroupRules`，快照带引擎的 `runningRuleIds` / `pausedRuleIds` 供实操判定）；进度存 `settings.json` 的 `tours` 键：`completed` 是学过的教程，`introVersion` 是已自动展示过的首启教程版本——与用户协议同一套语义，`TOUR_INTRO_VERSION`（`tour/types.ts`）一 bump，老用户下次启动会再自动看一遍。判定刻意不看「有没有规则」：新装配置自带两条未启用的出厂规则，那个口径对新用户永远为假。说明书大纲在本 skill 的 `references/manual/<id>.md`，`pnpm skills:check` 钉住一一对应。
 - 冲突检测 `conflicts.ts` 管跨绑定的软性提醒（面板键遮蔽全局键、热键盖住规则触发键、A 的连发键是 B 的触发键），与后端的硬性录入策略互不替代。
 
 ## 数据存储路径

@@ -186,3 +186,4 @@ Goal: 长按连发规则能加入互斥组，按住时同组正在跑的规则�
 | T4 | 已完成 | 列表 / 键帽 / 浮窗：形状表模式（长按实心、切换描边），外圈呼吸光晕表运行、⏸ + 降透明度表暂停；界面、教程、说明书口径「按压」→「长按」 |
 | T5 | 已完成 | 组号角标按模式实心 / 描边；悬停走线（`hkbWires.ts` 纯函数 + `WireOverlay.tsx`，`pnpm test:ui` 断言几何）；图例补组号两态与走线两色 |
 | T6 | 已完成 | 教程：快照加 running / paused、宿主 `createSampleGroup` / `deleteGroupRules`、body 与 actionHint 可为函数；`getting-started` / `rules` 改写，新增 `groups` + `GroupTimeline`；`TOUR_INTRO_VERSION` = 2；`manual/groups.md` 与 SKILL / README 教程表同步 |
+| T7 | 已完成 | CHANGELOG `[Unreleased]`、README（功能要点、横版 / 浮窗示意、教程表）、architecture / testing 收口、网站 `content.ts` 文案（站点在应用发版后再推 `site-v` tag） |
