@@ -99,7 +99,7 @@ export const groups: TourDef = {
         const [a] = sampleKeys(host.snapshot);
         return p(
           '要做三件事：把示例组三条规则的开关都勾上；点亮右下角的总开关；',
-          `再按一下 ${a}——组头亮起「宏A 在跑」。`,
+          `再按一下 ${a}——组头亮起「宏A 在跑」。保持这个窗口在前面，连发的键会打进前台窗口。`,
         );
       },
       prepare: (host) => (sampleRules(host.snapshot) ? undefined : 'skip'),
