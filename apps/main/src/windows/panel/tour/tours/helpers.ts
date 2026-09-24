@@ -39,8 +39,15 @@ export interface SampleRules {
   hold: TourRule;
 }
 
-/** 示例组三条都在才算有示例组；用户删掉其中一条后第 4～6 步没法做，直接跳过。 */
-export function sampleRules(snapshot: TourSnapshot): SampleRules | undefined {
+/**
+ * 示例组三条都在才算有示例组——宿主建组与教程判定共用这一个口径。只剩部分（用户删了一条、
+ * 拖出组）视为脏数据，宿主重建时先清掉；第 4～6 步在不完整时直接跳过。
+ */
+export function isSampleRule(rule: Pick<TourRule, 'id' | 'group'>): boolean {
+  return (Object.values(SAMPLE_IDS) as string[]).includes(rule.id) || rule.group === SAMPLE_GROUP;
+}
+
+export function sampleRules(snapshot: Pick<TourSnapshot, 'rules'>): SampleRules | undefined {
   const find = (id: string) => snapshot.rules.find((r) => r.id === id);
   const a = find(SAMPLE_IDS.a);
   const b = find(SAMPLE_IDS.b);

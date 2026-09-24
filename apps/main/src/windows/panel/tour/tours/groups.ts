@@ -3,7 +3,7 @@ import Button from '../../components/Button';
 import { keyLabel } from '../../components/KeyCapture';
 import GroupTimeline from '../components/GroupTimeline';
 import type { TourDef, TourHost, TourSnapshot } from '../types';
-import { p, SAMPLE_GROUP, SAMPLE_IDS, sampleRules } from './helpers';
+import { p, SAMPLE_IDS, sampleRules } from './helpers';
 
 /** 示例组三条规则的启动键名；示例组不在时用出厂键位讲。 */
 function sampleKeys(snapshot: TourSnapshot): [string, string, string] {
@@ -157,7 +157,7 @@ export const groups: TourDef = {
             '示例组用不上了可以一键删掉。',
           ),
           sampleRules(host.snapshot)
-            ? button('删除示例组', () => host.deleteGroupRules(SAMPLE_GROUP))
+            ? button('删除示例组', () => host.deleteSampleGroup())
             : undefined,
         ),
     },

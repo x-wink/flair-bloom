@@ -61,8 +61,11 @@ export interface TourHost {
    * 全被占用时不建、由宿主提示，返回 false。
    */
   createSampleGroup: () => boolean;
-  /** 删掉该分组里的全部规则——是删规则，不是「解散」（解散只清分组、规则保留）。 */
-  deleteGroupRules: (name: string) => void;
+  /**
+   * 删掉示例组：固定 id 的示例规则与组名为示例组的规则都删——是删规则，不是「解散」
+   * （解散只清分组、规则保留）。按 id 也删，是因为用户可能把示例规则拖出了组。
+   */
+  deleteSampleGroup: () => void;
 }
 
 export type PrepareResult = void | 'skip';
