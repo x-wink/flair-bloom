@@ -5,80 +5,9 @@
 //! 调度器的命令序列**——能抓住「状态对但命令错/漏/generation 不匹配」这类引擎↔调度契约 bug。
 //! 真实注入时序由 `scheduler/sim_tests.rs`（L1）覆盖。
 
-use crate::scheduler::Scheduler;
-use crate::BurstEngine;
+use crate::test_support::{rule, setup};
 use qzh_profile::key_id::KeyId;
-use qzh_profile::profile::{BurstMode, BurstRule};
-use std::sync::{Arc, Mutex};
-
-/// 只记录引擎下发命令、不做任何调度的替身。阻塞类命令一律返回 true（成功），
-/// 使引擎走正常路径而非 simulated_keys 兜底。
-#[derive(Default)]
-struct RecordingScheduler {
-    cmds: Mutex<Vec<String>>,
-}
-
-impl RecordingScheduler {
-    fn clear(&self) {
-        self.cmds.lock().unwrap().clear();
-    }
-    fn cmds(&self) -> Vec<String> {
-        self.cmds.lock().unwrap().clone()
-    }
-    fn log(&self, s: String) {
-        self.cmds.lock().unwrap().push(s);
-    }
-}
-
-impl Scheduler for RecordingScheduler {
-    fn start_rule(&self, rule: Arc<BurstRule>, generation: u64) {
-        self.log(format!("start:{}:g{generation}", rule.id));
-    }
-    fn tap_once(&self, rule: Arc<BurstRule>, generation: u64) {
-        self.log(format!("tap:{}:g{generation}", rule.id));
-    }
-    fn stop_rule(&self, rule_id: String, generation: u64) {
-        self.log(format!("stop:{rule_id}:g{generation}"));
-    }
-    fn stop_all_async(&self, generation: u64) {
-        self.log(format!("stopall:g{generation}"));
-    }
-    fn stop_all_blocking(&self, generation: u64) -> bool {
-        self.log(format!("stopall_blocking:g{generation}"));
-        true
-    }
-    fn shutdown_blocking(&self, generation: u64) -> bool {
-        self.log(format!("shutdown:g{generation}"));
-        true
-    }
-    fn hp_degraded(&self) -> bool {
-        false
-    }
-}
-
-fn rule(id: &str, mode: BurstMode, trigger: KeyId, target: KeyId) -> BurstRule {
-    BurstRule {
-        id: id.to_string(),
-        enabled: true,
-        trigger_key: trigger,
-        target_key: target,
-        mode,
-        stop_key: None,
-        interval_ms: 10,
-        group: None,
-    }
-}
-
-/// 建好引擎、装规则、开全局开关，并清掉装规则引发的 stop_all，
-/// 使后续断言只看「按键引发的命令」。装规则会把 generation 推进到 1。
-fn setup(rules: Vec<BurstRule>) -> (BurstEngine, Arc<RecordingScheduler>) {
-    let rec = Arc::new(RecordingScheduler::default());
-    let engine = BurstEngine::new_with_scheduler(rec.clone());
-    engine.set_rules(rules);
-    engine.set_global_enabled(true, false);
-    rec.clear();
-    (engine, rec)
-}
+use qzh_profile::profile::BurstMode;
 
 #[test]
 fn hold_press_release_emits_start_then_stop_same_generation() {

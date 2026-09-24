@@ -74,7 +74,9 @@ X1/X2 在 DD 模式 / 鼠标设备缺失时按 once 旗标 warn 一次后自动�
 - 注入事件先在 hook 层过滤：SendInput / Interception 用 `SIM_MARKER`，DDSimple 用 `PENDING_INJECTIONS`（以 `(KeyId, is_up)` 为键）。
 - 引擎用 `pressed_keys: HashSet<KeyId>` 记录已按下的物理键，只让首次 down 进入 `on_key_press`，up 时移除；不依赖 `KBDLLHOOKSTRUCT.flags` 的保留位判断 key-repeat。
 - 线程编排：`catch_unwind` 包裹引擎线程，panic 后记录日志并补发释放事件；并发连发用 `AtomicBool cancel + thread::park_timeout`，`Drop` 时先 signal 再 join 确保按键不卡住。规则热更新前停止连发线程并清空 toggle 状态。
-- Toggle 互斥分组：同组激活一条自动停止同组其他活跃规则；同组切换时只播报「新规则开始」。
+- 互斥组（`BurstRule.group`）：同组同一时间只有一条规则在跑。切换规则开启时停止同组其他切换规则；同组切换时只播报「新规则开始」。
+- 组内插队栈：组内长按规则按下时插队——同组正在跑的规则标 `paused`（仍留在活跃集合）并让调度器停下，长按入该组的 `hold_stacks` 栈开跑；松开时先停自己，再把组还给栈里仍按着的上一条长按，否则还给被暂停的切换规则。栈中间先松的只出栈，不影响栈顶。插队期间开启的同组切换规则以 `paused` 登记，只成为松手后的恢复目标——正在按住的长按不能被挤掉，否则手指按着却不连发。滚轮触发的长按每格只是一次点按、没有「按住」，不参与插队。全局暂停、换规则、切后端、退出时清空栈与暂停状态。
+- `get_active_ids` 返回运行 ∪ 暂停：前端靠它差分播报，暂停 / 恢复不改变集合，插队不会多响；`get_rule_states` 返回 `RuleStates { running, paused }` 供界面区分两种状态。
 - 多规则隔离：模拟目标键不会触发其他规则的启动 / 停止逻辑。
 - 非 Windows 平台提供空实现（`cfg(windows)` 隔离）。
 

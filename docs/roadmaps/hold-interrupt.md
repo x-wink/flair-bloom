@@ -46,7 +46,7 @@ Goal: 长按连发规则能加入互斥组，按住时同组正在跑的规则�
 | 暂停期间按切换规则的停止键 | 该规则移出 `active_rules`，松手后不恢复 |
 | 暂停期间按同组另一条切换规则的启动键 | 按现有互斥替换恢复目标，新规则保持暂停，松手后运行 |
 | 组内没有别的规则在跑 | 长按规则就是普通按住连发 |
-| 滚轮触发的长按规则 | 插队只持续一次点按，点完立刻恢复 |
+| 滚轮触发的长按规则 | 不插队，与同组切换同时跑 |
 | 全局暂停、切换后端、退出 | 清空栈与暂停状态 |
 | 声音播报 | 暂停 / 恢复不播报，只有切换规则真正开始 / 结束才播 |
 
@@ -74,19 +74,21 @@ Goal: 长按连发规则能加入互斥组，按住时同组正在跑的规则�
 - **D13：互斥组教程用「示例组」实操，不只看不点。** 宿主提供 `createSampleGroup()`：建一个「示例·多段宏」组，含两条切换（`1 → Q`、`2 → E`）和一条长按（`V → R`），**全部停用**，组内规则不存在时才建。用户在教程里亲手启用、按键、看组头状态，做完可一键删掉整组。选键避开鼠标键（注入左键会点到面板自己）。
 - **D14：概念先用气泡内动画时间线讲，再实操验证。** 气泡 `body` 是 `ReactNode`，加一个 `tour/components/GroupTimeline.tsx`：四条泳道（按键 / 宏A / 宏B / 长按），按「按 1 → 按 2 → 按住 V → 松开 V」四拍播放，谁在跑谁暂停一目了然；`prefers-reduced-motion` 下静态展示最后一帧。用户先有画面，再去按真键对照。
 - **D15：`TOUR_INTRO_VERSION` bump 到 `2`。** 「上手三步」第 1 步的锚点与文案随统一列表变了，老用户启动时再看一次。
+- **D16：滚轮触发的长按不参与插队。** 滚轮每格是瞬发点按，没有「按住」；调度器 Stop → Tap → Start 与不停止在用户看来等价，却多一轮停启并打断切换规则的拍相位，不值得。
+- **D17：分工。** 指挥 flair-bloom-2f，执行 flair-bloom-9e；执行方不 push、不推 tag。
 
 ## 3. 设计要点
 
 ### 引擎（`packages/burst-engine`）
 
-- `ActiveRule` 加 `paused: bool`；`RuntimeState` 加 `hold_stack: Vec<String>`（按住中的组内长按规则，按按下顺序）。
+- `ActiveRule` 存 `Arc<BurstRule>` + `paused: bool`；`RuntimeState` 加 `hold_stacks: HashMap<String, Vec<String>>`（按组分桶的按住中长按规则，按按下顺序，栈空即删键）。
 - `start_rule`（Hold）：若 `rule.group` 存在，把同组 running 规则标 paused 并 `scheduler.stop_rule`；自身入栈。
 - `stop_rule`（Hold release）：出栈；若自己是栈顶，恢复下一个候选：栈里上一条 → 否则同组 paused 的切换规则，调 `scheduler.start_rule`。
 - `handle_toggle_press`：同组有长按在栈中时，新规则以 paused 插入而非启动；停止键命中 paused 规则直接移除。
-- `tap_once_rule`（滚轮 Hold）：插队一次点按后立刻恢复，不入栈。
+- `tap_once_rule`（滚轮 Hold）：不插队（D16）。
 - `stop_runtime_activity` / 后端切换：清栈与 paused。
 - `get_active_ids` 不变；新增 `get_rule_states`。
-- 单测覆盖 0.2 表每一行，重点：栈中间先松、暂停期间停止键、暂停期间切换替换、滚轮插队。
+- 单测覆盖 0.2 表每一行，重点：栈中间先松、暂停期间停止键、暂停期间切换替换、滚轮不插队。
 
 ### 竖版面板
 
@@ -176,4 +178,6 @@ Goal: 长按连发规则能加入互斥组，按住时同组正在跑的规则�
 
 ## 6. 交接
 
-（开工后按轮次更新：已完成任务卡、遗留、下一步入口。）
+| 卡 | 状态 | 说明 |
+| --- | --- | --- |
+| T1 | 已完成 | 引擎插队栈 + `get_rule_states`；`preempt_tests.rs` 覆盖 0.2 表 |

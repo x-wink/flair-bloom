@@ -4,6 +4,10 @@ pub mod stress;
 
 #[cfg(test)]
 mod pipeline_tests;
+#[cfg(test)]
+mod preempt_tests;
+#[cfg(test)]
+mod test_support;
 
 #[cfg(all(test, windows))]
 mod smoke_tests;
@@ -107,19 +111,46 @@ pub struct KeyProcessResult {
     pub handled: bool,
 }
 
+/// 规则的运行 / 暂停分区。`running` 正在向调度器连发；`paused` 仍算开启（按着的长按、
+/// 已开启的切换），只是被同组按住的长按插队而暂时让位。两列均按 ID 排序。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RuleStates {
+    pub running: Vec<String>,
+    pub paused: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 struct ActiveRule {
-    mode: BurstMode,
-    group: Option<String>,
+    rule: Arc<BurstRule>,
+    /// 被同组长按插队而让位：仍算开启，但调度器里已停；恢复时重新 `start_rule`。
+    paused: bool,
+}
+
+impl ActiveRule {
+    fn in_group(&self, group: &str) -> bool {
+        self.rule.group.as_deref() == Some(group)
+    }
 }
 
 #[derive(Debug)]
 struct RuntimeState {
     lifecycle: EngineLifecycle,
-    /// 当前活跃规则。Toggle 是否「已开启」直接由此派生（存在且 `mode == Toggle`），
+    /// 当前活跃规则（含被插队暂停的）。Toggle 是否「已开启」直接由此派生，
     /// 以单一事实来源避免双表同步竞态。
     active_rules: HashMap<String, ActiveRule>,
+    /// 组内插队栈：group → 正按住的组内长按规则 ID，按按下顺序，栈顶在跑。按组分桶使跨组
+    /// 长按天然互不影响。不变量：某组栈非空时，该组只有栈顶在跑，其余同组活跃规则都 paused；
+    /// 栈空即删键，使「组里有没有长按按着」只需查键是否存在，不会被残留的空栈误判。
+    hold_stacks: HashMap<String, Vec<String>>,
     stop_generation: u64,
+}
+
+impl RuntimeState {
+    /// 清空全部活跃规则与插队栈（全局暂停、换规则、切后端、退出共用）。
+    fn clear_activity(&mut self) {
+        self.active_rules.clear();
+        self.hold_stacks.clear();
+    }
 }
 
 pub struct BurstEngine {
@@ -174,6 +205,7 @@ impl BurstEngine {
             runtime: Arc::new(Mutex::new(RuntimeState {
                 lifecycle: EngineLifecycle::Paused,
                 active_rules: HashMap::new(),
+                hold_stacks: HashMap::new(),
                 stop_generation: 0,
             })),
             physical_pressed: Arc::new(Mutex::new(HashSet::new())),
@@ -249,8 +281,8 @@ impl BurstEngine {
         revive(self.hotkeys.lock()).clone()
     }
 
-    /// 当前正在执行连发的规则 ID 集合：hold 模式表示触发键被按住，toggle 模式表示已开启。
-    /// 用于前端轮询展示激活态视觉反馈。
+    /// 当前活跃的规则 ID 集合（含被插队暂停的）：hold 模式表示触发键被按住，toggle 模式表示已开启。
+    /// 前端靠它差分播报切换规则启停，暂停 / 恢复不改变该集合，故插队不会多响。
     pub fn get_active_ids(&self) -> Vec<String> {
         let mut ids = revive(self.runtime.lock())
             .active_rules
@@ -259,6 +291,21 @@ impl BurstEngine {
             .collect::<Vec<_>>();
         ids.sort();
         ids
+    }
+
+    /// 活跃规则按运行 / 暂停分区，供前端区分「在跑」与「被插队暂停」。
+    pub fn get_rule_states(&self) -> RuleStates {
+        let mut states = RuleStates::default();
+        for (id, active) in &revive(self.runtime.lock()).active_rules {
+            if active.paused {
+                states.paused.push(id.clone());
+            } else {
+                states.running.push(id.clone());
+            }
+        }
+        states.running.sort();
+        states.paused.sort();
+        states
     }
 
     /// 返回 true 表示引擎处理了本次按键（热键触发或规则匹配），false 表示未匹配或重复按下。
@@ -381,7 +428,7 @@ impl BurstEngine {
             }
             runtime.lifecycle = EngineLifecycle::ShuttingDown;
             runtime.stop_generation = runtime.stop_generation.saturating_add(1);
-            runtime.active_rules.clear();
+            runtime.clear_activity();
             runtime.stop_generation
         };
         self.global_enabled.store(false, Ordering::SeqCst);
@@ -466,41 +513,51 @@ impl BurstEngine {
             let started = runtime
                 .active_rules
                 .get(&rule.id)
-                .is_some_and(|a| a.mode == BurstMode::Toggle);
+                .is_some_and(|a| a.rule.mode == BurstMode::Toggle);
             if started {
                 if stop != key {
                     return false;
                 }
-                runtime.active_rules.remove(&rule.id);
-                stop_ids.push(rule.id.clone());
+                // 被插队暂停的规则调度器里已停，只移出活跃集合，松手后也就不再恢复。
+                if runtime
+                    .active_rules
+                    .remove(&rule.id)
+                    .is_some_and(|a| !a.paused)
+                {
+                    stop_ids.push(rule.id.clone());
+                }
             } else {
                 if rule.trigger_key != key {
                     return false;
                 }
+                let mut paused = false;
                 if let Some(group) = rule.group.as_deref() {
                     let displaced = runtime
                         .active_rules
                         .iter()
                         .filter_map(|(id, active)| {
                             (id != &rule.id
-                                && active.mode == BurstMode::Toggle
-                                && active.group.as_deref() == Some(group))
+                                && active.rule.mode == BurstMode::Toggle
+                                && active.in_group(group))
                             .then_some(id.clone())
                         })
                         .collect::<Vec<_>>();
                     for id in displaced {
-                        runtime.active_rules.remove(&id);
-                        stop_ids.push(id);
+                        if runtime.active_rules.remove(&id).is_some_and(|a| !a.paused) {
+                            stop_ids.push(id);
+                        }
                     }
+                    // 同组有长按按着：正在按住的长按不被切换挤掉，新规则只成为松手后的恢复目标。
+                    paused = runtime.hold_stacks.contains_key(group);
                 }
                 runtime.active_rules.insert(
                     rule.id.clone(),
                     ActiveRule {
-                        mode: BurstMode::Toggle,
-                        group: rule.group.clone(),
+                        rule: rule.clone(),
+                        paused,
                     },
                 );
-                start_rule = true;
+                start_rule = !paused;
             }
             generation = runtime.stop_generation;
         }
@@ -514,27 +571,46 @@ impl BurstEngine {
         true
     }
 
+    /// 长按按下。带 group 时插队：同组正在跑的规则暂停让位，自身入栈开跑。
     fn start_rule(&self, rule: Arc<BurstRule>) -> bool {
+        let mut stop_ids = Vec::new();
         let generation = {
             let mut runtime = revive(self.runtime.lock());
             if !runtime_can_start(&runtime) || runtime.active_rules.contains_key(&rule.id) {
                 return false;
             }
+            if let Some(group) = rule.group.as_deref() {
+                for (id, active) in runtime.active_rules.iter_mut() {
+                    if !active.paused && active.in_group(group) {
+                        active.paused = true;
+                        stop_ids.push(id.clone());
+                    }
+                }
+                runtime
+                    .hold_stacks
+                    .entry(group.to_string())
+                    .or_default()
+                    .push(rule.id.clone());
+            }
             runtime.active_rules.insert(
                 rule.id.clone(),
                 ActiveRule {
-                    mode: rule.mode.clone(),
-                    group: rule.group.clone(),
+                    rule: rule.clone(),
+                    paused: false,
                 },
             );
             runtime.stop_generation
         };
+        for id in stop_ids {
+            self.scheduler.stop_rule(id, generation);
+        }
         self.scheduler.start_rule(rule, generation);
         true
     }
 
     /// 滚轮 Hold 的一次性点按：仅校验 lifecycle、捕获 generation 后委派调度器点按一次。
     /// 不登记 `active_rules`——瞬发且可重复，登记会被去重/释放逻辑误吞后续滚轮格。
+    /// 也不参与组内插队：每格只是一次点按，没有「按住」可言，与同组切换同时跑即可。
     fn tap_once_rule(&self, rule: Arc<BurstRule>) -> bool {
         let generation = {
             let runtime = revive(self.runtime.lock());
@@ -547,15 +623,48 @@ impl BurstEngine {
         true
     }
 
+    /// 长按松开。在跑的组内长按松手后把组还给上一个：栈里仍按着的前一条长按，
+    /// 否则被暂停的切换规则；本就被暂停（栈中间先松）的只出栈，不影响栈顶。
     fn stop_rule(&self, rule_id: &str) -> bool {
-        let generation = {
+        let mut resume = None;
+        let (was_running, generation) = {
             let mut runtime = revive(self.runtime.lock());
-            if runtime.active_rules.remove(rule_id).is_none() {
+            let Some(active) = runtime.active_rules.remove(rule_id) else {
                 return false;
+            };
+            if let Some(group) = active.rule.group.as_deref() {
+                let top = runtime.hold_stacks.get_mut(group).and_then(|stack| {
+                    stack.retain(|id| id != rule_id);
+                    stack.last().cloned()
+                });
+                if top.is_none() {
+                    runtime.hold_stacks.remove(group);
+                }
+                if !active.paused {
+                    let candidate = top.or_else(|| {
+                        runtime
+                            .active_rules
+                            .iter()
+                            .find(|(_, a)| {
+                                a.paused && a.rule.mode == BurstMode::Toggle && a.in_group(group)
+                            })
+                            .map(|(id, _)| id.clone())
+                    });
+                    if let Some(next) = candidate.and_then(|id| runtime.active_rules.get_mut(&id)) {
+                        next.paused = false;
+                        resume = Some(next.rule.clone());
+                    }
+                }
             }
-            runtime.stop_generation
+            (!active.paused, runtime.stop_generation)
         };
-        self.scheduler.stop_rule(rule_id.to_string(), generation);
+        // 与切换互斥替换同一契约：先停后启，调度器里同组任一时刻至多一条在跑。
+        if was_running {
+            self.scheduler.stop_rule(rule_id.to_string(), generation);
+        }
+        if let Some(rule) = resume {
+            self.scheduler.start_rule(rule, generation);
+        }
         true
     }
 
@@ -578,7 +687,7 @@ impl BurstEngine {
             }
             runtime.lifecycle = EngineLifecycle::Stopping;
             runtime.stop_generation = runtime.stop_generation.saturating_add(1);
-            runtime.active_rules.clear();
+            runtime.clear_activity();
             runtime.stop_generation
         };
 
