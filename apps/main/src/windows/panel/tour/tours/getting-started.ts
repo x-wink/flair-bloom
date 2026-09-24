@@ -7,8 +7,8 @@ export const gettingStarted: TourDef = {
   summary: '添加第一条规则并让它跑起来',
   steps: [
     {
-      id: 'tabs',
-      target: 'filter',
+      id: 'modes',
+      target: 'add-buttons',
       title: '两种连发',
       body: p(
         '长按连发：按住那个键就一直连，松手就停。',
@@ -18,7 +18,7 @@ export const gettingStarted: TourDef = {
       prepare: async (host) => {
         host.closeMenus();
         await host.setLayout('vertical');
-        host.setFilter('hold');
+        host.setFilter('all');
       },
     },
     {
@@ -26,7 +26,7 @@ export const gettingStarted: TourDef = {
       target: 'add-hold',
       title: '添加第一条规则',
       body: p('点这个按钮，下面会出现一张规则卡。'),
-      prepare: (host) => host.setFilter('hold'),
+      prepare: (host) => host.setFilter('all'),
       done: (now, entered) => now.rules.length > entered.rules.length,
       actionHint: '等你点一下…',
     },
@@ -73,7 +73,7 @@ export const gettingStarted: TourDef = {
       id: 'finish',
       title: '会了',
       body: p(
-        '☰ 菜单里的「新手教程」还有五组，随时能回来看。',
+        '☰ 菜单里的「新手教程」还有六组，随时能回来看。',
         '要在游戏里用，接着看「游戏模式与驱动」那一组。',
       ),
     },

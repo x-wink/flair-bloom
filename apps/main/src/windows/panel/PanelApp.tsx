@@ -52,6 +52,7 @@ import UpdateProgressBar, { type UpdateDownloadProgress } from './components/Upd
 import { detectConflicts, severityForKey, severityForRule } from './conflicts';
 import TourRunner from './tour/TourRunner';
 import { findTour, TOURS } from './tour/tours';
+import { SAMPLE_GROUP, SAMPLE_IDS } from './tour/tours/helpers';
 import type { TourDef, TourExitResult, TourHost, TourSnapshot } from './tour/types';
 import { useTourProgress } from './tour/useTourProgress';
 import { useKeyRelay } from './useKeyRelay';
@@ -2140,6 +2141,8 @@ export default function PanelApp() {
       settingsOpen: showSettings,
       settingsTab,
       coincidentToggle: keyPolicies.coincident_toggle,
+      runningRuleIds: [...activeRuleIds].filter((id) => !pausedRuleIds.has(id)).sort(),
+      pausedRuleIds: [...pausedRuleIds].sort(),
     }),
     [
       rules,
@@ -2151,6 +2154,8 @@ export default function PanelApp() {
       showSettings,
       settingsTab,
       keyPolicies.coincident_toggle,
+      activeRuleIds,
+      pausedRuleIds,
     ],
   );
 
@@ -2162,11 +2167,79 @@ export default function PanelApp() {
       openSettings: handleShowSettings,
       closeSettings: () => setShowSettings(false),
       closeMenus,
+      createSampleGroup,
+      deleteGroupRules,
     }),
     // 动作都是组件内的普通函数、每次渲染新建，纳入依赖等于每帧换一个 host；
     // 只让快照变化驱动重建
     [tourSnapshot],
   );
+
+  /**
+   * 互斥组教程的示例组：两条切换 + 一条长按，全部停用。键位从候选里挑没被占用的——撞上用户
+   * 自己的规则会同时触发、冲突提醒变红，教程就讲不清了。走 pushRules 不走 pushGroupMove：
+   * 教程本身就在讲插队，不再弹 D10 提示。
+   */
+  function createSampleGroup(): boolean {
+    if (
+      rules.some(
+        (r) => r.group === SAMPLE_GROUP || (Object.values(SAMPLE_IDS) as string[]).includes(r.id),
+      )
+    )
+      return true;
+    const used = new Set<string>();
+    const mark = (k: KeyId | null) => k && used.add(`${k.kind}:${k.code}`);
+    for (const r of rules) {
+      mark(r.trigger_key);
+      mark(r.target_key);
+      mark(r.stop_key);
+    }
+    mark(hotkeys.global_toggle);
+    mark(hotkeys.global_stop);
+    mark(hotkeys.panel_toggle);
+    const free = (vk: number) => !used.has(`keyboard:${vk}`);
+    const targets = [0x51, 0x45, 0x52]; // Q / E / R
+    const pairs: [number, number][] = [
+      [0x31, 0x32],
+      [0x33, 0x34],
+      [0x35, 0x36],
+      [0x37, 0x38],
+      [0x39, 0x30],
+      [0x5a, 0x58],
+    ];
+    const holds = [0x56, 0x42, 0x4e, 0x4d, 0x48, 0x4a]; // V B N M H J
+    const pair = pairs.find(([a, b]) => free(a) && free(b));
+    const hold = holds.find(free);
+    const hotkeyOnTarget = [hotkeys.global_toggle, hotkeys.global_stop, hotkeys.panel_toggle].some(
+      (k) => k && targets.some((vk) => keyEq(k, keyboardKey(vk))),
+    );
+    if (!pair || hold === undefined || hotkeyOnTarget) {
+      toast.warning('键位都被占用了，请先在规则或热键里腾出两个数字键和一个字母键，或跳过这一步');
+      return false;
+    }
+    const sample = (id: string, mode: BurstMode, trigger: number, target: number): BurstRule => ({
+      id,
+      enabled: false,
+      trigger_key: keyboardKey(trigger),
+      target_key: keyboardKey(target),
+      mode,
+      stop_key: null,
+      interval_ms: 50,
+      group: SAMPLE_GROUP,
+    });
+    pushRules((prev) => [
+      ...prev,
+      sample(SAMPLE_IDS.a, 'toggle', pair[0], targets[0]),
+      sample(SAMPLE_IDS.b, 'toggle', pair[1], targets[1]),
+      sample(SAMPLE_IDS.hold, 'hold', hold, targets[2]),
+    ]);
+    setFilter('all');
+    return true;
+  }
+
+  function deleteGroupRules(name: string) {
+    pushRules((prev) => prev.filter((r) => r.group !== name));
+  }
 
   function logTourEvent(id: string, event: string) {
     invoke('log_from_frontend', { level: 'info', message: `tour ${id} ${event}` }).catch(() => {});

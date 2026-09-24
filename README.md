@@ -96,7 +96,8 @@
 | ---------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | 上手三步         | 添加第一条规则、录键、打开总开关（首次启动、教程更新后自动进入）      | [getting-started](skills/flair-bloom/references/manual/getting-started.md) |
 | 游戏模式与驱动   | 为什么游戏里要装驱动、怎么装、装不上怎么办                            | [game-mode](skills/flair-bloom/references/manual/game-mode.md)             |
-| 规则玩法         | 长按 / 切换连发、"开始键"和"被连的键"分开、多段宏互斥分组、⚠ 冲突提醒 | [rules](skills/flair-bloom/references/manual/rules.md)                     |
+| 规则玩法         | 长按 / 切换连发、点标签换模式、"开始键"和"被连的键"分开、⚠ 冲突提醒   | [rules](skills/flair-bloom/references/manual/rules.md)                     |
+| 互斥组与多段宏   | 多段宏一键切换互不打架；跑宏时按住长按键临时插队，松手宏自己接着跑    | [groups](skills/flair-bloom/references/manual/groups.md)                   |
 | 横版键鼠图与浮窗 | 在键盘 / 鼠标示意图上点键设连发，收进右下角常驻悬浮条                 | [layouts](skills/flair-bloom/references/manual/layouts.md)                 |
 | 多套配置         | 不同角色 / 心法各存一套，一键切换，导出 `.qzh` 分享                   | [profiles](skills/flair-bloom/references/manual/profiles.md)               |
 | 热键、声音与外观 | 游戏里一键开关 / 显隐面板，语音或音频播报，21 个门派配色              | [settings](skills/flair-bloom/references/manual/settings.md)               |

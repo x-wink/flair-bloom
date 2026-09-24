@@ -352,14 +352,16 @@ export default function TourRunner({ tour, host, paused = false, onExit }: Props
           </button>
         </div>
         <div className="tour-bubble__body">
-          {step.body}
+          {typeof step.body === 'function' ? step.body(host) : step.body}
           {missing && (
             <p className="tour-bubble__note">这一步的目标当前不在界面上，可以直接看下一步。</p>
           )}
         </div>
         {interactive && (
           <div className={`tour-bubble__hint${phase === 'done' ? ' tour-bubble__hint--done' : ''}`}>
-            {phase === 'done' ? '✓ 完成' : `● ${step.actionHint ?? '等你操作…'}`}
+            {phase === 'done'
+              ? '✓ 完成'
+              : `● ${(typeof step.actionHint === 'function' ? step.actionHint(host.snapshot) : step.actionHint) ?? '等你操作…'}`}
           </div>
         )}
         <div className="tour-bubble__footer">

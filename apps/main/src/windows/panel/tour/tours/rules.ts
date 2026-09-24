@@ -8,28 +8,28 @@ function hasHoldRule(snapshot: TourSnapshot): boolean {
 export const rules: TourDef = {
   id: 'rules',
   title: '规则玩法',
-  summary: '长按 / 切换、高级设置、互斥分组',
+  summary: '筛选、规则卡、换模式、高级设置',
   steps: [
     {
-      id: 'modes',
+      id: 'filter',
       target: 'filter',
-      title: '两种连发各适合什么',
+      title: '一个列表，顶部只管筛选',
       body: p(
-        '长按连发适合平 A、等 CD 戳键，按住才连。',
-        '切换连发适合长时间挂机、采集、一键宏，按一下就一直跑。',
+        '长按和切换规则都在同一个列表里，顶部的标签只筛选显示，不会删改规则。',
+        '标签上的数字是「已启用 / 总数」。长按适合平 A、等 CD 戳键；切换适合挂机、采集、一键宏。',
       ),
       prepare: async (host) => {
         host.closeMenus();
         await host.setLayout('vertical');
-        host.setFilter('hold');
+        host.setFilter('all');
       },
     },
     {
       id: 'add',
       target: 'add-hold',
       title: '先加一条规则',
-      body: p('后面两步要在规则卡上讲，先点这里添加一条长按连发规则。'),
-      // 前置步：已经有长按规则就不出现，没有就等用户加一条，后面两步才有卡可指
+      body: p('后面几步要在规则卡上讲，先点这里添加一条长按连发规则。'),
+      // 前置步：已经有长按规则就不出现，没有就等用户加一条，后面几步才有卡可指
       prepare: (host) => {
         host.setFilter('hold');
         return hasHoldRule(host.snapshot) ? 'skip' : undefined;
@@ -42,10 +42,23 @@ export const rules: TourDef = {
       target: 'rule-latest',
       title: '规则卡上有什么',
       body: p(
-        '连发按键、间隔毫秒数、启用开关，左边的把手能拖动排序。',
+        '左边色条实心的是长按、描边的是切换；连发按键、间隔毫秒数、启用开关，把手能拖动排序。',
         '多条规则一起连时软件会自动控速，不会越连越快、停不下来。',
       ),
       // 上一步被跳过、仍然没有规则卡：跳过而不是指着空处讲
+      prepare: (host) => {
+        host.setFilter('hold');
+        return hasHoldRule(host.snapshot) ? undefined : 'skip';
+      },
+    },
+    {
+      id: 'mode',
+      target: 'rule-mode',
+      title: '点标签就能换模式',
+      body: p(
+        '卡片左上角的「长按 / 切换」标签点一下就换成另一种，不用删了重建。',
+        '右上角 ⋯ 里还有移入分组、删除。',
+      ),
       prepare: (host) => {
         host.setFilter('hold');
         return hasHoldRule(host.snapshot) ? undefined : 'skip';
@@ -68,18 +81,11 @@ export const rules: TourDef = {
       id: 'add-toggle',
       target: 'add-toggle',
       title: '添加切换连发',
-      body: p('切换连发规则从这里加，列表已经替你筛到切换连发；这一步只看，不用点。'),
-      prepare: (host) => host.setFilter('toggle'),
-    },
-    {
-      id: 'group',
-      target: 'add-group',
-      title: '互斥分组',
       body: p(
-        '把几条切换连发规则放进同一组，组内同一时刻只跑一条。',
-        '多段宏就靠它：按 2 那条起来，按 1 那条自动停，不会打架。',
+        '切换连发规则从这里加；这一步只看，不用点。',
+        '多段宏要互不打架，靠互斥组——另有一组教程「互斥组与多段宏」专门讲。',
       ),
-      prepare: (host) => host.setFilter('toggle'),
+      prepare: (host) => host.setFilter('all'),
     },
     {
       id: 'finish',

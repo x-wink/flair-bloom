@@ -148,6 +148,10 @@
   margin-top: var(--fb-space-3);
 }
 
+.tour-bubble__actions {
+  margin-top: var(--fb-space-4);
+}
+
 .tour-bubble__note {
   margin-top: var(--fb-space-3);
   font-size: var(--fb-fs-sm);

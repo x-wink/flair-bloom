@@ -27,7 +27,8 @@ description: 气质花（FlairBloom）按键助手的项目文档单一来源：
 | ----------------- | ------------------------------------------------- | ------------------------------------------------ |
 | `getting-started` | [上手三步](references/manual/getting-started.md)  | 添加第一条规则、录键、打开总开关（按教程版本自动进入） |
 | `game-mode`       | [游戏模式与驱动](references/manual/game-mode.md)  | 为什么游戏里要装驱动、怎么装、装完做什么         |
-| `rules`           | [规则玩法](references/manual/rules.md)            | 长按 / 切换连发、高级设置、互斥分组、冲突提醒    |
+| `rules`           | [规则玩法](references/manual/rules.md)            | 筛选、规则卡、点标签换模式、高级设置、冲突提醒   |
+| `groups`          | [互斥组与多段宏](references/manual/groups.md)     | 同组只跑一条：切换是换人、长按是插队、示例组实操 |
 | `layouts`         | [横版键鼠图与浮窗](references/manual/layouts.md)  | 横版点键三态、图例、统一间隔、收进浮窗           |
 | `profiles`        | [多套配置](references/manual/profiles.md)         | 新建 / 切换、导入导出 `.qzh`、托盘切换           |
 | `settings`        | [热键、声音与外观](references/manual/settings.md) | 全局热键、语音播报、主题、关闭行为与自启         |

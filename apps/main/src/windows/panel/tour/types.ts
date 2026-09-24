@@ -9,7 +9,7 @@ import type { Location } from '../components/Overlay';
  * 教程内容有实质改动时 bump 它，老用户会再看一次。不按「有没有规则」判新老用户——
  * 新装配置自带两条未启用的出厂规则，那个口径对新用户永远为假。
  */
-export const TOUR_INTRO_VERSION = '1';
+export const TOUR_INTRO_VERSION = '2';
 
 /** 教程只关心规则的这几个字段；与 PanelApp 的 BurstRule 结构兼容，不反向依赖它。 */
 export interface TourRule {
@@ -38,6 +38,10 @@ export interface TourSnapshot {
   settingsTab: 'general' | 'hotkeys' | 'sound' | 'profiles';
   /** 后端能力位：为 false（DD 系列）时横版键鼠图不可用。 */
   coincidentToggle: boolean;
+  /** 引擎里正在连发的规则 ID（已排序）。 */
+  runningRuleIds: string[];
+  /** 被同组长按插队而暂停的规则 ID（已排序），仍算开启。 */
+  pausedRuleIds: string[];
 }
 
 /**
@@ -52,6 +56,13 @@ export interface TourHost {
   openSettings: (tab: TourSnapshot['settingsTab']) => void;
   closeSettings: () => void;
   closeMenus: () => void;
+  /**
+   * 建互斥组教程的示例组（全部停用）；已存在就什么也不做。键位从候选里挑没被占用的，
+   * 全被占用时不建、由宿主提示，返回 false。
+   */
+  createSampleGroup: () => boolean;
+  /** 删掉该分组里的全部规则——是删规则，不是「解散」（解散只清分组、规则保留）。 */
+  deleteGroupRules: (name: string) => void;
 }
 
 export type PrepareResult = void | 'skip';
@@ -61,7 +72,8 @@ export interface TourStep {
   /** 目标元素的 `data-tour` 属性值；缺省为无目标的居中气泡。 */
   target?: string;
   title: string;
-  body: ReactNode;
+  /** 需要宿主动作（气泡里的按钮）或随快照变化的文案时传函数。 */
+  body: ReactNode | ((host: TourHost) => ReactNode);
   /** 缺省按剩余空间自动选一侧。 */
   placement?: Location;
   /** 展示前调用：切页签、开设置等。返回 'skip' 跳过本步。 */
@@ -71,8 +83,8 @@ export interface TourStep {
    * 「规则数增加」这类判定要靠它做基线。
    */
   done?: (now: TourSnapshot, entered: TourSnapshot) => boolean;
-  /** 实操步骤下方的「等你…」提示。 */
-  actionHint?: string;
+  /** 实操步骤下方的「等你…」提示；要带键名等随快照变化的内容时传函数。 */
+  actionHint?: string | ((snapshot: TourSnapshot) => string);
 }
 
 export interface TourDef {

@@ -1,0 +1,55 @@
+.group-timeline {
+  display: grid;
+  grid-template-columns: auto repeat(4, 1fr);
+  gap: var(--fb-space-2) var(--fb-space-1);
+  align-items: center;
+  margin-top: var(--fb-space-4);
+  font-size: var(--fb-fs-xs);
+}
+
+.group-timeline__lane-name {
+  padding-right: var(--fb-space-3);
+  color: var(--fb-text-weak);
+  white-space: nowrap;
+}
+
+.group-timeline__beat {
+  text-align: center;
+  color: var(--fb-text-weak);
+  white-space: nowrap;
+  transition: color var(--fb-duration-base);
+}
+
+.group-timeline__beat.is-current {
+  color: var(--fb-color-primary);
+  font-weight: var(--fb-fw-semibold);
+}
+
+.group-timeline__cell {
+  height: 14px;
+  border-radius: var(--fb-radius-xs);
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  transition: opacity var(--fb-duration-base);
+}
+
+/* 与规则卡同一套形状语言：长按实心、切换描边；暂停降透明度 + ⏸ */
+.group-timeline__cell.is-run.is-hold {
+  background: var(--fb-color-primary);
+}
+
+.group-timeline__cell.is-run.is-toggle {
+  background: var(--fb-color-primary-soft);
+  box-shadow: inset 0 0 0 1.5px var(--fb-color-primary);
+}
+
+.group-timeline__cell.is-pause {
+  background: var(--fb-color-primary-soft);
+  color: var(--fb-text-weak);
+  opacity: 0.6;
+}
+
+.group-timeline__cell.is-future {
+  opacity: 0;
+}
