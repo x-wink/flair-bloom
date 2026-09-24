@@ -4,6 +4,7 @@ import { ChevronIcon } from './components/icons';
 import IntervalInput from './components/IntervalInput';
 import KeyCapture, {
   type CaptureReject,
+  keyEq,
   type KeyId,
   type KeyPolicies,
 } from './components/KeyCapture';
@@ -91,6 +92,9 @@ export default function RuleCard({
   const menuRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const isToggle = rule.mode === 'toggle';
+  // 长按键与连发键分开时把「按住哪个键」提到主行：插队要按住的就是它，不能藏在高级设置里。
+  const holdSplit = !isToggle && !keyEq(rule.trigger_key, rule.target_key);
+  const showTrigger = isToggle || holdSplit;
   const nextMode = other(rule.mode);
 
   const moveTargets = groups.filter((g) => g !== rule.group);
@@ -122,11 +126,8 @@ export default function RuleCard({
     .join(' ');
 
   // 长按不开高级时启动键跟随连发按键（重合态）；切换连发的启动键始终单独可设。
-  const targetPolicy = isToggle
-    ? policies.target
-    : showAdvanced
-      ? policies.target
-      : policies.trigger_target;
+  const targetPolicy =
+    isToggle || holdSplit || showAdvanced ? policies.target : policies.trigger_target;
 
   return (
     <div
@@ -164,10 +165,10 @@ export default function RuleCard({
       </div>
       <div className="rule-body">
         <div className="rule-main">
-          {isToggle && (
+          {showTrigger && (
             <>
               <div className="rule-field">
-                <label>启动热键</label>
+                <label>{isToggle ? '启动热键' : '长按键'}</label>
                 <KeyCapture
                   onReject={onKeyReject}
                   policy={policies.trigger}
@@ -188,11 +189,11 @@ export default function RuleCard({
               onChange={(vk) => {
                 if (!vk) return;
                 const patch: Partial<CardRule> = { target_key: vk };
-                if (!isToggle && !showAdvanced) patch.trigger_key = vk;
+                if (!showTrigger && !showAdvanced) patch.trigger_key = vk;
                 onPatch(patch);
                 onTargetCaptured();
               }}
-              conflict={isToggle || !showAdvanced ? conflict : null}
+              conflict={showTrigger || !showAdvanced ? conflict : null}
             />
           </div>
           <div className="rule-field rule-interval" data-tour="rule-interval">
@@ -216,26 +217,36 @@ export default function RuleCard({
       </div>
       {showAdvanced && (
         <div className="rule-advanced">
-          <div className="rule-field">
-            <label>{isToggle ? '停止热键' : '长按键'}</label>
-            {isToggle ? (
-              <KeyCapture
-                onReject={onKeyReject}
-                policy={policies.trigger}
-                value={rule.stop_key ?? rule.trigger_key}
-                onChange={(vk) => vk && onPatch({ stop_key: vk })}
-              />
-            ) : (
-              <KeyCapture
-                onReject={onKeyReject}
-                policy={policies.trigger}
-                value={rule.trigger_key}
-                onChange={(vk) => vk && onPatch({ trigger_key: vk })}
-                conflict={conflict}
-              />
-            )}
-          </div>
-          <span className="adv-hint">{isToggle ? '默认与启动热键相同' : '默认与连发按键相同'}</span>
+          {isToggle ? (
+            <>
+              <div className="rule-field">
+                <label>停止热键</label>
+                <KeyCapture
+                  onReject={onKeyReject}
+                  policy={policies.trigger}
+                  value={rule.stop_key ?? rule.trigger_key}
+                  onChange={(vk) => vk && onPatch({ stop_key: vk })}
+                />
+              </div>
+              <span className="adv-hint">默认与启动热键相同</span>
+            </>
+          ) : holdSplit ? (
+            <span className="adv-hint">长按键已在上面单独设置；改成与连发按键相同即回到单键</span>
+          ) : (
+            <>
+              <div className="rule-field">
+                <label>长按键</label>
+                <KeyCapture
+                  onReject={onKeyReject}
+                  policy={policies.trigger}
+                  value={rule.trigger_key}
+                  onChange={(vk) => vk && onPatch({ trigger_key: vk })}
+                  conflict={conflict}
+                />
+              </div>
+              <span className="adv-hint">默认与连发按键相同</span>
+            </>
+          )}
         </div>
       )}
       <button
