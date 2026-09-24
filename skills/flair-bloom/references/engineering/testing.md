@@ -17,6 +17,8 @@
 
 `.github/workflows/ci.yml`（push:main / PR 触发，windows-latest）：`cargo fmt --check` + `cargo clippy -D warnings` + `cargo test`（排除 Tauri app `flair-bloom`，其构建依赖前端 dist；逻辑都在各 crate）。L1/L1.5/引擎/边界用例每次推送自动跑。L2 冒烟为 `#[ignore]` 不在 CI 跑（需交互式会话）。共享 crate 覆盖率另由 `coverage.yml` 把守 ≥85%。
 
+前端没有测试框架，界面里可抽成纯函数的几何 / 判定逻辑放 `scripts/*.test.ts`，用 Node 内置 test runner 加类型剥离直接跑：`pnpm test:ui`（Node ≥ 22.6）。目前覆盖横版走线（`panel/hkbWires.ts`：边集合、参与键、扇出偏移、路由与切角、端点缺失）。不进 CI——CI 只装 Rust 工具链，为几条断言再装 Node 与依赖不划算，改相关文件时本地跑。
+
 ## L1 已落地：调度器模拟 harness
 
 代码：`packages/burst-engine/src/scheduler/sim_tests.rs`。

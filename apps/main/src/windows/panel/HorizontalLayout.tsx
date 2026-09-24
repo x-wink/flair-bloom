@@ -1,4 +1,6 @@
 import { type CSSProperties, useRef, useState } from 'react';
+import WireOverlay from './WireOverlay';
+import { buildWires, wiredKeys } from './hkbWires';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import IntervalInput from './components/IntervalInput';
 import {
@@ -99,6 +101,12 @@ export default function HorizontalLayout({
 }: Props) {
   const anchorRef = useRef<HTMLElement | null>(null);
   const [menuKey, setMenuKey] = useState<KeyId | null>(null);
+  const layoutRef = useRef<HTMLElement | null>(null);
+  // 键帽 DOM 按 token 登记，悬停时量两端位置画走线。
+  const capRefs = useRef(new Map<string, HTMLElement>());
+  const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const wires = buildWires(rules);
+  const wired = wiredKeys(wires);
 
   // 触发键 token → 规则列表。
   const byTrigger = new Map<string, HRule[]>();
@@ -177,6 +185,15 @@ export default function HorizontalLayout({
     const warn = st.advanced || severity !== null;
     const gi = rule?.group ? groupIndex(rule.group) : 0;
     const modeClass = rule ? (rule.mode === 'toggle' ? 'is-toggle' : 'is-hold') : '';
+    const t = token(key);
+    const hoverProps = wired.has(t)
+      ? {
+          onMouseEnter: () => setHoverKey(t),
+          onMouseLeave: () => setHoverKey((k) => (k === t ? null : k)),
+          onFocus: () => setHoverKey(t),
+          onBlur: () => setHoverKey((k) => (k === t ? null : k)),
+        }
+      : {};
 
     const cls = [
       'hkb-cap',
@@ -206,10 +223,15 @@ export default function HorizontalLayout({
     return (
       <button
         key={reactKey}
+        ref={(el) => {
+          if (el) capRefs.current.set(t, el);
+          else capRefs.current.delete(t);
+        }}
         type="button"
         className={cls}
         style={style}
         title={title}
+        {...hoverProps}
         onClick={() => {
           if (!st.advanced) onCycleKey(key);
         }}
@@ -227,7 +249,11 @@ export default function HorizontalLayout({
             ⚠️
           </span>
         )}
-        {gi > 0 && <span className="hkb-group-badge">{gi}</span>}
+        {gi > 0 && rule && (
+          <span className={`hkb-group-badge ${rule.mode === 'toggle' ? 'is-toggle' : 'is-hold'}`}>
+            {gi}
+          </span>
+        )}
       </button>
     );
   }
@@ -267,7 +293,7 @@ export default function HorizontalLayout({
   }
 
   return (
-    <section className="horizontal-layout">
+    <section className="horizontal-layout" ref={layoutRef}>
       <div className="hkb-keyboard" data-tour="hkb-keyboard">
         {renderBlock(MAIN_BLOCK, 'hkb-main')}
         {renderBlock(NAV_BLOCK, 'hkb-nav')}
@@ -346,10 +372,22 @@ export default function HorizontalLayout({
               <span className="hbar-swatch sw-off" />
               已停用
             </span>
-            <span className="hbar-legend-item">
+            <span
+              className="hbar-legend-item"
+              title="组号角标：实心 = 长按在组内，描边 = 切换在组内"
+            >
               <span className="hbar-swatch sw-group">1</span>
+              <span className="hbar-swatch sw-group is-toggle">1</span>
               互斥分组
             </span>
+            {wires.length > 0 && (
+              <span className="hbar-legend-item" title="悬停参与高级规则的键查看走线">
+                <span className="hbar-wire sw-wire-out" />
+                它触发的
+                <span className="hbar-wire sw-wire-in" />
+                触发它的
+              </span>
+            )}
             {hasAdvanced && (
               <span
                 className="hbar-legend-item"
@@ -394,6 +432,14 @@ export default function HorizontalLayout({
         <div className="hbottom-spacer" aria-hidden="true" />
       </div>
 
+      {hoverKey && (
+        <WireOverlay
+          hoverKey={hoverKey}
+          wires={wires}
+          container={layoutRef.current}
+          caps={capRefs.current}
+        />
+      )}
       <ContextMenu
         open={menuKey !== null}
         onClose={() => setMenuKey(null)}
