@@ -1,14 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 import { useEffect, useRef } from 'react';
 import { keyboardKey, type KeyId, vkFromCode } from './components/KeyCapture';
+import { keyToken } from './keyToken';
 
 interface RelayKeyResult {
   accepted_physical: boolean;
   handled: boolean;
-}
-
-function keyToken(key: KeyId): string {
-  return `${key.kind}:${key.code}`;
 }
 
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {

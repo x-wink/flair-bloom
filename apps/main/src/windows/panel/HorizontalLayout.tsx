@@ -1,6 +1,7 @@
 import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import WireOverlay from './WireOverlay';
-import { buildWires, keyToken as token, wiredKeys } from './hkbWires';
+import { buildWires, wiredKeys } from './hkbWires';
+import { keyToken as token } from './keyToken';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import IntervalInput from './components/IntervalInput';
 import {

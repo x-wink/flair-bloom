@@ -11,6 +11,7 @@
  */
 
 import { keyEq, keyLabel, type KeyId } from './components/KeyCapture';
+import { keyToken } from './keyToken';
 
 export type BurstMode = 'hold' | 'toggle';
 
@@ -49,10 +50,6 @@ export interface Conflict {
 }
 
 // ── 工具 ─────────────────────────────────────────────────────────────────────
-
-function keyStr(k: KeyId): string {
-  return `${k.kind}:${k.code}`;
-}
 
 const GLOBAL_LABELS: Record<string, string> = {
   global_toggle: '全局开启键',
@@ -126,7 +123,7 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
     if (alreadyError) continue;
 
     conflicts.push({
-      id: `hotkey-masks-rule-${field}-${keyStr(key)}`,
+      id: `hotkey-masks-rule-${field}-${keyToken(key)}`,
       severity: 'warning',
       key,
       message: `${GLOBAL_LABELS[field]}与规则触发键相同，按下时热键优先，该按键不触发连发`,
@@ -161,7 +158,7 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
     if (alreadyCovered) continue;
 
     conflicts.push({
-      id: `target-cascades-trigger-${ruleA.id}-${keyStr(ruleA.target_key)}`,
+      id: `target-cascades-trigger-${ruleA.id}-${keyToken(ruleA.target_key)}`,
       severity: 'warning',
       key: ruleA.target_key,
       message: `连发按键 ${keyLabel(ruleA.target_key)} 同时是另一条规则的触发键，注入时可能意外激活该规则`,

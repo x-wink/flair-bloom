@@ -1,4 +1,8 @@
 import type { KeyId } from './components/KeyCapture';
+// 带扩展名：scripts/hkb-wires.test.ts 用 Node 类型剥离直接跑本文件，运行时导入必须写全路径。
+import { keyToken } from './keyToken.ts';
+
+export { keyToken };
 
 type BurstMode = 'hold' | 'toggle';
 
@@ -27,10 +31,6 @@ export interface Rect {
   top: number;
   width: number;
   height: number;
-}
-
-export function keyToken(key: KeyId): string {
-  return `${key.kind}:${key.code}`;
 }
 
 /** 横版画不出来的「高级」关系：启动键 ≠ 连发按键、切换连发的独立停止键。 */

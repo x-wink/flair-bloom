@@ -53,7 +53,7 @@ import { detectConflicts, severityForKey, severityForRule } from './conflicts';
 import TourRunner from './tour/TourRunner';
 import { findTour, TOURS } from './tour/tours';
 import { isSampleRule, SAMPLE_GROUP, SAMPLE_IDS, sampleRules } from './tour/tours/helpers';
-import { keyToken } from './hkbWires';
+import { keyToken } from './keyToken';
 import type { TourDef, TourExitResult, TourHost, TourSnapshot } from './tour/types';
 import { useTourProgress } from './tour/useTourProgress';
 import { useKeyRelay } from './useKeyRelay';
