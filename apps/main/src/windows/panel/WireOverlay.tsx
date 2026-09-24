@@ -59,6 +59,8 @@ export default function WireOverlay({ hoverKey, wires, container, caps }: Props)
         const [ex, ey] = l.end;
         return (
           <g key={l.id} className={cls}>
+            {/* 光晕用下层同几何的宽描边而不是 drop-shadow：filter 在遮罩揭开动画里会整段闪 */}
+            <path className="hkb-wire-glow" d={l.d} mask={`url(#hkb-wire-mask-${l.id})`} />
             <path className="hkb-wire-line" d={l.d} mask={`url(#hkb-wire-mask-${l.id})`} />
             <circle className="hkb-wire-src" cx={l.start[0]} cy={l.start[1]} r={2} />
             {wire.kind === 'stop' ? (

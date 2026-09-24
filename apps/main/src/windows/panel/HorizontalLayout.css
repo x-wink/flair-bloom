@@ -351,17 +351,26 @@
 .hkb-wire-line {
   fill: none;
   stroke: var(--wire);
-  stroke-width: 1.5;
+  stroke-width: 2;
   stroke-linejoin: round;
 }
-.hkb-wire.is-stop .hkb-wire-line {
+/* 同色弱光晕：相邻行之间只有 5px 行缝，光靠 2px 线仍不显眼 */
+.hkb-wire-glow {
+  fill: none;
+  stroke: var(--wire);
+  stroke-width: 10;
+  stroke-linejoin: round;
+  stroke-opacity: 0.25;
+}
+.hkb-wire.is-stop .hkb-wire-line,
+.hkb-wire.is-stop .hkb-wire-glow {
   stroke-dasharray: 4 3;
 }
 /* 沿语义方向（启动键 → 终点）生长：遮罩里一条同几何的实线揭开可见线，虚线也能生长 */
 .hkb-wire-reveal {
   fill: none;
   stroke: #fff;
-  stroke-width: 8;
+  stroke-width: 12; /* 盖住光晕全宽，否则揭开时光晕边缘被裁 */
   stroke-dasharray: 1 1;
   stroke-dashoffset: 1;
   animation: hkb-wire-grow 250ms ease-out forwards;
