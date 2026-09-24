@@ -98,7 +98,7 @@
   color: var(--fb-color-primary);
   font-weight: var(--fb-fw-semibold);
 }
-/* 按压连发：主题色实心 */
+/* 长按连发：主题色实心 */
 .hkb-cap--key.is-hold {
   background: var(--fb-color-primary);
   border-color: var(--fb-color-primary);
@@ -114,12 +114,29 @@
   color: var(--fb-color-primary);
 }
 
-/* 连发中：实底 + 脉冲 */
+/* 连发中：保持模式形状（实心 / 描边），只加外圈呼吸光晕——形状表模式、光晕表状态，两件事不串味 */
 .hkb-cap--key.is-active {
-  background: rgb(var(--pulse));
-  border-color: rgb(var(--pulse));
-  color: var(--fb-text-on-accent);
   animation: hkb-pulse 0.9s ease-in-out infinite;
+}
+
+/* 被同组长按插队暂停：同时带 .is-active，特异性相同，靠声明在其后覆盖掉呼吸。
+   降透明度 + 左上角 ⏸（右侧两角已被分组号与 ⚠ 占用） */
+.hkb-cap--key.is-paused {
+  animation: none;
+  opacity: 0.55;
+}
+.hkb-cap--key.is-paused::after {
+  content: '⏸';
+  position: absolute;
+  top: -7px;
+  left: -6px;
+  font-size: 10px;
+  line-height: 1;
+  padding: 1px 2px;
+  border-radius: var(--fb-radius-xs);
+  background: var(--fb-surface);
+  border: 1px solid var(--fb-border);
+  color: var(--fb-text-strong);
 }
 @keyframes hkb-pulse {
   0%,
@@ -128,6 +145,15 @@
   }
   50% {
     box-shadow: 0 0 0 4px rgba(var(--pulse), 0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hkb-cap--key.is-active {
+    animation: none;
+    box-shadow: 0 0 0 3px rgba(var(--pulse), 0.35);
+  }
+  .hkb-cap--key.is-paused {
+    box-shadow: none;
   }
 }
 

@@ -19,7 +19,7 @@ fn no_coincident() -> InjectCaps {
     }
 }
 
-/// 同一条规则的按压版，用于验证重合槽位按模式分流。
+/// 同一条规则的长按版，用于验证重合槽位按模式分流。
 fn hold_rule(trigger: KeyId, target: KeyId, stop: Option<KeyId>) -> BurstRule {
     BurstRule {
         mode: BurstMode::Hold,

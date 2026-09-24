@@ -217,7 +217,7 @@ export default function RuleCard({
       {showAdvanced && (
         <div className="rule-advanced">
           <div className="rule-field">
-            <label>{isToggle ? '停止热键' : '按压键'}</label>
+            <label>{isToggle ? '停止热键' : '长按键'}</label>
             {isToggle ? (
               <KeyCapture
                 onReject={onKeyReject}

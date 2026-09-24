@@ -61,4 +61,4 @@
 - payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `expiry u64` / `features u32`（位掩码，见 `license.rs::feature_bits`）。
 - 兑换码 `QZHUA-XXXXX-XXXXX-XXXXX-XXXXX`（Base32：64 字节签名 + JSON payload）。
 - 私钥仅在 `apps/keygen` 使用、寄存 GitHub Secrets，不进主应用二进制；主应用只内置校验公钥，**当前为全零占位，发布前替换**。
-- 功能分层：核心功能（按压 / Toggle 连发、键鼠滚轮、配置管理、自动更新）免费；亲友专属（宏录制回放、随机抖动、条件配置集、桌宠扩展动画包）由 `feature_bits` 控制。`MOUSE_BURST` 位预留但当前不限制——鼠标连发对所有用户开放。激活 UI 与功能开关尚未实现，设计见 `docs/roadmaps/license.md`（draft）。
+- 功能分层：核心功能（长按 / Toggle 连发、键鼠滚轮、配置管理、自动更新）免费；亲友专属（宏录制回放、随机抖动、条件配置集、桌宠扩展动画包）由 `feature_bits` 控制。`MOUSE_BURST` 位预留但当前不限制——鼠标连发对所有用户开放。激活 UI 与功能开关尚未实现，设计见 `docs/roadmaps/license.md`（draft）。

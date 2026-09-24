@@ -227,7 +227,7 @@ export default function ImportDialog({ onClose, onImported }: Props) {
                   <span className="preview-value">{preview.source_app}</span>
                   <span className="preview-label">规则数量</span>
                   <span className="preview-value">
-                    {preview.rule_count} 条按压连发
+                    {preview.rule_count} 条长按连发
                     {preview.skipped_count > 0 && (
                       <span className="preview-warn">
                         （已截取前 {MAX_RULES} 条，丢弃 {preview.skipped_count} 条）

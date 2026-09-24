@@ -126,7 +126,7 @@ export default function ProfileCardList(props: Props) {
               <span className="profile-card-stats">
                 <span>
                   <strong>{profile.summary.hold_count}</strong>
-                  按压
+                  长按
                 </span>
                 <span>
                   <strong>{profile.summary.toggle_count}</strong>

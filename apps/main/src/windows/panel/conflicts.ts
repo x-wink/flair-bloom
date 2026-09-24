@@ -137,7 +137,7 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
           ruleId: r.id,
           ruleMode: r.mode,
           field: 'trigger_key' as const,
-          label: r.mode === 'hold' ? '按压连发' : '切换连发',
+          label: r.mode === 'hold' ? '长按连发' : '切换连发',
         })),
       ],
     });

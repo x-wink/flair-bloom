@@ -28,7 +28,7 @@ export const layouts: TourDef = {
       target: 'hkb-keyboard',
       title: '直接点键设连发',
       body: p(
-        '在键鼠图上点一个键：无 → 切换连发 → 按压连发 → 取消，三态轮着来。',
+        '在键鼠图上点一个键：无 → 切换连发 → 长按连发 → 取消，三态轮着来。',
         '右键点它还有更多选项：启用、改模式、分组、删除。',
       ),
       prepare: (host) => host.setLayout('horizontal'),
@@ -38,7 +38,7 @@ export const layouts: TourDef = {
       target: 'hbar-legend',
       title: '颜色和角标的意思',
       body: p(
-        '三种颜色分别是切换连发、按压连发和已停用，数字角标是互斥组的编号。',
+        '三种颜色分别是切换连发、长按连发和已停用，数字角标是互斥组的编号。',
         '⚠ 表示这个键上有横版画不出来的规则（启动键和连发键不同、或同一个键上有多条），回竖版改。',
       ),
       prepare: (host) => host.setLayout('horizontal'),

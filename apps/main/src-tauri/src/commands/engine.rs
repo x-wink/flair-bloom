@@ -56,7 +56,7 @@ pub struct KeyPolicies {
     pub trigger: SlotPolicy,
     /// 规则的连发按键，且与启动 / 停止键不同。纯写。
     pub target: SlotPolicy,
-    /// 按压连发里启动键与连发按键重合（默认模式、横版单键）。读写取交集。
+    /// 长按连发里启动键与连发按键重合（默认模式、横版单键）。读写取交集。
     pub trigger_target: SlotPolicy,
     /// 切换连发里启动键与连发按键重合。后端不支持重合态时是空集，键盘键也不收。
     pub trigger_target_toggle: SlotPolicy,

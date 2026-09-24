@@ -51,13 +51,13 @@ done
 
 - `.rule-row` 只统计当前筛选下渲染的卡片（被筛掉的组成员折叠成「另有 N 条已隐藏」），数规则数先把筛选切回「全部」。
 - **不要让应用在验证中途「以管理员重启」**：relaunch 出来的提权实例不继承远程调试环境变量（CDP 断连），在 `tauri dev` 下还会报 `WebView2 error 0x800700AA` 起不来窗口；普通权限的会话也杀不掉提权进程。需要管理员就按第 1 步从管理员终端起，从一开始就是 elevated。
-- **别在 dev 构建上打开「以管理员模式启动」**：该开关把 exe 绝对路径写进 `HKCU\...\AppCompatFlags\Layers`，而 dev 下那个路径是 `target\debug\flair-bloom.exe`，之后 `cargo run` 每次都要求提权、直接失败（`os error 740`）。已经中招就删掉该注册表值：`Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers' -Name '<debug exe 绝对路径>'`。
+- **别在 dev 构建上打开「以管理员模式启动」**：该开关把 exe 绝对路径写进 `HKCU\...\AppCompatFlags\Layers`，而 dev 下那个路径是 `target\debug\flair-bloom.exe`，之后 `cargo run` 每次都要求提权、直接失败（`os error 740`）。本机 settings 里 `runAsAdmin` 已为真（用户在正式版里开过）时同样会中招：dev 构建启动时按用户意图自愈，把 debug exe 写进去，第一次能起、下一次就 740，所以验完停进程后顺手删掉。已经中招就删掉该注册表值：`Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers' -Name '<debug exe 绝对路径>'`。
 
 用 MCP 接同一个端口：仓库 `.mcp.json` 里的 `flair-bloom-app` 是 Playwright MCP 以 `--cdp-endpoint http://127.0.0.1:9222` 连应用（新会话首次加载需确认一次）。`browser_snapshot` 看可访问性树、`browser_click` 按元素点、`browser_press_key` 发真实按键、`browser_take_screenshot` 截图，不必知道选择器；应用必须先起、端口先开，重启后重连一次即可。**不要调导航类工具**，那会把面板页面导航走。快照体积大，数规则、读 settings 这类精确取值仍用 `scripts/cdp.mts`。
 
 ## 设计准则
 
-- **小白友好，开箱即用**：合理默认值（连发间隔默认 10ms、触发方式默认按压），首启协议同意后进入新手教程，基础视图只显示核心操作、高级选项折叠，报错用自然语言。
+- **小白友好，开箱即用**：合理默认值（连发间隔默认 10ms、触发方式默认长按），首启协议同意后进入新手教程，基础视图只显示核心操作、高级选项折叠，报错用自然语言。
 - **灵活扩展，充分可配置**：所有行为暴露设置项，`.qzh` 可导入导出，设置面板独立于主配置，功能开关可独立关闭。
 - **容错重试，稳健运行**：单个功能出错不影响整体，关键操作失败后自动恢复（策略表见 [architecture](architecture.md)）。
 - **日志完善，崩溃可追溯**：用户一键提供有效日志，开发者快速定位。

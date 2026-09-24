@@ -283,7 +283,7 @@ export interface KeyPolicies {
   hotkey: SlotPolicy;
   trigger: SlotPolicy;
   target: SlotPolicy;
-  /** 按压连发里启动键与连发按键重合。 */
+  /** 长按连发里启动键与连发按键重合。 */
   trigger_target: SlotPolicy;
   /** 切换连发里启动键与连发按键重合。后端不支持重合态时是空集。 */
   trigger_target_toggle: SlotPolicy;

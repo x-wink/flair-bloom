@@ -279,7 +279,7 @@ export default function FloatApp() {
   const renderCap = (r: FloatRule) => {
     const isActive = activeSet.has(r.id);
     const isPaused = pausedSet.has(r.id);
-    const modeName = r.mode === 'toggle' ? '切换连发' : '按压连发';
+    const modeName = r.mode === 'toggle' ? '切换连发' : '长按连发';
     return (
       <span
         key={r.id}

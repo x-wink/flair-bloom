@@ -8,14 +8,14 @@ function hasHoldRule(snapshot: TourSnapshot): boolean {
 export const rules: TourDef = {
   id: 'rules',
   title: '规则玩法',
-  summary: '按压 / 切换、高级设置、互斥分组',
+  summary: '长按 / 切换、高级设置、互斥分组',
   steps: [
     {
       id: 'modes',
       target: 'filter',
       title: '两种连发各适合什么',
       body: p(
-        '按压连发适合平 A、等 CD 戳键，按住才连。',
+        '长按连发适合平 A、等 CD 戳键，按住才连。',
         '切换连发适合长时间挂机、采集、一键宏，按一下就一直跑。',
       ),
       prepare: async (host) => {
@@ -28,8 +28,8 @@ export const rules: TourDef = {
       id: 'add',
       target: 'add-hold',
       title: '先加一条规则',
-      body: p('后面两步要在规则卡上讲，先点这里添加一条按压连发规则。'),
-      // 前置步：已经有按压规则就不出现，没有就等用户加一条，后面两步才有卡可指
+      body: p('后面两步要在规则卡上讲，先点这里添加一条长按连发规则。'),
+      // 前置步：已经有长按规则就不出现，没有就等用户加一条，后面两步才有卡可指
       prepare: (host) => {
         host.setFilter('hold');
         return hasHoldRule(host.snapshot) ? 'skip' : undefined;

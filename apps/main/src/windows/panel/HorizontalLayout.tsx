@@ -55,7 +55,7 @@ interface Props {
   intervalMin: number;
   intervalMax: number;
   onIntervalChange: (ms: number) => void;
-  /** 左键点键：在 无 → 切换 → 按压 → 无 之间轮换。 */
+  /** 左键点键：在 无 → 切换 → 长按 → 无 之间轮换。 */
   onCycleKey: (key: KeyId) => void;
   onSetEnabled: (ruleId: string, enabled: boolean) => void;
   onSetMode: (rule: HRule, mode: 'hold' | 'toggle') => void;
@@ -144,7 +144,7 @@ export default function HorizontalLayout({
         onClick: () => onSetEnabled(rule.id, !rule.enabled),
       },
       {
-        label: rule.mode === 'toggle' ? '改为按压连发' : '改为切换连发',
+        label: rule.mode === 'toggle' ? '改为长按连发' : '改为切换连发',
         onClick: () => onSetMode(rule, rule.mode === 'toggle' ? 'hold' : 'toggle'),
       },
     ];
@@ -197,7 +197,7 @@ export default function HorizontalLayout({
     if (st.advanced) {
       title = `${keyLabel(key)} · 高级规则（仅竖版可编辑）`;
     } else if (rule) {
-      const modeName = rule.mode === 'toggle' ? '切换连发' : '按压连发';
+      const modeName = rule.mode === 'toggle' ? '切换连发' : '长按连发';
       title = `${keyLabel(key)} · ${modeName}${rule.enabled ? '' : '（已停用）'}${rule.group ? ` · ${rule.group}` : ''}${paused ? ' · 已暂停（同组长按插队中）' : ''}（左键轮换 · 右键管理）`;
     } else {
       title = `${keyLabel(key)}（点击建立连发）`;
@@ -340,7 +340,7 @@ export default function HorizontalLayout({
             </span>
             <span className="hbar-legend-item">
               <span className="hbar-swatch sw-hold" />
-              按压连发
+              长按连发
             </span>
             <span className="hbar-legend-item">
               <span className="hbar-swatch sw-off" />

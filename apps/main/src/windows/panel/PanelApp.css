@@ -362,38 +362,66 @@ body {
   transition: box-shadow 0.2s;
 }
 
-.rule-row:not(.disabled) {
-  box-shadow:
-    inset 3px 0 0 var(--fb-color-primary),
-    0 1px 2px rgba(0, 0, 0, 0.03);
-}
-
 .rule-row:not(.disabled):hover {
-  box-shadow:
-    inset 3px 0 0 var(--fb-color-primary),
-    0 2px 8px rgba(var(--fb-color-primary-rgb), 0.1);
+  box-shadow: 0 2px 8px rgba(var(--fb-color-primary-rgb), 0.1);
 }
 
+/* 左侧模式色条：长按实心、切换描边（D5：模式靠形状区分，色弱可辨、只跟主色变量） */
+.rule-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: var(--fb-space-7);
+  bottom: var(--fb-space-7);
+  width: 4px;
+  border-radius: 0 var(--fb-radius-xs) var(--fb-radius-xs) 0;
+  box-sizing: border-box;
+}
+
+.rule-row.is-hold::before {
+  background: var(--fb-color-primary);
+}
+
+.rule-row.is-toggle::before {
+  background: var(--fb-color-primary-soft);
+  border: 1.5px solid var(--fb-color-primary);
+  border-left: none;
+}
+
+.rule-row.disabled::before {
+  background: transparent;
+  border: 1.5px solid var(--fb-border);
+  border-left: none;
+}
+
+.rule-row.disabled.is-hold::before {
+  background: var(--fb-border);
+}
+
+/* 正在跑：外圈呼吸光晕，不改色条——状态与模式两件事分开表达 */
 .rule-row.active {
-  animation: rule-pulse 0.8s ease-in-out infinite;
+  border-color: var(--fb-rule-active-border);
+  animation: rule-glow 1.2s ease-in-out infinite;
 }
 
-.rule-row.active:hover {
-  animation-name: rule-pulse-hover;
+/* 被同组长按插队暂停：仍算开启，所以同时带 .active；与 .active 特异性相同，靠声明在其后覆盖掉呼吸。
+   不呼吸、降透明度、模式标签后挂 ⏸ */
+.rule-row.is-paused {
+  animation: none;
+  opacity: 0.6;
+}
+
+.rule-row.is-paused .rule-mode-tag::after {
+  content: ' ⏸';
 }
 
 .rule-row.disabled {
   background: var(--fb-surface-muted);
   border-color: var(--fb-border-soft);
-  box-shadow:
-    inset 3px 0 0 var(--fb-border),
-    0 1px 2px rgba(0, 0, 0, 0.02);
 }
 
 .rule-row.disabled:hover {
-  box-shadow:
-    inset 3px 0 0 var(--fb-border),
-    0 2px 6px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
 
 .rule-row.disabled .rule-field label,
@@ -402,48 +430,25 @@ body {
   color: var(--fb-text-disabled);
 }
 
-@keyframes rule-pulse {
+@keyframes rule-glow {
   0%,
   100% {
-    background: var(--fb-surface);
-    border-color: var(--fb-rule-active-border);
-    box-shadow:
-      inset 3px 0 0 var(--fb-color-primary),
-      0 1px 2px rgba(0, 0, 0, 0.03);
+    box-shadow: 0 0 0 0 rgba(var(--fb-color-primary-rgb), 0.35);
   }
 
   50% {
-    background: var(--fb-rule-active-bg);
-    border-color: var(--fb-rule-active-border-strong);
-    box-shadow:
-      inset 6px 0 0 var(--fb-rule-active-accent),
-      0 1px 2px rgba(0, 0, 0, 0.03);
-  }
-}
-
-@keyframes rule-pulse-hover {
-  0%,
-  100% {
-    background: var(--fb-surface);
-    border-color: var(--fb-rule-active-border);
-    box-shadow:
-      inset 3px 0 0 var(--fb-color-primary),
-      0 2px 8px rgba(var(--fb-color-primary-rgb), 0.1);
-  }
-
-  50% {
-    background: var(--fb-rule-active-bg);
-    border-color: var(--fb-rule-active-border-strong);
-    box-shadow:
-      inset 6px 0 0 var(--fb-rule-active-accent),
-      0 2px 10px rgba(var(--fb-color-primary-rgb), 0.14);
+    box-shadow: 0 0 0 4px rgba(var(--fb-color-primary-rgb), 0.12);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rule-row.active,
-  .rule-row.active:hover {
+  .rule-row.active {
     animation: none;
+    box-shadow: 0 0 0 3px rgba(var(--fb-color-primary-rgb), 0.25);
+  }
+
+  .rule-row.is-paused {
+    box-shadow: none;
   }
 }
 
@@ -783,6 +788,10 @@ select {
 
 .group-status-item.is-running {
   color: var(--fb-color-primary);
+}
+
+.group-status-item.is-paused {
+  color: var(--fb-text-faint);
 }
 
 .group-hidden-note {

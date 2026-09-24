@@ -1594,7 +1594,7 @@ export default function PanelApp() {
   const hSingleRules = rules.filter((r) => keyEq(r.trigger_key, r.target_key));
   const hUnifiedInterval = hSingleRules[0]?.interval_ms ?? unifiedInterval;
 
-  // 左键点键：无 → 切换 → 按压 → 无 轮换（高级规则键不响应）
+  // 左键点键：无 → 切换 → 长按 → 无 轮换（高级规则键不响应）
   function handleHCycleKey(key: KeyId) {
     const onKey = rules.filter((r) => keyEq(r.trigger_key, key));
     const single = onKey.find((r) => keyEq(r.target_key, key));
@@ -1626,7 +1626,7 @@ export default function PanelApp() {
       keyEq(rule.trigger_key, rule.target_key)
     ) {
       toast.warning(
-        `${INPUT_MODE_LABELS[inputMode]}下切换连发的启动键不能与连发按键相同，请先在高级设置里改按压键`,
+        `${INPUT_MODE_LABELS[inputMode]}下切换连发的启动键不能与连发按键相同，请先在高级设置里改长按键`,
       );
       return;
     }
