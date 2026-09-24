@@ -457,14 +457,14 @@ export default function PanelApp() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const profileBtnRef = useRef<HTMLButtonElement>(null);
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({});
-  const [draggingId, setDraggingId] = useState<string | null>(null);
-  const draggingIdRef = useRef<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | undefined>(undefined);
+  const draggingIdRef = useRef<string | undefined>(undefined);
   const [dragOverInfo, setDragOverInfo] = useState<
     | { kind: 'rule'; ruleId: string }
     | { kind: 'group'; name: string }
     | { kind: 'ungrouped' }
-    | null
-  >(null);
+    | undefined
+  >(undefined);
   const [pendingGroupName, setPendingGroupName] = useState<string | null>(null);
   const [editingGroupName, setEditingGroupName] = useState<{
     current: string;
@@ -1767,9 +1767,9 @@ export default function PanelApp() {
   /** 取出拖拽源规则并复位拖拽状态。 */
   function takeDragSource(e: ReactDragEvent): string | undefined {
     const srcId = draggingIdRef.current || e.dataTransfer.getData('text/plain');
-    draggingIdRef.current = null;
-    setDraggingId(null);
-    setDragOverInfo(null);
+    draggingIdRef.current = undefined;
+    setDraggingId(undefined);
+    setDragOverInfo(undefined);
     return srcId || undefined;
   }
 
@@ -1798,9 +1798,9 @@ export default function PanelApp() {
         handleDropBeforeRule(srcId, rule.id);
       },
       onDragEnd: () => {
-        draggingIdRef.current = null;
-        setDraggingId(null);
-        setDragOverInfo(null);
+        draggingIdRef.current = undefined;
+        setDraggingId(undefined);
+        setDragOverInfo(undefined);
       },
     };
   }
@@ -2149,12 +2149,48 @@ export default function PanelApp() {
    */
   function createSampleGroup(): boolean {
     if (sampleRules({ rules })) return true;
-    // 残留的部分示例规则（删了一条、拖出组、同名自建组）一律当脏数据清掉再重建，
-    // 否则建组判定与教程判定口径不一，按钮成了空操作、第 2 步永远等不到完成。
-    const kept = rules.filter((r) => !isSampleRule(r));
+    // 残留的部分示例规则（删了一条、拖出组）当脏数据清掉再重建，否则建组判定与教程判定
+    // 口径不一，按钮成了空操作、第 2 步永远等不到完成。挑键与写入都基于 updater 的 prev
+    // 派生，不拿渲染时的快照写盘；这里先挑一次只为决定要不要提示。
+    if (!pickSampleKeys(rules.filter((r) => !isSampleRule(r)))) {
+      toast.warning('键位都被占用了，请先在规则或热键里腾出几个数字键和字母键，或跳过这一步');
+      return false;
+    }
+    pushRules((prev) => {
+      const kept = prev.filter((r) => !isSampleRule(r));
+      const keys = pickSampleKeys(kept);
+      if (!keys) return prev;
+      const sample = (id: string, mode: BurstMode, trigger: number, target: number): BurstRule => ({
+        id,
+        enabled: false,
+        trigger_key: keyboardKey(trigger),
+        target_key: keyboardKey(target),
+        mode,
+        stop_key: null,
+        interval_ms: 50,
+        group: SAMPLE_GROUP,
+      });
+      return [
+        ...kept,
+        sample(SAMPLE_IDS.a, 'toggle', keys.pair[0], keys.targets[0]),
+        sample(SAMPLE_IDS.b, 'toggle', keys.pair[1], keys.targets[1]),
+        sample(SAMPLE_IDS.hold, 'hold', keys.hold, keys.targets[2]),
+      ];
+    });
+    setFilter('all');
+    return true;
+  }
+
+  /**
+   * 示例组键位：从候选里挑没被占用的。撞上用户规则会同时触发、冲突提醒变红，教程就讲不清了。
+   * 占用 = 规则的启动 / 连发 / 停止键 ∪ 三个全局热键；挑不齐返回 undefined。
+   */
+  function pickSampleKeys(
+    list: BurstRule[],
+  ): { pair: [number, number]; hold: number; targets: number[] } | undefined {
     const used = new Set<string>();
     const mark = (k: KeyId | null) => k && used.add(keyToken(k));
-    for (const r of kept) {
+    for (const r of list) {
       mark(r.trigger_key);
       mark(r.target_key);
       mark(r.stop_key);
@@ -2172,33 +2208,12 @@ export default function PanelApp() {
       [0x5a, 0x58],
     ];
     const holds = [0x56, 0x42, 0x4e, 0x4d, 0x48, 0x4a]; // V B N M H J
-    // 连发键同样避让：撞上用户规则的启动键，示例卡与用户卡都会亮冲突色
     const targetCandidates = [0x51, 0x45, 0x52, 0x54, 0x59, 0x55, 0x49, 0x4f, 0x50]; // Q E R T Y U I O P
     const pair = pairs.find(([a, b]) => free(a) && free(b));
     const hold = holds.find(free);
     const targets = targetCandidates.filter(free).slice(0, 3);
-    if (!pair || hold === undefined || targets.length < 3) {
-      toast.warning('键位都被占用了，请先在规则或热键里腾出几个数字键和字母键，或跳过这一步');
-      return false;
-    }
-    const sample = (id: string, mode: BurstMode, trigger: number, target: number): BurstRule => ({
-      id,
-      enabled: false,
-      trigger_key: keyboardKey(trigger),
-      target_key: keyboardKey(target),
-      mode,
-      stop_key: null,
-      interval_ms: 50,
-      group: SAMPLE_GROUP,
-    });
-    pushRules(() => [
-      ...kept,
-      sample(SAMPLE_IDS.a, 'toggle', pair[0], targets[0]),
-      sample(SAMPLE_IDS.b, 'toggle', pair[1], targets[1]),
-      sample(SAMPLE_IDS.hold, 'hold', hold, targets[2]),
-    ]);
-    setFilter('all');
-    return true;
+    if (!pair || hold === undefined || targets.length < 3) return undefined;
+    return { pair, hold, targets };
   }
 
   function deleteSampleGroup() {
@@ -2480,7 +2495,7 @@ export default function PanelApp() {
               ...new Set(rules.filter((r) => r.group).map((r) => r.group as string)),
             ];
             const latestGroup = groupNames[groupNames.length - 1];
-            const draggingRule = draggingId ? rules.find((r) => r.id === draggingId) : null;
+            const draggingRule = draggingId ? rules.find((r) => r.id === draggingId) : undefined;
             const canGroupDrop = filter === 'all';
             const groupList = groupNames.filter((g) => g !== pendingGroupName);
 

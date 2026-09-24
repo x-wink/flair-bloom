@@ -7,12 +7,12 @@ import {
   chamferPath,
   FAN_GAP,
   fanOffset,
-  keyToken,
   placeWires,
   routeWire,
   wiredKeys,
   type WireRule,
 } from '../apps/main/src/windows/panel/hkbWires.ts';
+import { keyToken } from '../apps/main/src/windows/panel/keyToken.ts';
 
 const kb = (code: number) => ({ kind: 'keyboard', code }) as unknown as WireRule['trigger_key'];
 

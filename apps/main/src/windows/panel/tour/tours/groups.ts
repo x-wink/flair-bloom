@@ -3,7 +3,7 @@ import Button from '../../components/Button';
 import { keyLabel } from '../../components/KeyCapture';
 import GroupTimeline from '../components/GroupTimeline';
 import type { TourDef, TourHost, TourSnapshot } from '../types';
-import { p, SAMPLE_IDS, sampleRules } from './helpers';
+import { isSampleRule, p, SAMPLE_IDS, sampleRules } from './helpers';
 
 /** 示例组三条规则的启动键名；示例组不在时用出厂键位讲。 */
 function sampleKeys(snapshot: TourSnapshot): [string, string, string] {
@@ -154,10 +154,11 @@ export const groups: TourDef = {
           null,
           p(
             '长按规则不放进组，就和切换规则同时跑、互不影响；放进组才会插队。',
-            '示例组用不上了可以一键删掉。',
+            '示例规则用不上了可以一键删掉。',
           ),
-          sampleRules(host.snapshot)
-            ? button('删除示例组', () => host.deleteSampleGroup())
+          // 只剩部分示例规则时也给清理入口
+          host.snapshot.rules.some(isSampleRule)
+            ? button('删除示例规则', () => host.deleteSampleGroup())
             : undefined,
         ),
     },

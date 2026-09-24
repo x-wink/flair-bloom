@@ -102,16 +102,21 @@ export default function HorizontalLayout({
   // 键帽 DOM 按 token 登记，悬停时量两端位置画走线。
   const capRefs = useRef(new Map<string, HTMLElement>());
   const [hoverKey, setHoverKey] = useState<string | undefined>(undefined);
+  // 悬停来源：键盘 Tab 聚焦视口外的键帽时浏览器先滚动再聚焦，那次 scroll 不能把刚画的线收掉
+  const hoverSourceRef = useRef<'mouse' | 'focus'>('mouse');
   // 走线几何只在悬停那一刻量一次；滚动（不触发 mouseleave）或窗口缩放后线会与键帽错位，
   // 直接收起，重新移入再画——比实时重算省事，悬停零密度的语义也不变。
   useEffect(() => {
     if (!hoverKey) return;
     const clear = () => setHoverKey(undefined);
+    const onScroll = () => {
+      if (hoverSourceRef.current === 'mouse') clear();
+    };
     const el = layoutRef.current;
-    el?.addEventListener('scroll', clear, { passive: true });
+    el?.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', clear);
     return () => {
-      el?.removeEventListener('scroll', clear);
+      el?.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', clear);
     };
   }, [hoverKey]);
@@ -198,9 +203,15 @@ export default function HorizontalLayout({
     const t = token(key);
     const hoverProps = wired.has(t)
       ? {
-          onMouseEnter: () => setHoverKey(t),
+          onMouseEnter: () => {
+            hoverSourceRef.current = 'mouse';
+            setHoverKey(t);
+          },
           onMouseLeave: () => setHoverKey((k) => (k === t ? undefined : k)),
-          onFocus: () => setHoverKey(t),
+          onFocus: () => {
+            hoverSourceRef.current = 'focus';
+            setHoverKey(t);
+          },
           onBlur: () => setHoverKey((k) => (k === t ? undefined : k)),
         }
       : {};

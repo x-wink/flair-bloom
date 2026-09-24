@@ -1,8 +1,7 @@
 import type { KeyId } from './components/KeyCapture';
-// 带扩展名：scripts/hkb-wires.test.ts 用 Node 类型剥离直接跑本文件，运行时导入必须写全路径。
+// 带扩展名：scripts/hkb-wires.test.ts 用 Node 类型剥离直接跑本文件，无扩展名的相对导入会报
+// ERR_MODULE_NOT_FOUND；Vite 与 tsc（allowImportingTsExtensions）都认这种写法。
 import { keyToken } from './keyToken.ts';
-
-export { keyToken };
 
 type BurstMode = 'hold' | 'toggle';
 
