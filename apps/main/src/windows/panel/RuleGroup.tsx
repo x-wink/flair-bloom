@@ -1,6 +1,11 @@
 import type { DragEvent, ReactNode } from 'react';
 import { ChevronIcon, EditIcon } from './components/icons';
 
+interface StatusItem {
+  id: string;
+  label: string;
+}
+
 interface Props {
   name: string;
   /** 最后一个组容器，承载教程锚点 `group-latest` / `group-header`。 */
@@ -12,8 +17,9 @@ interface Props {
   /** 筛选状态下不接受拖入：被隐藏的成员看不见，拖进去的位置不可预期。 */
   acceptDrop: boolean;
   hasHold: boolean;
-  running: string[];
-  paused: string[];
+  /** 组内在跑 / 暂停的规则；同组可能有两条同键位规则，故带 id 作 key。 */
+  running: StatusItem[];
+  paused: StatusItem[];
   /** 被筛选隐藏的成员数。 */
   hiddenCount: number;
   children: ReactNode;
@@ -132,13 +138,13 @@ export default function RuleGroup({
           <span className="group-status-idle">未在运行</span>
         ) : (
           <>
-            {running.map((label) => (
-              <span key={`r-${label}`} className="group-status-item is-running">
+            {running.map(({ id, label }) => (
+              <span key={id} className="group-status-item is-running">
                 ● {label} 在跑
               </span>
             ))}
-            {paused.map((label) => (
-              <span key={`p-${label}`} className="group-status-item is-paused">
+            {paused.map(({ id, label }) => (
+              <span key={id} className="group-status-item is-paused">
                 ⏸ {label} 暂停
               </span>
             ))}

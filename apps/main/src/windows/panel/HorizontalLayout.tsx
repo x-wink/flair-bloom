@@ -1,6 +1,6 @@
-import { type CSSProperties, useRef, useState } from 'react';
+import { type CSSProperties, useEffect, useRef, useState } from 'react';
 import WireOverlay from './WireOverlay';
-import { buildWires, wiredKeys } from './hkbWires';
+import { buildWires, keyToken as token, wiredKeys } from './hkbWires';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import IntervalInput from './components/IntervalInput';
 import {
@@ -68,10 +68,6 @@ interface Props {
   onDeleteKey: (key: KeyId) => void;
 }
 
-function token(key: KeyId): string {
-  return `${key.kind}:${key.code}`;
-}
-
 /** 某物理键上的规则分类结果。 */
 interface KeyState {
   rules: HRule[];
@@ -104,7 +100,20 @@ export default function HorizontalLayout({
   const layoutRef = useRef<HTMLElement | null>(null);
   // 键帽 DOM 按 token 登记，悬停时量两端位置画走线。
   const capRefs = useRef(new Map<string, HTMLElement>());
-  const [hoverKey, setHoverKey] = useState<string | null>(null);
+  const [hoverKey, setHoverKey] = useState<string | undefined>(undefined);
+  // 走线几何只在悬停那一刻量一次；滚动（不触发 mouseleave）或窗口缩放后线会与键帽错位，
+  // 直接收起，重新移入再画——比实时重算省事，悬停零密度的语义也不变。
+  useEffect(() => {
+    if (!hoverKey) return;
+    const clear = () => setHoverKey(undefined);
+    const el = layoutRef.current;
+    el?.addEventListener('scroll', clear, { passive: true });
+    window.addEventListener('resize', clear);
+    return () => {
+      el?.removeEventListener('scroll', clear);
+      window.removeEventListener('resize', clear);
+    };
+  }, [hoverKey]);
   const wires = buildWires(rules);
   const wired = wiredKeys(wires);
 
@@ -189,9 +198,9 @@ export default function HorizontalLayout({
     const hoverProps = wired.has(t)
       ? {
           onMouseEnter: () => setHoverKey(t),
-          onMouseLeave: () => setHoverKey((k) => (k === t ? null : k)),
+          onMouseLeave: () => setHoverKey((k) => (k === t ? undefined : k)),
           onFocus: () => setHoverKey(t),
-          onBlur: () => setHoverKey((k) => (k === t ? null : k)),
+          onBlur: () => setHoverKey((k) => (k === t ? undefined : k)),
         }
       : {};
 

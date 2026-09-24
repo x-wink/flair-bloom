@@ -57,6 +57,7 @@ import { keyToken } from './hkbWires';
 import type { TourDef, TourExitResult, TourHost, TourSnapshot } from './tour/types';
 import { useTourProgress } from './tour/useTourProgress';
 import { useKeyRelay } from './useKeyRelay';
+import { useRuleStates } from './useRuleStates';
 import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
 import ImportDialog from './dialogs/ImportDialog';
@@ -248,12 +249,6 @@ function inputModeRequiresAdmin(mode: InputMode): boolean {
 // DD 驱动（DDSimple）。横版键鼠图无法表达其单键规则约束，二者互斥。
 function isDdInputMode(mode: InputMode): boolean {
   return mode === 'ddsimple';
-}
-
-/** 引擎 `get_rule_states`：paused 是被同组按住的长按插队而暂时让位的规则，仍算开启。 */
-interface RuleStates {
-  running: string[];
-  paused: string[];
 }
 
 interface BurstRule {
@@ -454,8 +449,8 @@ export default function PanelApp() {
   const [modePickerOpen, setModePickerOpen] = useState(false);
   const modeBtnRef = useRef<HTMLButtonElement>(null);
   const [rules, setRules] = useState<BurstRule[]>([]);
-  const [activeRuleIds, setActiveRuleIds] = useState<Set<string>>(new Set());
-  const [pausedRuleIds, setPausedRuleIds] = useState<Set<string>>(new Set());
+  // 全局开关启用时轮询，驱动激活态光晕；关闭时清空，避免残留高亮。
+  const { active: activeRuleIds, paused: pausedRuleIds } = useRuleStates(globalEnabled, 120);
   const prevActiveRuleIdsRef = useRef<Set<string>>(new Set());
   const [profileName, setProfileName] = useState('defaults');
   const [profileList, setProfileList] = useState<ProfileEntry[]>([]);
@@ -1056,35 +1051,6 @@ export default function PanelApp() {
         }
       });
   }, [hotkeys]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // 全局开关启用时轮询活动规则 ID，驱动激活态脉冲动画。
-  // 关闭时清空，避免残留高亮。
-  useEffect(() => {
-    if (!globalEnabled) {
-      setActiveRuleIds((prev) => (prev.size === 0 ? prev : new Set()));
-      setPausedRuleIds((prev) => (prev.size === 0 ? prev : new Set()));
-      return;
-    }
-    let cancelled = false;
-    const sameSet = (prev: Set<string>, ids: string[]) =>
-      prev.size === ids.length && ids.every((id) => prev.has(id));
-    const poll = () => {
-      invoke<RuleStates>('get_rule_states')
-        .then(({ running, paused }) => {
-          if (cancelled) return;
-          const ids = [...running, ...paused];
-          setActiveRuleIds((prev) => (sameSet(prev, ids) ? prev : new Set(ids)));
-          setPausedRuleIds((prev) => (sameSet(prev, paused) ? prev : new Set(paused)));
-        })
-        .catch(() => {});
-    };
-    poll();
-    const timer = setInterval(poll, 120);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
-  }, [globalEnabled]);
 
   // 全局开关切换时播报语音；initialLoadDone 为 true 后才响应，跳过启动阶段的状态同步
   useEffect(() => {
@@ -1799,12 +1765,12 @@ export default function PanelApp() {
   }
 
   /** 取出拖拽源规则并复位拖拽状态。 */
-  function takeDragSource(e: ReactDragEvent): string | null {
+  function takeDragSource(e: ReactDragEvent): string | undefined {
     const srcId = draggingIdRef.current || e.dataTransfer.getData('text/plain');
     draggingIdRef.current = null;
     setDraggingId(null);
     setDragOverInfo(null);
-    return srcId || null;
+    return srcId || undefined;
   }
 
   function cardDragHandlers(rule: BurstRule): CardDragHandlers {
@@ -2565,8 +2531,10 @@ export default function PanelApp() {
                   hasHold={members.some((r) => r.mode === 'hold')}
                   running={members
                     .filter((r) => activeRuleIds.has(r.id) && !pausedRuleIds.has(r.id))
-                    .map(ruleLabel)}
-                  paused={members.filter((r) => pausedRuleIds.has(r.id)).map(ruleLabel)}
+                    .map((r) => ({ id: r.id, label: ruleLabel(r) }))}
+                  paused={members
+                    .filter((r) => pausedRuleIds.has(r.id))
+                    .map((r) => ({ id: r.id, label: ruleLabel(r) }))}
                   hiddenCount={members.length - shown.length}
                   onToggleCollapse={() => toggleGroupCollapse(name)}
                   onStartRename={() => setEditingGroupName({ current: name, draft: name })}

@@ -11,6 +11,7 @@ import { LazyStore } from '@tauri-apps/plugin-store';
 import iconUrl from '../../assets/icon-64.png';
 import { keyLabel, type KeyId } from '../panel/components/KeyCapture';
 import { useKeyRelay } from '../panel/useKeyRelay';
+import { useRuleStates } from '../panel/useRuleStates';
 import {
   applyThemeColor,
   applyThemeMode,
@@ -43,12 +44,6 @@ interface BurstRuleLike {
   group: string | null;
 }
 
-/** 引擎 `get_rule_states`：paused 是被同组按住的长按插队而暂时让位的规则，仍算开启。 */
-interface RuleStates {
-  running: string[];
-  paused: string[];
-}
-
 function capClass(r: FloatRule, active: boolean, paused: boolean): string {
   return [
     'hkb-cap',
@@ -66,8 +61,6 @@ export default function FloatApp() {
   const [globalEnabled, setGlobalEnabled] = useState(false);
   const [togglingGlobal, setTogglingGlobal] = useState(false);
   const [rules, setRules] = useState<FloatRule[]>([]);
-  const [activeIds, setActiveIds] = useState<string[]>([]);
-  const [pausedIds, setPausedIds] = useState<string[]>([]);
   const floatRef = useRef<HTMLDivElement>(null);
 
   // 浮窗聚焦时全局键盘钩子失效，与主面板共用键盘事件中继，避免热键被吞。
@@ -214,36 +207,9 @@ export default function FloatApp() {
     }
   }, []);
 
-  // 激活规则轮询：可见时每 150ms 拉一次 id，停用即清空。
+  // 可见时刷新规则缓存；激活规则由 useRuleStates 每 150ms 轮询，停用即清空。
   useEffect(() => {
-    if (!active) {
-      setActiveIds((prev) => (prev.length === 0 ? prev : []));
-      setPausedIds((prev) => (prev.length === 0 ? prev : []));
-      return;
-    }
-    let cancelled = false;
-    void refreshRules();
-
-    const poll = async () => {
-      let states: RuleStates;
-      try {
-        states = await invoke<RuleStates>('get_rule_states');
-      } catch {
-        return;
-      }
-      if (cancelled) return;
-      const ids = [...states.running, ...states.paused].sort();
-      const same = (prev: string[], next: string[]) =>
-        prev.length === next.length && prev.every((id, i) => id === next[i]);
-      setActiveIds((prev) => (same(prev, ids) ? prev : ids));
-      setPausedIds((prev) => (same(prev, states.paused) ? prev : states.paused));
-    };
-    void poll();
-    const timer = setInterval(poll, 150);
-    return () => {
-      cancelled = true;
-      clearInterval(timer);
-    };
+    if (active) void refreshRules();
   }, [active, refreshRules]);
 
   const onExpand = () => {
@@ -265,8 +231,7 @@ export default function FloatApp() {
     }
   };
 
-  const activeSet = new Set(activeIds);
-  const pausedSet = new Set(pausedIds);
+  const { active: activeSet, paused: pausedSet } = useRuleStates(active, 150);
   // 含激活规则的互斥分组（保持规则出现顺序）
   const activeGroups: string[] = [];
   for (const r of rules) {

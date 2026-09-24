@@ -27,7 +27,7 @@ FlairBloom.exe（单一 Tauri 进程）
 
 **退出只有一个出口**：`lib.rs` 的 `shutdown_and_exit`（先 `engine.shutdown()` 再 `app.exit(0)`），托盘「退出」、`exit_app` 命令（面板关闭选「直接退出」、协议对话框「不同意并退出」）、浮窗关闭请求都走它。不走 `window.destroy()`：销毁面板时浮窗窗口仍在窗口表里，进程不会退出，引擎也不会停，结果是窗口全没了但连发还在后台跑。`RunEvent::Exit` 里再 `shutdown()` 一次，兜住不经此函数的退出路径。
 
-**单进程多窗口**：面板与浮窗是同一进程的独立 WebView，通过 `app.emit_all()` 事件通信（`float-active` / `global-enabled-changed` / `theme-changed` / `app-status-changed` / `update-*`），无 Named Pipe。窗口显隐统一走 `lib.rs` 的 `enter_panel_mode`（显示面板、隐藏浮窗）/ `enter_float_mode`（先显示浮窗再隐藏面板，浮窗缺失则保留面板）。激活态规则由前端轮询 `get_rule_states`（运行 / 暂停分区取自同一快照），活跃集合在前端派生为两者并集。
+**单进程多窗口**：面板与浮窗是同一进程的独立 WebView，通过 `app.emit_all()` 事件通信（`float-active` / `global-enabled-changed` / `theme-changed` / `app-status-changed` / `update-*`），无 Named Pipe。窗口显隐统一走 `lib.rs` 的 `enter_panel_mode`（显示面板、隐藏浮窗）/ `enter_float_mode`（先显示浮窗再隐藏面板，浮窗缺失则保留面板）。激活态规则由前端轮询 `get_rule_states`（`panel/useRuleStates.ts`，面板与浮窗共用；运行 / 暂停分区取自同一快照），活跃集合在前端派生为两者并集。
 
 WebView 聚焦时 `WH_KEYBOARD_LL` 全局钩子不触发，面板与浮窗都用 `useKeyRelay` 把键盘事件中继到后端 `relay_key_event` 命令，交由引擎统一处理热键 / Toggle 触发 / `pressed_keys` 维护，避免聚焦窗口时热键被吞；同时阻止非编辑区的默认快捷键（F12、Ctrl+Shift+I 等，仅生产构建）。
 
