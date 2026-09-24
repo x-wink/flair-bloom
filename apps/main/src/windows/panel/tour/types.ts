@@ -27,7 +27,8 @@ export interface TourSnapshot {
   globalEnabled: boolean;
   inputMode: 'sendinput' | 'interception' | 'ddsimple';
   layout: 'vertical' | 'horizontal';
-  activeTab: 'hold' | 'toggle';
+  /** 竖版规则列表的筛选；只影响显示。 */
+  filter: 'all' | 'hold' | 'toggle';
   /**
    * 每成功录入一次「连发按键」+1。实操判定用它而不是比较键值：新建规则的连发按键默认
    * 就是 Q，用户照着提示按 Q 时键值不变，比较键值会让人永远停在「等你按一个键…」。
@@ -45,7 +46,7 @@ export interface TourSnapshot {
  */
 export interface TourHost {
   snapshot: TourSnapshot;
-  setActiveTab: (tab: TourSnapshot['activeTab']) => void;
+  setFilter: (filter: TourSnapshot['filter']) => void;
   /** 可能被拒绝（DD 模式切横版），拒绝时宿主自己提示，教程只需继续。 */
   setLayout: (layout: TourSnapshot['layout']) => Promise<void>;
   openSettings: (tab: TourSnapshot['settingsTab']) => void;

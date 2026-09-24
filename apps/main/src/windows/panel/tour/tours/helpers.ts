@@ -14,11 +14,13 @@ export function p(...lines: string[]): ReactNode {
 }
 
 /**
- * 实操判定的基线取「当前页签里的最后一条规则」：刚添加的那条总在末尾，而 `rule-latest`
- * 锚点也是按页签各取末尾的那张卡。取全部规则的末尾会在两边指到不同的卡——已有
- * `[hold1, toggle1]` 的用户在 hold 页签，高亮的是 hold1，判定却盯着 toggle1。
+ * 实操判定的基线取「当前筛选下最后一条可见规则」，与 `rule-latest` 锚点同口径：刚添加的那条
+ * 总在末尾。若取全部规则的末尾，筛选时两边会指到不同的卡——高亮的是可见的那张，判定却盯着
+ * 被筛掉的那条。
  */
 export function lastRule(snapshot: TourSnapshot): TourRule | undefined {
-  const inTab = snapshot.rules.filter((rule) => rule.mode === snapshot.activeTab);
-  return inTab[inTab.length - 1];
+  const { filter } = snapshot;
+  const visible =
+    filter === 'all' ? snapshot.rules : snapshot.rules.filter((rule) => rule.mode === filter);
+  return visible[visible.length - 1];
 }

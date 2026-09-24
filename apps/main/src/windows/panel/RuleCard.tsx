@@ -1,0 +1,259 @@
+import { useRef, useState, type DragEventHandler } from 'react';
+import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
+import { ChevronIcon } from './components/icons';
+import IntervalInput from './components/IntervalInput';
+import KeyCapture, {
+  type CaptureReject,
+  type KeyId,
+  type KeyPolicies,
+} from './components/KeyCapture';
+import type { ConflictSeverity } from './conflicts';
+
+type BurstMode = 'hold' | 'toggle';
+
+/** 与 PanelApp 的 BurstRule 结构兼容，不反向依赖它。 */
+export interface CardRule {
+  id: string;
+  enabled: boolean;
+  trigger_key: KeyId;
+  target_key: KeyId;
+  mode: BurstMode;
+  stop_key: KeyId | null;
+  interval_ms: number;
+  group: string | null;
+}
+
+export interface CardDragHandlers {
+  onDragStart: DragEventHandler<HTMLDivElement>;
+  onDragOver: DragEventHandler<HTMLDivElement>;
+  onDrop: DragEventHandler<HTMLDivElement>;
+  onDragEnd: DragEventHandler<HTMLDivElement>;
+}
+
+interface Props {
+  rule: CardRule;
+  isActive: boolean;
+  isPaused: boolean;
+  /** 当前筛选下最后一条可见规则，承载教程锚点 `rule-latest`。 */
+  isLatest: boolean;
+  showAdvanced: boolean;
+  isDragging: boolean;
+  isDragTarget: boolean;
+  conflict: ConflictSeverity | null;
+  policies: KeyPolicies;
+  intervalMin: number;
+  intervalMax: number;
+  /** 全部已有分组名，供「移入分组」子菜单。 */
+  groups: string[];
+  drag: CardDragHandlers;
+  onPatch: (patch: Partial<CardRule>) => void;
+  onSetMode: (mode: BurstMode) => void;
+  onToggleAdvanced: () => void;
+  onDelete: () => void;
+  onMoveToGroup: (group: string) => void;
+  onNewGroupWith: () => void;
+  onRemoveFromGroup: () => void;
+  onKeyReject: (info: CaptureReject) => void;
+  /** 成功录入一次连发按键（教程实操判定用）。 */
+  onTargetCaptured: () => void;
+}
+
+const MODE_NAME: Record<BurstMode, string> = { hold: '长按', toggle: '切换' };
+
+function other(mode: BurstMode): BurstMode {
+  return mode === 'hold' ? 'toggle' : 'hold';
+}
+
+export default function RuleCard({
+  rule,
+  isActive,
+  isPaused,
+  isLatest,
+  showAdvanced,
+  isDragging,
+  isDragTarget,
+  conflict,
+  policies,
+  intervalMin,
+  intervalMax,
+  groups,
+  drag,
+  onPatch,
+  onSetMode,
+  onToggleAdvanced,
+  onDelete,
+  onMoveToGroup,
+  onNewGroupWith,
+  onRemoveFromGroup,
+  onKeyReject,
+  onTargetCaptured,
+}: Props) {
+  const menuRef = useRef<HTMLButtonElement>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const isToggle = rule.mode === 'toggle';
+  const nextMode = other(rule.mode);
+
+  const moveTargets = groups.filter((g) => g !== rule.group);
+  const menuItems: ContextMenuItem[] = [
+    {
+      label: '移入分组',
+      children: [
+        ...moveTargets.map((g) => ({ label: g, onClick: () => onMoveToGroup(g) })),
+        ...(moveTargets.length > 0 ? [{ type: 'divider' as const }] : []),
+        { label: '新建分组', onClick: onNewGroupWith },
+      ],
+    },
+    ...(rule.group ? [{ label: '移出分组', onClick: onRemoveFromGroup }] : []),
+    { label: `改为${MODE_NAME[nextMode]}连发`, onClick: () => onSetMode(nextMode) },
+    { type: 'divider' },
+    { label: '删除', danger: true, onClick: onDelete },
+  ];
+
+  const cls = [
+    'rule-row',
+    isToggle ? 'is-toggle' : 'is-hold',
+    !rule.enabled && 'disabled',
+    isActive && 'active',
+    isPaused && 'is-paused',
+    isDragging && 'dragging',
+    isDragTarget && 'drag-target',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  // 长按不开高级时启动键跟随连发按键（重合态）；切换连发的启动键始终单独可设。
+  const targetPolicy = isToggle
+    ? policies.target
+    : showAdvanced
+      ? policies.target
+      : policies.trigger_target;
+
+  return (
+    <div
+      className={cls}
+      title={isPaused ? '已暂停：同组长按插队中，松手后恢复' : undefined}
+      data-tour={isLatest ? 'rule-latest' : undefined}
+      draggable
+      {...drag}
+    >
+      <span className="drag-handle" aria-hidden>
+        ⠿
+      </span>
+      <div className="rule-head">
+        <button
+          type="button"
+          className={`rule-mode-tag ${isToggle ? 'is-toggle' : 'is-hold'}`}
+          data-tour="rule-mode"
+          aria-label={`切换为${MODE_NAME[nextMode]}连发`}
+          title={`${MODE_NAME[rule.mode]}连发（点击改为${MODE_NAME[nextMode]}连发）`}
+          onClick={() => onSetMode(nextMode)}
+        >
+          {MODE_NAME[rule.mode]}
+        </button>
+        <button
+          ref={menuRef}
+          type="button"
+          className="rule-menu-btn"
+          data-tour="rule-menu"
+          aria-label="更多操作"
+          title="更多操作"
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          ⋯
+        </button>
+      </div>
+      <div className="rule-body">
+        <div className="rule-main">
+          {isToggle && (
+            <>
+              <div className="rule-field">
+                <label>启动热键</label>
+                <KeyCapture
+                  onReject={onKeyReject}
+                  policy={policies.trigger}
+                  value={rule.trigger_key}
+                  onChange={(vk) => vk && onPatch({ trigger_key: vk })}
+                  conflict={conflict}
+                />
+              </div>
+              <span className="rule-arrow">→</span>
+            </>
+          )}
+          <div className="rule-field" data-tour="rule-key">
+            <label>连发按键</label>
+            <KeyCapture
+              onReject={onKeyReject}
+              policy={targetPolicy}
+              value={rule.target_key}
+              onChange={(vk) => {
+                if (!vk) return;
+                const patch: Partial<CardRule> = { target_key: vk };
+                if (!isToggle && !showAdvanced) patch.trigger_key = vk;
+                onPatch(patch);
+                onTargetCaptured();
+              }}
+              conflict={isToggle || !showAdvanced ? conflict : null}
+            />
+          </div>
+          <div className="rule-field rule-interval" data-tour="rule-interval">
+            <label>间隔</label>
+            <IntervalInput
+              value={rule.interval_ms}
+              min={intervalMin}
+              max={intervalMax}
+              onChange={(v) => onPatch({ interval_ms: v })}
+            />
+          </div>
+        </div>
+        <input
+          type="checkbox"
+          className="enable-checkbox"
+          data-tour="rule-enable"
+          checked={rule.enabled}
+          onChange={(e) => onPatch({ enabled: e.target.checked })}
+          aria-label="启用"
+        />
+      </div>
+      {showAdvanced && (
+        <div className="rule-advanced">
+          <div className="rule-field">
+            <label>{isToggle ? '停止热键' : '按压键'}</label>
+            {isToggle ? (
+              <KeyCapture
+                onReject={onKeyReject}
+                policy={policies.trigger}
+                value={rule.stop_key ?? rule.trigger_key}
+                onChange={(vk) => vk && onPatch({ stop_key: vk })}
+              />
+            ) : (
+              <KeyCapture
+                onReject={onKeyReject}
+                policy={policies.trigger}
+                value={rule.trigger_key}
+                onChange={(vk) => vk && onPatch({ trigger_key: vk })}
+                conflict={conflict}
+              />
+            )}
+          </div>
+          <span className="adv-hint">{isToggle ? '默认与启动热键相同' : '默认与连发按键相同'}</span>
+        </div>
+      )}
+      <button
+        className={`expand-btn${showAdvanced ? ' open' : ''}`}
+        data-tour="rule-advanced"
+        onClick={onToggleAdvanced}
+        aria-label="高级设置"
+      >
+        <ChevronIcon size={10} className="chevron" />
+        <span className="expand-label">{showAdvanced ? '收起高级设置' : '高级设置'}</span>
+      </button>
+      <ContextMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        target={menuRef}
+        items={menuItems}
+        location="bottom-left"
+      />
+    </div>
+  );
+}

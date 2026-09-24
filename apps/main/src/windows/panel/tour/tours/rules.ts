@@ -12,7 +12,7 @@ export const rules: TourDef = {
   steps: [
     {
       id: 'modes',
-      target: 'tabs',
+      target: 'filter',
       title: '两种连发各适合什么',
       body: p(
         '按压连发适合平 A、等 CD 戳键，按住才连。',
@@ -21,7 +21,7 @@ export const rules: TourDef = {
       prepare: async (host) => {
         host.closeMenus();
         await host.setLayout('vertical');
-        host.setActiveTab('hold');
+        host.setFilter('hold');
       },
     },
     {
@@ -31,7 +31,7 @@ export const rules: TourDef = {
       body: p('后面两步要在规则卡上讲，先点这里添加一条按压连发规则。'),
       // 前置步：已经有按压规则就不出现，没有就等用户加一条，后面两步才有卡可指
       prepare: (host) => {
-        host.setActiveTab('hold');
+        host.setFilter('hold');
         return hasHoldRule(host.snapshot) ? 'skip' : undefined;
       },
       done: (now, entered) => now.rules.length > entered.rules.length,
@@ -47,7 +47,7 @@ export const rules: TourDef = {
       ),
       // 上一步被跳过、仍然没有规则卡：跳过而不是指着空处讲
       prepare: (host) => {
-        host.setActiveTab('hold');
+        host.setFilter('hold');
         return hasHoldRule(host.snapshot) ? undefined : 'skip';
       },
     },
@@ -60,7 +60,7 @@ export const rules: TourDef = {
         '切换连发还能再单独设一个停止键。',
       ),
       prepare: (host) => {
-        host.setActiveTab('hold');
+        host.setFilter('hold');
         return hasHoldRule(host.snapshot) ? undefined : 'skip';
       },
     },
@@ -68,8 +68,8 @@ export const rules: TourDef = {
       id: 'add-toggle',
       target: 'add-toggle',
       title: '添加切换连发',
-      body: p('切换连发规则从这里加，页签已经替你切过去了；这一步只看，不用点。'),
-      prepare: (host) => host.setActiveTab('toggle'),
+      body: p('切换连发规则从这里加，列表已经替你筛到切换连发；这一步只看，不用点。'),
+      prepare: (host) => host.setFilter('toggle'),
     },
     {
       id: 'group',
@@ -79,7 +79,7 @@ export const rules: TourDef = {
         '把几条切换连发规则放进同一组，组内同一时刻只跑一条。',
         '多段宏就靠它：按 2 那条起来，按 1 那条自动停，不会打架。',
       ),
-      prepare: (host) => host.setActiveTab('toggle'),
+      prepare: (host) => host.setFilter('toggle'),
     },
     {
       id: 'finish',

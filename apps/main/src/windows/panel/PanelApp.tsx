@@ -5,16 +5,25 @@ import { emit, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
 import { LazyStore } from '@tauri-apps/plugin-store';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type DragEvent as ReactDragEvent,
+  type ReactNode,
+} from 'react';
 import iconUrl from '../../assets/icon-32.png';
 import bgUrl from '../../assets/icon.png';
 import { APP_NAME } from '../../constants';
 import HorizontalLayout from './HorizontalLayout';
+import RuleCard, { type CardDragHandlers } from './RuleCard';
+import RuleGroup from './RuleGroup';
 import Button from './components/Button';
 import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
 import { useConfirm, useConfirmOpen } from './components/ConfirmDialog';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
-import IntervalInput from './components/IntervalInput';
 import {
   ChevronIcon,
   CloseIcon,
@@ -25,7 +34,7 @@ import {
 } from './components/icons';
 import Kbd from './components/Kbd';
 
-import KeyCapture, {
+import {
   type CaptureReject,
   type KeyPolicies,
   RESTRICTIVE_POLICY,
@@ -88,7 +97,8 @@ const HOTKEY_LABELS: Record<string, string> = {
 
 const settingsStore = new LazyStore('settings.json');
 const CLOSE_BEHAVIOR_KEY = 'closeBehavior';
-const ACTIVE_TAB_KEY = 'activeTab';
+/** D10：长按与切换第一次混进同一组时的提示，勾选「不再提示」后写 true。 */
+const HOLD_IN_GROUP_HINT_KEY = 'holdInGroupHintDismissed';
 const SOUND_KEY = 'sound';
 const THEME_KEY = 'theme';
 const LAYOUT_KEY = 'layout';
@@ -184,6 +194,7 @@ const DEFAULT_INTERVAL_MS = 10;
 const MAX_INTERVAL_MS = 10000;
 
 type BurstMode = 'hold' | 'toggle';
+type RuleFilter = 'all' | BurstMode;
 type InputMode = 'sendinput' | 'interception' | 'ddsimple';
 type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
 
@@ -463,7 +474,8 @@ export default function PanelApp() {
     draft: string;
   } | null>(null);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<BurstMode>('toggle');
+  // 筛选只影响显示；不持久化，免得下次打开时规则被上次的筛选藏起来像是丢了。
+  const [filter, setFilter] = useState<RuleFilter>('all');
   const [layout, setLayout] = useState<PanelLayout>('vertical');
   // 横版统一间隔的回退值（无规则时显示用；有规则时显示取自规则本身）
   const [unifiedInterval, setUnifiedInterval] = useState(DEFAULT_INTERVAL_MS);
@@ -773,13 +785,6 @@ export default function PanelApp() {
   }, []);
 
   useEffect(() => {
-    settingsStore
-      .get<BurstMode>(ACTIVE_TAB_KEY)
-      .then((v) => {
-        if (v === 'hold' || v === 'toggle') setActiveTab(v);
-      })
-      .catch(() => {});
-
     settingsStore
       .get<CloseBehavior>(CLOSE_BEHAVIOR_KEY)
       .then((v) => {
@@ -1603,24 +1608,85 @@ export default function PanelApp() {
     }
   }
 
-  // 切换连发 ↔ 按压连发；互斥组（仅切换连发可用）内改为按压时确认并移出分组
-  async function handleHSetMode(rule: BurstRule, mode: BurstMode) {
-    if (mode === 'hold' && rule.group) {
-      const ok = await confirm({
-        title: '移出互斥分组',
-        description: `「${rule.group}」是互斥分组，仅切换连发可用。改为按压连发将把该键移出分组，是否继续？`,
-        confirmText: '继续',
-        tone: 'danger',
-      });
-      if (!ok) return;
-      updateRule(rule.id, { mode, stop_key: null, enabled: true, group: null });
-      return;
-    }
-    updateRule(rule.id, {
-      mode,
+  // 横版单键：切换连发的停止键就是这个键本身，轮换出来的规则总是启用
+  function handleHSetMode(rule: BurstRule, mode: BurstMode) {
+    setRuleMode(rule, mode, {
       stop_key: mode === 'toggle' ? rule.trigger_key : null,
       enabled: true,
     });
+  }
+
+  /** 改模式保留分组：长按也能进组插队。 */
+  function setRuleMode(rule: BurstRule, mode: BurstMode, extra: Partial<BurstRule> = {}) {
+    // 后端不支持切换连发的重合态（DD 系列）时，启动键 == 连发按键的规则改成切换是空集，
+    // 写进去也会在装载时被净化掉，不如当场拒绝并说明。
+    if (
+      mode === 'toggle' &&
+      !keyPolicies.coincident_toggle &&
+      keyEq(rule.trigger_key, rule.target_key)
+    ) {
+      toast.warning(
+        `${INPUT_MODE_LABELS[inputMode]}下切换连发的启动键不能与连发按键相同，请先在高级设置里改按压键`,
+      );
+      return;
+    }
+    pushGroupMove((prev) =>
+      prev.map((r) => (r.id === rule.id ? { ...r, mode, stop_key: null, ...extra } : r)),
+    );
+  }
+
+  /** 同时含长按与切换的分组。 */
+  function mixedGroups(list: BurstRule[]): Set<string> {
+    const modes = new Map<string, Set<BurstMode>>();
+    for (const r of list) {
+      if (!r.group) continue;
+      const set = modes.get(r.group) ?? new Set<BurstMode>();
+      set.add(r.mode);
+      modes.set(r.group, set);
+    }
+    return new Set([...modes].filter(([, m]) => m.size > 1).map(([g]) => g));
+  }
+
+  /**
+   * 会改变分组成员的写入都走这里：某组第一次同时有长按与切换时提示一次插队语义（D10）。
+   * 双向都提示——长按拖进切换组、切换拖进长按组，结果一样，用户同样需要知道长按会插队。
+   */
+  function pushGroupMove(updater: (prev: BurstRule[]) => BurstRule[]) {
+    const before = mixedGroups(rules);
+    const next = updater(rules);
+    pushRules(() => next);
+    if ([...mixedGroups(next)].some((g) => !before.has(g))) void showHoldInGroupHint();
+  }
+
+  async function showHoldInGroupHint() {
+    const dismissed = await settingsStore.get<boolean>(HOLD_IN_GROUP_HINT_KEY).catch(() => false);
+    if (dismissed) return;
+    let dontShowAgain = false;
+    await confirm({
+      title: '长按和切换在同一组',
+      body: (
+        <>
+          <p>按住组里的长按键时，同组正在跑的规则会暂停让位；松手后它自动接着跑。</p>
+          <label className="confirm-dismiss">
+            <input
+              type="checkbox"
+              onChange={(e) => {
+                dontShowAgain = e.target.checked;
+              }}
+            />
+            不再提示
+          </label>
+        </>
+      ),
+      confirmText: '知道了',
+      cancelText: null,
+    });
+    if (dontShowAgain) {
+      settingsStore
+        .set(HOLD_IN_GROUP_HINT_KEY, true)
+        .then(() => settingsStore.save())
+        .catch(() => {});
+    }
   }
 
   function handleHSetEnabled(ruleId: string, enabled: boolean) {
@@ -1640,7 +1706,7 @@ export default function PanelApp() {
   }
 
   function handleHSetGroup(ruleId: string, group: string | null) {
-    updateRule(ruleId, { group });
+    pushGroupMove((prev) => prev.map((r) => (r.id === ruleId ? { ...r, group } : r)));
   }
 
   function handleHCreateGroupWith(ruleId: string) {
@@ -1655,6 +1721,8 @@ export default function PanelApp() {
     let n = 1;
     while (existingGroups.has(`互斥组${n}`)) n++;
     const name = `互斥组${n}`;
+    // 待命空组靠拖入成形，筛选下不接受拖入，故回到全部。
+    setFilter('all');
     setPendingGroupName(name);
     setEditingGroupName({ current: name, draft: name });
   }
@@ -1688,7 +1756,7 @@ export default function PanelApp() {
   }
 
   function handleDropBeforeRule(ruleId: string, targetRuleId: string) {
-    pushRules((prev) => {
+    pushGroupMove((prev) => {
       const dragged = prev.find((r) => r.id === ruleId);
       const target = prev.find((r) => r.id === targetRuleId);
       if (!dragged || !target) return prev;
@@ -1701,7 +1769,7 @@ export default function PanelApp() {
   }
 
   function handleDropToGroup(ruleId: string, groupName: string) {
-    pushRules((prev) => {
+    pushGroupMove((prev) => {
       const dragged = prev.find((r) => r.id === ruleId);
       if (!dragged) return prev;
       const without = prev.filter((r) => r.id !== ruleId);
@@ -1725,7 +1793,61 @@ export default function PanelApp() {
     if (!name) return;
     setPendingGroupName(null);
     setEditingGroupName(null);
-    pushRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, group: name } : r)));
+    pushGroupMove((prev) => prev.map((r) => (r.id === ruleId ? { ...r, group: name } : r)));
+  }
+
+  /** 取出拖拽源规则并复位拖拽状态。 */
+  function takeDragSource(e: ReactDragEvent): string | null {
+    const srcId = draggingIdRef.current || e.dataTransfer.getData('text/plain');
+    draggingIdRef.current = null;
+    setDraggingId(null);
+    setDragOverInfo(null);
+    return srcId || null;
+  }
+
+  function cardDragHandlers(rule: BurstRule): CardDragHandlers {
+    return {
+      onDragStart: (e) => {
+        draggingIdRef.current = rule.id;
+        e.dataTransfer.setData('text/plain', rule.id);
+        e.dataTransfer.effectAllowed = 'move';
+        setDraggingId(rule.id);
+      },
+      onDragOver: (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        e.dataTransfer.dropEffect = 'move';
+        setDragOverInfo({ kind: 'rule', ruleId: rule.id });
+      },
+      onDrop: (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const srcId = takeDragSource(e);
+        if (!srcId || srcId === rule.id) return;
+        // 放到别组的卡片前等于移入那个组；筛选下组里有被隐藏的成员，不允许这样拖入。
+        const dragged = rules.find((r) => r.id === srcId);
+        if (filter !== 'all' && rule.group && dragged?.group !== rule.group) return;
+        handleDropBeforeRule(srcId, rule.id);
+      },
+      onDragEnd: () => {
+        draggingIdRef.current = null;
+        setDraggingId(null);
+        setDragOverInfo(null);
+      },
+    };
+  }
+
+  function addRuleFromList(mode: BurstMode) {
+    addRule(mode);
+    // 新规则落在当前筛选之外会看不见，像是没加上。
+    if (filter !== 'all' && filter !== mode) setFilter('all');
+  }
+
+  /** 组头状态区的规则名：启动键与连发按键相同时只写一个键名。 */
+  function ruleLabel(rule: BurstRule): string {
+    return keyEq(rule.trigger_key, rule.target_key)
+      ? keyLabel(rule.target_key)
+      : `${keyLabel(rule.trigger_key)}→${keyLabel(rule.target_key)}`;
   }
 
   async function handleDelete(id: string) {
@@ -2007,21 +2129,13 @@ export default function PanelApp() {
     setProfileMenuOpen(false);
   }
 
-  function selectTab(mode: BurstMode) {
-    setActiveTab(mode);
-    settingsStore
-      .set(ACTIVE_TAB_KEY, mode)
-      .then(() => settingsStore.save())
-      .catch(() => toast.warning('保存当前标签页失败'));
-  }
-
   const tourSnapshot: TourSnapshot = useMemo(
     () => ({
       rules,
       globalEnabled,
       inputMode,
       layout,
-      activeTab,
+      filter,
       keyCaptureSeq,
       settingsOpen: showSettings,
       settingsTab,
@@ -2032,7 +2146,7 @@ export default function PanelApp() {
       globalEnabled,
       inputMode,
       layout,
-      activeTab,
+      filter,
       keyCaptureSeq,
       showSettings,
       settingsTab,
@@ -2043,7 +2157,7 @@ export default function PanelApp() {
   const tourHost: TourHost = useMemo(
     () => ({
       snapshot: tourSnapshot,
-      setActiveTab: selectTab,
+      setFilter,
       setLayout: switchLayout,
       openSettings: handleShowSettings,
       closeSettings: () => setShowSettings(false),
@@ -2277,20 +2391,23 @@ export default function PanelApp() {
 
       <section className="rules-section">
         {layout === 'vertical' && (
-          <div data-tour="tabs">
+          <div data-tour="filter">
             <Tabs
-              tabs={(['hold', 'toggle'] as BurstMode[]).map((mode) => {
-                const groupRules = rules.filter((r) => r.mode === mode);
-                const active = groupRules.filter((r) => r.enabled).length;
-                return {
-                  id: mode,
-                  label: mode === 'hold' ? '按压连发' : '切换连发',
-                  badge: `${active}/${groupRules.length}`,
-                };
-              })}
-              active={activeTab}
+              tabs={[
+                { id: 'all' as RuleFilter, label: '全部', badge: `${rules.length}` },
+                ...(['hold', 'toggle'] as BurstMode[]).map((mode) => {
+                  const inMode = rules.filter((r) => r.mode === mode);
+                  const enabled = inMode.filter((r) => r.enabled).length;
+                  return {
+                    id: mode as RuleFilter,
+                    label: mode === 'hold' ? '长按' : '切换',
+                    badge: `${enabled}/${inMode.length}`,
+                  };
+                }),
+              ]}
+              active={filter}
               grow
-              onChange={selectTab}
+              onChange={setFilter}
             />
           </div>
         )}
@@ -2317,306 +2434,111 @@ export default function PanelApp() {
         )}
 
         {layout === 'vertical' &&
-          (['hold', 'toggle'] as BurstMode[]).map((mode) => {
-            if (mode !== activeTab) return null;
-            if (mode === 'hold') {
-              const holdRules = rules.filter((r) => r.mode === 'hold');
-              // 按 id 认「最后一张」而不是 map 的 idx：切换页签的卡片分散在未分组区与
-              // 各分组容器里，容器内的 idx 不是全列表序号。两个页签统一用这个口径。
-              const latestHoldId = holdRules[holdRules.length - 1]?.id;
-              return (
-                <div className="rule-group" key="hold">
-                  <div className="rules-list">
-                    {holdRules.length === 0 && <p className="empty">暂无按压连发规则</p>}
-                    {holdRules.map((rule) => {
-                      const isActive = activeRuleIds.has(rule.id);
-                      const isPaused = pausedRuleIds.has(rule.id);
-                      const showAdvanced = advancedOpen[rule.id];
-                      const isDragging = draggingId === rule.id;
-                      const isDragTarget =
-                        dragOverInfo?.kind === 'rule' &&
-                        dragOverInfo.ruleId === rule.id &&
-                        draggingId !== rule.id;
-                      return (
-                        <div
-                          key={rule.id}
-                          className={`rule-row${rule.enabled ? '' : ' disabled'}${isActive ? ' active' : ''}${isPaused ? ' is-paused' : ''}${isDragging ? ' dragging' : ''}${isDragTarget ? ' drag-target' : ''}`}
-                          title={isPaused ? '已暂停：同组长按插队中，松手后恢复' : undefined}
-                          data-tour={rule.id === latestHoldId ? 'rule-latest' : undefined}
-                          draggable
-                          onDragStart={(e) => {
-                            draggingIdRef.current = rule.id;
-                            e.dataTransfer.setData('text/plain', rule.id);
-                            e.dataTransfer.effectAllowed = 'move';
-                            setDraggingId(rule.id);
-                          }}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            setDragOverInfo({ kind: 'rule', ruleId: rule.id });
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            const srcId =
-                              draggingIdRef.current || e.dataTransfer.getData('text/plain');
-                            draggingIdRef.current = null;
-                            if (srcId && srcId !== rule.id) handleDropBeforeRule(srcId, rule.id);
-                            setDraggingId(null);
-                            setDragOverInfo(null);
-                          }}
-                          onDragEnd={() => {
-                            draggingIdRef.current = null;
-                            setDraggingId(null);
-                            setDragOverInfo(null);
-                          }}
-                        >
-                          <span className="drag-handle" aria-hidden>
-                            ⠿
-                          </span>
-                          <button
-                            className="del-btn"
-                            onClick={() => handleDelete(rule.id)}
-                            aria-label="删除"
-                            title="删除"
-                          >
-                            ✕
-                          </button>
-                          <div className="rule-body">
-                            <div className="rule-main">
-                              <div className="rule-field" data-tour="rule-key">
-                                <label>连发按键</label>
-                                <KeyCapture
-                                  onReject={notifyRuleKeyReject}
-                                  policy={
-                                    showAdvanced
-                                      ? keyPolicies.target
-                                      : rule.mode === 'toggle'
-                                        ? keyPolicies.trigger_target_toggle
-                                        : keyPolicies.trigger_target
-                                  }
-                                  value={rule.target_key}
-                                  onChange={(vk) => {
-                                    if (!vk) return;
-                                    const patch: Partial<BurstRule> = { target_key: vk };
-                                    if (!showAdvanced) patch.trigger_key = vk;
-                                    updateRule(rule.id, patch);
-                                    setKeyCaptureSeq((n) => n + 1);
-                                  }}
-                                  conflict={
-                                    !showAdvanced ? severityForRule(conflicts, rule.id) : null
-                                  }
-                                />
-                              </div>
-                              <div className="rule-field rule-interval" data-tour="rule-interval">
-                                <label>间隔</label>
-                                <IntervalInput
-                                  value={rule.interval_ms}
-                                  min={MIN_INTERVAL_MS}
-                                  max={MAX_INTERVAL_MS}
-                                  onChange={(v) => updateRule(rule.id, { interval_ms: v })}
-                                />
-                              </div>
-                            </div>
-                            <input
-                              type="checkbox"
-                              className="enable-checkbox"
-                              data-tour="rule-enable"
-                              checked={rule.enabled}
-                              onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
-                              aria-label="启用"
-                            />
-                          </div>
-                          {showAdvanced && (
-                            <div className="rule-advanced">
-                              <div className="rule-field">
-                                <label>按压键</label>
-                                <KeyCapture
-                                  onReject={notifyRuleKeyReject}
-                                  policy={keyPolicies.trigger}
-                                  value={rule.trigger_key}
-                                  onChange={(vk) => vk && updateRule(rule.id, { trigger_key: vk })}
-                                  conflict={severityForRule(conflicts, rule.id)}
-                                />
-                              </div>
-                              <span className="adv-hint">默认与连发按键相同</span>
-                            </div>
-                          )}
-                          <button
-                            className={`expand-btn${showAdvanced ? ' open' : ''}`}
-                            data-tour="rule-advanced"
-                            onClick={() => toggleAdvanced(rule.id)}
-                            aria-label="高级设置"
-                          >
-                            <ChevronIcon size={10} className="chevron" />
-                            <span className="expand-label">
-                              {showAdvanced ? '收起高级设置' : '高级设置'}
-                            </span>
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <Button
-                    className="add-btn"
-                    variant="dashed"
-                    tone="primary"
-                    block
-                    data-tour="add-hold"
-                    onClick={() => addRule('hold')}
-                  >
-                    + 添加按压连发规则
-                  </Button>
-                </div>
-              );
-            }
-
-            // Toggle tab — 分组容器 UI
-            const toggleRules = rules.filter((r) => r.mode === 'toggle');
-            const latestToggleId = toggleRules[toggleRules.length - 1]?.id;
-            const ungroupedRules = toggleRules.filter((r) => !r.group);
+          (() => {
+            const matches = (r: BurstRule) => filter === 'all' || r.mode === filter;
+            const visible = rules.filter(matches);
+            const latestId = visible[visible.length - 1]?.id;
+            // 组容器按第一个成员出现的位置整体渲染，与拖拽排序（数组顺序）同一口径。
             const groupNames = [
-              ...new Set(toggleRules.filter((r) => r.group).map((r) => r.group as string)),
+              ...new Set(rules.filter((r) => r.group).map((r) => r.group as string)),
             ];
+            const latestGroup = groupNames[groupNames.length - 1];
             const draggingRule = draggingId ? rules.find((r) => r.id === draggingId) : null;
+            const canGroupDrop = filter === 'all';
+            const groupList = groupNames.filter((g) => g !== pendingGroupName);
 
-            const renderToggleCard = (rule: BurstRule) => {
-              const isActive = activeRuleIds.has(rule.id);
-              const isPaused = pausedRuleIds.has(rule.id);
-              const showAdvanced = advancedOpen[rule.id];
-              const isDragging = draggingId === rule.id;
-              const isDragTarget =
-                dragOverInfo?.kind === 'rule' &&
-                dragOverInfo.ruleId === rule.id &&
-                draggingId !== rule.id;
+            const renderCard = (rule: BurstRule) => (
+              <RuleCard
+                key={rule.id}
+                rule={rule}
+                isActive={activeRuleIds.has(rule.id)}
+                isPaused={pausedRuleIds.has(rule.id)}
+                isLatest={rule.id === latestId}
+                showAdvanced={!!advancedOpen[rule.id]}
+                isDragging={draggingId === rule.id}
+                isDragTarget={
+                  dragOverInfo?.kind === 'rule' &&
+                  dragOverInfo.ruleId === rule.id &&
+                  draggingId !== rule.id
+                }
+                conflict={severityForRule(conflicts, rule.id)}
+                policies={keyPolicies}
+                intervalMin={MIN_INTERVAL_MS}
+                intervalMax={MAX_INTERVAL_MS}
+                groups={groupList}
+                drag={cardDragHandlers(rule)}
+                onPatch={(patch) => updateRule(rule.id, patch)}
+                onSetMode={(mode) => setRuleMode(rule, mode)}
+                onToggleAdvanced={() => toggleAdvanced(rule.id)}
+                onDelete={() => void handleDelete(rule.id)}
+                onMoveToGroup={(g) => handleDropToGroup(rule.id, g)}
+                onNewGroupWith={() => handleHCreateGroupWith(rule.id)}
+                onRemoveFromGroup={() => handleDropToUngrouped(rule.id)}
+                onKeyReject={notifyRuleKeyReject}
+                onTargetCaptured={() => setKeyCaptureSeq((n) => n + 1)}
+              />
+            );
+
+            const renderGroup = (name: string) => {
+              const members = rules.filter((r) => r.group === name);
+              const shown = members.filter(matches);
               return (
-                <div
-                  key={rule.id}
-                  className={`rule-row${rule.enabled ? '' : ' disabled'}${isActive ? ' active' : ''}${isPaused ? ' is-paused' : ''}${isDragging ? ' dragging' : ''}${isDragTarget ? ' drag-target' : ''}`}
-                  title={isPaused ? '已暂停：同组长按插队中，松手后恢复' : undefined}
-                  data-tour={rule.id === latestToggleId ? 'rule-latest' : undefined}
-                  draggable
-                  onDragStart={(e) => {
-                    draggingIdRef.current = rule.id;
-                    e.dataTransfer.setData('text/plain', rule.id);
-                    e.dataTransfer.effectAllowed = 'move';
-                    setDraggingId(rule.id);
+                <RuleGroup
+                  key={`group:${name}`}
+                  name={name}
+                  isLatest={name === latestGroup}
+                  collapsed={collapsedGroups.has(name)}
+                  draft={editingGroupName?.current === name ? editingGroupName.draft : undefined}
+                  dragActive={dragOverInfo?.kind === 'group' && dragOverInfo.name === name}
+                  acceptDrop={canGroupDrop}
+                  hasHold={members.some((r) => r.mode === 'hold')}
+                  running={members
+                    .filter((r) => activeRuleIds.has(r.id) && !pausedRuleIds.has(r.id))
+                    .map(ruleLabel)}
+                  paused={members.filter((r) => pausedRuleIds.has(r.id)).map(ruleLabel)}
+                  hiddenCount={members.length - shown.length}
+                  onToggleCollapse={() => toggleGroupCollapse(name)}
+                  onStartRename={() => setEditingGroupName({ current: name, draft: name })}
+                  onDraftChange={(draft) => setEditingGroupName((g) => g && { ...g, draft })}
+                  onCommitRename={() => {
+                    if (editingGroupName) {
+                      commitRenameGroup(editingGroupName.current, editingGroupName.draft);
+                      setEditingGroupName(null);
+                    }
                   }}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.dataTransfer.dropEffect = 'move';
-                    setDragOverInfo({ kind: 'rule', ruleId: rule.id });
-                  }}
+                  onCancelRename={() => setEditingGroupName(null)}
+                  onDisband={() => void disbandGroup(name)}
+                  onDragOver={() => setDragOverInfo({ kind: 'group', name })}
                   onDrop={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    const srcId = draggingIdRef.current || e.dataTransfer.getData('text/plain');
-                    draggingIdRef.current = null;
-                    if (srcId && srcId !== rule.id) handleDropBeforeRule(srcId, rule.id);
-                    setDraggingId(null);
-                    setDragOverInfo(null);
-                  }}
-                  onDragEnd={() => {
-                    draggingIdRef.current = null;
-                    setDraggingId(null);
-                    setDragOverInfo(null);
+                    const srcId = takeDragSource(e);
+                    if (srcId) handleDropToGroup(srcId, name);
                   }}
                 >
-                  <span className="drag-handle" aria-hidden>
-                    ⠿
-                  </span>
-                  <button
-                    className="del-btn"
-                    onClick={() => handleDelete(rule.id)}
-                    aria-label="删除"
-                    title="删除"
-                  >
-                    ✕
-                  </button>
-                  <div className="rule-body">
-                    <div className="rule-main">
-                      <div className="rule-field">
-                        <label>启动热键</label>
-                        <KeyCapture
-                          onReject={notifyRuleKeyReject}
-                          policy={keyPolicies.trigger}
-                          value={rule.trigger_key}
-                          onChange={(vk) => vk && updateRule(rule.id, { trigger_key: vk })}
-                          conflict={severityForRule(conflicts, rule.id)}
-                        />
-                      </div>
-                      <span className="rule-arrow">→</span>
-                      <div className="rule-field" data-tour="rule-key">
-                        <label>连发按键</label>
-                        <KeyCapture
-                          onReject={notifyRuleKeyReject}
-                          policy={keyPolicies.target}
-                          value={rule.target_key}
-                          onChange={(vk) => {
-                            if (!vk) return;
-                            updateRule(rule.id, { target_key: vk });
-                            setKeyCaptureSeq((n) => n + 1);
-                          }}
-                          conflict={severityForRule(conflicts, rule.id)}
-                        />
-                      </div>
-                      <div className="rule-field rule-interval" data-tour="rule-interval">
-                        <label>间隔</label>
-                        <IntervalInput
-                          value={rule.interval_ms}
-                          min={MIN_INTERVAL_MS}
-                          max={MAX_INTERVAL_MS}
-                          onChange={(v) => updateRule(rule.id, { interval_ms: v })}
-                        />
-                      </div>
-                    </div>
-                    <input
-                      type="checkbox"
-                      className="enable-checkbox"
-                      data-tour="rule-enable"
-                      checked={rule.enabled}
-                      onChange={(e) => updateRule(rule.id, { enabled: e.target.checked })}
-                      aria-label="启用"
-                    />
-                  </div>
-                  {showAdvanced && (
-                    <div className="rule-advanced">
-                      <div className="rule-field">
-                        <label>停止热键</label>
-                        <KeyCapture
-                          onReject={notifyRuleKeyReject}
-                          policy={keyPolicies.trigger}
-                          value={rule.stop_key ?? rule.trigger_key}
-                          onChange={(vk) => vk && updateRule(rule.id, { stop_key: vk })}
-                        />
-                      </div>
-                      <span className="adv-hint">默认与启动热键相同</span>
-                    </div>
-                  )}
-                  <button
-                    className={`expand-btn${showAdvanced ? ' open' : ''}`}
-                    data-tour="rule-advanced"
-                    onClick={() => toggleAdvanced(rule.id)}
-                    aria-label="高级设置"
-                  >
-                    <ChevronIcon size={10} className="chevron" />
-                    <span className="expand-label">
-                      {showAdvanced ? '收起高级设置' : '高级设置'}
-                    </span>
-                  </button>
-                </div>
+                  {shown.map(renderCard)}
+                </RuleGroup>
               );
             };
 
+            const items: ReactNode[] = [];
+            const seenGroups = new Set<string>();
+            for (const rule of rules) {
+              if (!rule.group) {
+                if (matches(rule)) items.push(renderCard(rule));
+              } else if (!seenGroups.has(rule.group)) {
+                seenGroups.add(rule.group);
+                items.push(renderGroup(rule.group));
+              }
+            }
+
             return (
-              <div className="rule-group" key="toggle">
+              <div className="rule-group" key="list">
                 <div className="rules-list">
-                  {toggleRules.length === 0 && !pendingGroupName && (
-                    <p className="empty">暂无切换连发规则</p>
+                  {rules.length === 0 && !pendingGroupName && <p className="empty">暂无连发规则</p>}
+                  {rules.length > 0 && visible.length === 0 && groupNames.length === 0 && (
+                    <p className="empty">没有{filter === 'hold' ? '长按' : '切换'}连发规则</p>
                   )}
 
-                  {/* 无分组规则 */}
-                  {ungroupedRules.map(renderToggleCard)}
+                  {items}
 
                   {/* 拖动有分组规则时显示"移出分组"区域 */}
                   {draggingId && draggingRule?.group && (
@@ -2628,137 +2550,13 @@ export default function PanelApp() {
                       }}
                       onDrop={(e) => {
                         e.preventDefault();
-                        const srcId = draggingIdRef.current || e.dataTransfer.getData('text/plain');
-                        draggingIdRef.current = null;
+                        const srcId = takeDragSource(e);
                         if (srcId) handleDropToUngrouped(srcId);
-                        setDraggingId(null);
-                        setDragOverInfo(null);
                       }}
                     >
                       移出分组
                     </div>
                   )}
-
-                  {/* 分组容器 */}
-                  {groupNames.map((groupName) => {
-                    const groupRules = toggleRules.filter((r) => r.group === groupName);
-                    const isEditing = editingGroupName?.current === groupName;
-                    const isGroupDragOver =
-                      dragOverInfo?.kind === 'group' && dragOverInfo.name === groupName;
-                    const isCollapsed = collapsedGroups.has(groupName);
-                    return (
-                      <div
-                        key={groupName}
-                        className={`rule-group-container${isGroupDragOver ? ' drag-active' : ''}`}
-                        onDragOver={(e) => {
-                          e.preventDefault();
-                          setDragOverInfo({ kind: 'group', name: groupName });
-                        }}
-                        onDrop={(e) => {
-                          e.preventDefault();
-                          const srcId =
-                            draggingIdRef.current || e.dataTransfer.getData('text/plain');
-                          draggingIdRef.current = null;
-                          if (srcId) handleDropToGroup(srcId, groupName);
-                          setDraggingId(null);
-                          setDragOverInfo(null);
-                        }}
-                      >
-                        <div
-                          className={`rule-group-header${isCollapsed ? ' collapsed' : ''}`}
-                          onClick={() => !isEditing && toggleGroupCollapse(groupName)}
-                        >
-                          {isEditing ? (
-                            <input
-                              className="group-name-edit"
-                              autoFocus
-                              value={editingGroupName.draft}
-                              onChange={(e) =>
-                                setEditingGroupName((g) => g && { ...g, draft: e.target.value })
-                              }
-                              onBlur={() => {
-                                if (editingGroupName) {
-                                  commitRenameGroup(
-                                    editingGroupName.current,
-                                    editingGroupName.draft,
-                                  );
-                                  setEditingGroupName(null);
-                                }
-                              }}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' && editingGroupName) {
-                                  commitRenameGroup(
-                                    editingGroupName.current,
-                                    editingGroupName.draft,
-                                  );
-                                  setEditingGroupName(null);
-                                } else if (e.key === 'Escape') {
-                                  setEditingGroupName(null);
-                                }
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              onDragOver={(e) => e.preventDefault()}
-                              onDrop={(e) => e.preventDefault()}
-                            />
-                          ) : (
-                            <div
-                              className={`group-collapse-indicator${isCollapsed ? ' collapsed' : ''}`}
-                            >
-                              <ChevronIcon size={12} className="group-chevron" />
-                              <span className="group-name-text">{groupName}</span>
-                            </div>
-                          )}
-                          {!isEditing && (
-                            <button
-                              className="group-edit-btn"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setEditingGroupName({ current: groupName, draft: groupName });
-                              }}
-                              title="重命名"
-                            >
-                              <EditIcon size={12} />
-                            </button>
-                          )}
-                          <button
-                            className="disband-btn"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              disbandGroup(groupName);
-                            }}
-                            title="解散分组（规则保留）"
-                          >
-                            解散
-                          </button>
-                        </div>
-                        {!isCollapsed && (
-                          <div className="group-body">
-                            {groupRules.map(renderToggleCard)}
-                            <div
-                              className={`group-drop-zone${isGroupDragOver ? ' drag-active' : ''}`}
-                              onDragOver={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setDragOverInfo({ kind: 'group', name: groupName });
-                              }}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                const srcId =
-                                  draggingIdRef.current || e.dataTransfer.getData('text/plain');
-                                draggingIdRef.current = null;
-                                if (srcId) handleDropToGroup(srcId, groupName);
-                                setDraggingId(null);
-                                setDragOverInfo(null);
-                              }}
-                            >
-                              拖入规则
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
 
                   {/* 待命空分组（新建后等待拖入或改名） */}
                   {pendingGroupName &&
@@ -2766,23 +2564,23 @@ export default function PanelApp() {
                       const isPendingEditing = editingGroupName?.current === pendingGroupName;
                       const isPendingDragOver =
                         dragOverInfo?.kind === 'group' && dragOverInfo.name === pendingGroupName;
+                      const pendingDrop = (e: ReactDragEvent<HTMLDivElement>) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const srcId = takeDragSource(e);
+                        if (srcId) handleDropToPending(srcId);
+                      };
+                      const pendingDragOver = (e: ReactDragEvent<HTMLDivElement>) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setDragOverInfo({ kind: 'group', name: pendingGroupName });
+                      };
                       return (
                         <div
                           key="__pending__"
                           className={`rule-group-container${isPendingDragOver ? ' drag-active' : ''}`}
-                          onDragOver={(e) => {
-                            e.preventDefault();
-                            setDragOverInfo({ kind: 'group', name: pendingGroupName });
-                          }}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            const srcId =
-                              draggingIdRef.current || e.dataTransfer.getData('text/plain');
-                            draggingIdRef.current = null;
-                            if (srcId) handleDropToPending(srcId);
-                            setDraggingId(null);
-                            setDragOverInfo(null);
-                          }}
+                          onDragOver={pendingDragOver}
+                          onDrop={pendingDrop}
                         >
                           <div className="rule-group-header">
                             {isPendingEditing ? (
@@ -2847,21 +2645,6 @@ export default function PanelApp() {
                           <div className="group-body">
                             <div
                               className={`group-drop-zone${isPendingDragOver ? ' drag-active' : ''}`}
-                              onDragOver={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setDragOverInfo({ kind: 'group', name: pendingGroupName });
-                              }}
-                              onDrop={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                const srcId =
-                                  draggingIdRef.current || e.dataTransfer.getData('text/plain');
-                                draggingIdRef.current = null;
-                                if (srcId) handleDropToPending(srcId);
-                                setDraggingId(null);
-                                setDragOverInfo(null);
-                              }}
                             >
                               将规则拖入此分组
                             </div>
@@ -2871,15 +2654,24 @@ export default function PanelApp() {
                     })()}
                 </div>
 
-                <div className="rules-bottom-actions">
+                <div className="rules-bottom-actions" data-tour="add-buttons">
+                  <Button
+                    className="add-btn"
+                    variant="dashed"
+                    tone="primary"
+                    data-tour="add-hold"
+                    onClick={() => addRuleFromList('hold')}
+                  >
+                    + 长按连发
+                  </Button>
                   <Button
                     className="add-btn"
                     variant="dashed"
                     tone="primary"
                     data-tour="add-toggle"
-                    onClick={() => addRule('toggle')}
+                    onClick={() => addRuleFromList('toggle')}
                   >
-                    + 添加切换连发规则
+                    + 切换连发
                   </Button>
                   <Button
                     className="add-btn"
@@ -2888,12 +2680,12 @@ export default function PanelApp() {
                     data-tour="add-group"
                     onClick={handleNewGroup}
                   >
-                    + 新建互斥分组
+                    + 新建分组
                   </Button>
                 </div>
               </div>
             );
-          })}
+          })()}
       </section>
 
       <footer className="panel-footer">

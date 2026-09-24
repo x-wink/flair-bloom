@@ -8,17 +8,17 @@ export const gettingStarted: TourDef = {
   steps: [
     {
       id: 'tabs',
-      target: 'tabs',
+      target: 'filter',
       title: '两种连发',
       body: p(
         '按压连发：按住那个键就一直连，松手就停。',
         '切换连发：按一下开始连，再按一下停。先从按压连发开始。',
       ),
-      // 横版键鼠图没有页签，也没有规则卡，整组都讲不了
+      // 横版键鼠图没有筛选条，也没有规则卡，整组都讲不了
       prepare: async (host) => {
         host.closeMenus();
         await host.setLayout('vertical');
-        host.setActiveTab('hold');
+        host.setFilter('hold');
       },
     },
     {
@@ -26,7 +26,7 @@ export const gettingStarted: TourDef = {
       target: 'add-hold',
       title: '添加第一条规则',
       body: p('点这个按钮，下面会出现一张规则卡。'),
-      prepare: (host) => host.setActiveTab('hold'),
+      prepare: (host) => host.setFilter('hold'),
       done: (now, entered) => now.rules.length > entered.rules.length,
       actionHint: '等你点一下…',
     },

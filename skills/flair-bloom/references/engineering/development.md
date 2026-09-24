@@ -42,14 +42,14 @@ done
    - `node scripts/cdp.mts eval "<js>"`：`Runtime.evaluate`（awaitPromise + returnByValue），可写 `(async()=>{...})()` 做多步，等 React 重渲染用 `await wait(ms)`。
    - `node scripts/cdp.mts key Escape`：`Input.dispatchKeyEvent` 的 keyDown + keyUp，带 `windowsVirtualKeyCode`。必须用它而不是 `window.dispatchEvent(new KeyboardEvent(...))`：合成事件的 target 是 window，capture 与 bubble 监听在 at-target 阶段按注册顺序跑，教程「capture 阶段先行截断」的语义验不出来；真实按键的 target 是聚焦元素。
    - `node scripts/cdp.mts shot out.png`：`Page.captureScreenshot` 落盘后用 Read 看图。
-3. **点击**在 `eval` 里 `element.click()` 即可，`HTMLElement.click()` 不受 CSS `pointer-events` 影响，hover 才显形的按钮（规则卡的删除 ✕）照样有效。**定位一律用 `[data-tour=...]`**——教程锚点的第二个用途。
+3. **点击**在 `eval` 里 `element.click()` 即可，`HTMLElement.click()` 不受 CSS `pointer-events` 影响，hover 才显形的按钮照样有效。**定位一律用 `[data-tour=...]`**——教程锚点的第二个用途。
 4. **收尾**：`Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'flair-bloom.exe' }` 取 PID，`Stop-Process -Id <PID>`，按 PID 不按模式匹配；应用退出后 `pnpm dev` 自行结束，9222 随进程释放。重启只需再跑第 1 步，Rust 已编译好约 10 秒。
 
 5. **伪造后端事件**（验证 `update-ready` 这类靠网络才触发的弹窗）：Vite dev 下在 `eval` 里 `await (await import('/node_modules/.vite/deps/@tauri-apps_api_event.js')).emit('update-ready', payload)`，前端 emit 会回灌到自己的 `listen`；文件名以 `/node_modules/.vite/deps/` 里实际存在的为准，payload 按前端类型的形状给。
 
 坑：
 
-- `.rule-row` 只统计当前页签渲染的卡片，数规则数先确认在哪个页签。
+- `.rule-row` 只统计当前筛选下渲染的卡片（被筛掉的组成员折叠成「另有 N 条已隐藏」），数规则数先把筛选切回「全部」。
 - **不要让应用在验证中途「以管理员重启」**：relaunch 出来的提权实例不继承远程调试环境变量（CDP 断连），在 `tauri dev` 下还会报 `WebView2 error 0x800700AA` 起不来窗口；普通权限的会话也杀不掉提权进程。需要管理员就按第 1 步从管理员终端起，从一开始就是 elevated。
 - **别在 dev 构建上打开「以管理员模式启动」**：该开关把 exe 绝对路径写进 `HKCU\...\AppCompatFlags\Layers`，而 dev 下那个路径是 `target\debug\flair-bloom.exe`，之后 `cargo run` 每次都要求提权、直接失败（`os error 740`）。已经中招就删掉该注册表值：`Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers' -Name '<debug exe 绝对路径>'`。
 
