@@ -32,8 +32,8 @@ use commands::{
     },
     engine::{
         get_active_rules, get_global_enabled, get_hotkeys, get_input_mode, get_key_policy,
-        get_rules, relay_key_event, set_global_enabled, set_global_hotkeys, set_input_mode,
-        set_rules, EngineState,
+        get_rule_states, get_rules, relay_key_event, set_global_enabled, set_global_hotkeys,
+        set_input_mode, set_rules, EngineState,
     },
     import_profile::{import_external_config, preview_import, scan_import_configs},
     log::{log_from_frontend, open_app_dir},
@@ -166,6 +166,7 @@ pub fn run() {
             get_rules,
             get_hotkeys,
             get_active_rules,
+            get_rule_states,
             relay_key_event,
             get_key_policy,
             take_profile_notice,

@@ -237,6 +237,12 @@ function isDdInputMode(mode: InputMode): boolean {
   return mode === 'ddsimple';
 }
 
+/** 引擎 `get_rule_states`：paused 是被同组按住的长按插队而暂时让位的规则，仍算开启。 */
+interface RuleStates {
+  running: string[];
+  paused: string[];
+}
+
 interface BurstRule {
   id: string;
   enabled: boolean;
@@ -436,6 +442,7 @@ export default function PanelApp() {
   const modeBtnRef = useRef<HTMLButtonElement>(null);
   const [rules, setRules] = useState<BurstRule[]>([]);
   const [activeRuleIds, setActiveRuleIds] = useState<Set<string>>(new Set());
+  const [pausedRuleIds, setPausedRuleIds] = useState<Set<string>>(new Set());
   const prevActiveRuleIdsRef = useRef<Set<string>>(new Set());
   const [profileName, setProfileName] = useState('defaults');
   const [profileList, setProfileList] = useState<ProfileEntry[]>([]);
@@ -1048,17 +1055,19 @@ export default function PanelApp() {
   useEffect(() => {
     if (!globalEnabled) {
       setActiveRuleIds((prev) => (prev.size === 0 ? prev : new Set()));
+      setPausedRuleIds((prev) => (prev.size === 0 ? prev : new Set()));
       return;
     }
     let cancelled = false;
+    const sameSet = (prev: Set<string>, ids: string[]) =>
+      prev.size === ids.length && ids.every((id) => prev.has(id));
     const poll = () => {
-      invoke<string[]>('get_active_rules')
-        .then((ids) => {
+      invoke<RuleStates>('get_rule_states')
+        .then(({ running, paused }) => {
           if (cancelled) return;
-          setActiveRuleIds((prev) => {
-            if (prev.size === ids.length && ids.every((id) => prev.has(id))) return prev;
-            return new Set(ids);
-          });
+          const ids = [...running, ...paused];
+          setActiveRuleIds((prev) => (sameSet(prev, ids) ? prev : new Set(ids)));
+          setPausedRuleIds((prev) => (sameSet(prev, paused) ? prev : new Set(paused)));
         })
         .catch(() => {});
     };
@@ -1077,6 +1086,7 @@ export default function PanelApp() {
   }, [globalEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Toggle 规则启动/停止时播报语音，通过 activeRuleIds 变化检测状态翻转。
+  // activeRuleIds 是 running ∪ paused：被长按插队的规则暂停 / 恢复不改变集合，插队不会多响。
   // 依赖 rules state 而非 ref，避免 queueMicrotask(initialLoadDone) 比 React re-render
   // 先触发时 rulesRef 为空导致 find 失败、playToggleFeedback 永远不调用的竞态。
   useEffect(() => {
@@ -2290,6 +2300,7 @@ export default function PanelApp() {
             policy={keyPolicies.trigger_target}
             rules={rules}
             activeRuleIds={activeRuleIds}
+            pausedRuleIds={pausedRuleIds}
             conflicts={conflicts}
             interval={hUnifiedInterval}
             intervalMin={MIN_INTERVAL_MS}
@@ -2319,6 +2330,7 @@ export default function PanelApp() {
                     {holdRules.length === 0 && <p className="empty">暂无按压连发规则</p>}
                     {holdRules.map((rule) => {
                       const isActive = activeRuleIds.has(rule.id);
+                      const isPaused = pausedRuleIds.has(rule.id);
                       const showAdvanced = advancedOpen[rule.id];
                       const isDragging = draggingId === rule.id;
                       const isDragTarget =
@@ -2328,7 +2340,8 @@ export default function PanelApp() {
                       return (
                         <div
                           key={rule.id}
-                          className={`rule-row${rule.enabled ? '' : ' disabled'}${isActive ? ' active' : ''}${isDragging ? ' dragging' : ''}${isDragTarget ? ' drag-target' : ''}`}
+                          className={`rule-row${rule.enabled ? '' : ' disabled'}${isActive ? ' active' : ''}${isPaused ? ' is-paused' : ''}${isDragging ? ' dragging' : ''}${isDragTarget ? ' drag-target' : ''}`}
+                          title={isPaused ? '已暂停：同组长按插队中，松手后恢复' : undefined}
                           data-tour={rule.id === latestHoldId ? 'rule-latest' : undefined}
                           draggable
                           onDragStart={(e) => {
@@ -2468,6 +2481,7 @@ export default function PanelApp() {
 
             const renderToggleCard = (rule: BurstRule) => {
               const isActive = activeRuleIds.has(rule.id);
+              const isPaused = pausedRuleIds.has(rule.id);
               const showAdvanced = advancedOpen[rule.id];
               const isDragging = draggingId === rule.id;
               const isDragTarget =
@@ -2477,7 +2491,8 @@ export default function PanelApp() {
               return (
                 <div
                   key={rule.id}
-                  className={`rule-row${rule.enabled ? '' : ' disabled'}${isActive ? ' active' : ''}${isDragging ? ' dragging' : ''}${isDragTarget ? ' drag-target' : ''}`}
+                  className={`rule-row${rule.enabled ? '' : ' disabled'}${isActive ? ' active' : ''}${isPaused ? ' is-paused' : ''}${isDragging ? ' dragging' : ''}${isDragTarget ? ' drag-target' : ''}`}
+                  title={isPaused ? '已暂停：同组长按插队中，松手后恢复' : undefined}
                   data-tour={rule.id === latestToggleId ? 'rule-latest' : undefined}
                   draggable
                   onDragStart={(e) => {

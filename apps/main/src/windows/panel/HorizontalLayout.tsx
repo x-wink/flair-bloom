@@ -47,6 +47,8 @@ interface Props {
    */
   policy: SlotPolicy;
   activeRuleIds: Set<string>;
+  /** 被同组长按插队而暂停的规则（仍在 activeRuleIds 里）。 */
+  pausedRuleIds: Set<string>;
   conflicts: Conflict[];
   /** 统一连发间隔（所有单键规则共享）。 */
   interval: number;
@@ -81,6 +83,7 @@ export default function HorizontalLayout({
   rules,
   policy,
   activeRuleIds,
+  pausedRuleIds,
   conflicts,
   interval,
   intervalMin,
@@ -169,6 +172,7 @@ export default function HorizontalLayout({
     const st = stateOf(key);
     const rule = st.single;
     const active = rule ? activeRuleIds.has(rule.id) : false;
+    const paused = rule ? pausedRuleIds.has(rule.id) : false;
     const severity = severityForKey(conflicts, key);
     const warn = st.advanced || severity !== null;
     const gi = rule?.group ? groupIndex(rule.group) : 0;
@@ -180,6 +184,7 @@ export default function HorizontalLayout({
       extraClass,
       rule && (rule.enabled ? modeClass : 'is-off'),
       active && 'is-active',
+      paused && 'is-paused',
       st.advanced && 'is-advanced',
       gi > 0 && 'is-grouped',
       severity === 'error' && 'is-error',
@@ -193,7 +198,7 @@ export default function HorizontalLayout({
       title = `${keyLabel(key)} · 高级规则（仅竖版可编辑）`;
     } else if (rule) {
       const modeName = rule.mode === 'toggle' ? '切换连发' : '按压连发';
-      title = `${keyLabel(key)} · ${modeName}${rule.enabled ? '' : '（已停用）'}${rule.group ? ` · ${rule.group}` : ''}（左键轮换 · 右键管理）`;
+      title = `${keyLabel(key)} · ${modeName}${rule.enabled ? '' : '（已停用）'}${rule.group ? ` · ${rule.group}` : ''}${paused ? ' · 已暂停（同组长按插队中）' : ''}（左键轮换 · 右键管理）`;
     } else {
       title = `${keyLabel(key)}（点击建立连发）`;
     }

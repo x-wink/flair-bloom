@@ -1,6 +1,6 @@
 //! 规则 CRUD + 输入模式切换 + 按键捕获。驱动管理已迁至 [`super::driver`]。
 
-use crate::engine::BurstEngine;
+use crate::engine::{BurstEngine, RuleStates};
 use qzh_profile::key_policy::{slot_policy, KeySlot, SlotPolicy};
 use qzh_profile::{
     find_rule_violations, BurstRule, Hotkeys, InjectCaps, KeyId, KeyRejection, MAX_INTERVAL_MS,
@@ -148,9 +148,32 @@ pub fn get_hotkeys(state: State<EngineState>) -> Hotkeys {
     state.0.get_hotkeys()
 }
 
+/// 保留注册以维持 D9 语义兼容（running ∪ paused）；面板与浮窗已改用 [`get_rule_states`]。
 #[tauri::command]
 pub fn get_active_rules(state: State<EngineState>) -> Vec<String> {
     state.0.get_active_ids()
+}
+
+/// 活跃规则的运行 / 暂停分区。引擎不依赖 serde，在命令层映射成可序列化结构。
+#[derive(Debug, Clone, Serialize)]
+pub struct RuleStatesDto {
+    pub running: Vec<String>,
+    pub paused: Vec<String>,
+}
+
+impl From<RuleStates> for RuleStatesDto {
+    fn from(s: RuleStates) -> Self {
+        Self {
+            running: s.running,
+            paused: s.paused,
+        }
+    }
+}
+
+/// 前端每拍只调这一个：运行与暂停取自同一把锁下的快照，两次调用拼起来可能错拍。
+#[tauri::command]
+pub fn get_rule_states(state: State<EngineState>) -> RuleStatesDto {
+    state.0.get_rule_states().into()
 }
 
 /// 面板聚焦时 WH_KEYBOARD_LL 不触发，前端将键盘事件中继到引擎统一处理。

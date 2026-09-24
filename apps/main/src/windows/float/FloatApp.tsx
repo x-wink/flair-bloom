@@ -43,12 +43,19 @@ interface BurstRuleLike {
   group: string | null;
 }
 
-function capClass(r: FloatRule, active: boolean): string {
+/** 引擎 `get_rule_states`：paused 是被同组按住的长按插队而暂时让位的规则，仍算开启。 */
+interface RuleStates {
+  running: string[];
+  paused: string[];
+}
+
+function capClass(r: FloatRule, active: boolean, paused: boolean): string {
   return [
     'hkb-cap',
     'hkb-cap--key',
     r.enabled ? (r.mode === 'toggle' ? 'is-toggle' : 'is-hold') : 'is-off',
     active && 'is-active',
+    paused && 'is-paused',
   ]
     .filter(Boolean)
     .join(' ');
@@ -60,6 +67,7 @@ export default function FloatApp() {
   const [togglingGlobal, setTogglingGlobal] = useState(false);
   const [rules, setRules] = useState<FloatRule[]>([]);
   const [activeIds, setActiveIds] = useState<string[]>([]);
+  const [pausedIds, setPausedIds] = useState<string[]>([]);
   const floatRef = useRef<HTMLDivElement>(null);
 
   // 浮窗聚焦时全局键盘钩子失效，与主面板共用键盘事件中继，避免热键被吞。
@@ -210,23 +218,25 @@ export default function FloatApp() {
   useEffect(() => {
     if (!active) {
       setActiveIds((prev) => (prev.length === 0 ? prev : []));
+      setPausedIds((prev) => (prev.length === 0 ? prev : []));
       return;
     }
     let cancelled = false;
     void refreshRules();
 
     const poll = async () => {
-      let ids: string[];
+      let states: RuleStates;
       try {
-        ids = await invoke<string[]>('get_active_rules');
+        states = await invoke<RuleStates>('get_rule_states');
       } catch {
         return;
       }
       if (cancelled) return;
-      setActiveIds((prev) => {
-        if (prev.length === ids.length && prev.every((id, i) => id === ids[i])) return prev;
-        return ids;
-      });
+      const ids = [...states.running, ...states.paused].sort();
+      const same = (prev: string[], next: string[]) =>
+        prev.length === next.length && prev.every((id, i) => id === next[i]);
+      setActiveIds((prev) => (same(prev, ids) ? prev : ids));
+      setPausedIds((prev) => (same(prev, states.paused) ? prev : states.paused));
     };
     void poll();
     const timer = setInterval(poll, 150);
@@ -256,6 +266,7 @@ export default function FloatApp() {
   };
 
   const activeSet = new Set(activeIds);
+  const pausedSet = new Set(pausedIds);
   // 含激活规则的互斥分组（保持规则出现顺序）
   const activeGroups: string[] = [];
   for (const r of rules) {
@@ -267,13 +278,14 @@ export default function FloatApp() {
 
   const renderCap = (r: FloatRule) => {
     const isActive = activeSet.has(r.id);
+    const isPaused = pausedSet.has(r.id);
     const modeName = r.mode === 'toggle' ? '切换连发' : '按压连发';
     return (
       <span
         key={r.id}
-        className={capClass(r, isActive)}
+        className={capClass(r, isActive, isPaused)}
         data-tauri-drag-region
-        title={`${keyLabel(r.trigger_key)} · ${modeName}${r.enabled ? '' : '（已停用）'}`}
+        title={`${keyLabel(r.trigger_key)} · ${modeName}${r.enabled ? '' : '（已停用）'}${isPaused ? ' · 已暂停' : ''}`}
       >
         <span className="hkb-cap-label">{keyLabel(r.trigger_key)}</span>
       </span>

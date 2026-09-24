@@ -181,3 +181,4 @@ Goal: 长按连发规则能加入互斥组，按住时同组正在跑的规则�
 | 卡 | 状态 | 说明 |
 | --- | --- | --- |
 | T1 | 已完成 | 引擎插队栈 + `get_rule_states`；`preempt_tests.rs` 覆盖 0.2 表 |
+| T2 | 已完成 | 命令 `get_rule_states`；面板 / 横版 / 浮窗改用它并加 `is-paused` 类名与 title，样式留给 T4 |
