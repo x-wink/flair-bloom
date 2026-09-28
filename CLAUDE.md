@@ -40,6 +40,7 @@ pnpm coverage                   # 四个共享 crate 覆盖率（CI 同源）
 - **所有配置装载必经 `activate_profile_file`**，由它统一 `sanitize_profile`；`Profile::validate()` 刻意不查按键。
 - **文档同步在同一提交**：用户可见行为变了改 `manual/<id>.md` 与对应教程文件，架构事实变了改 `engineering/*.md`；pre-commit 在改 `.md`、`skills/`、`tour/` 时跑 `pnpm skills:check`。
 - **新增 crate** 必须加 `[lints] workspace = true`；新增共享 crate 同步加入 `coverage.yml` 与 `package.json` 的 `coverage` 脚本。
+- **产品页 `apps/site` 的组件库缺口**：`@xwink/ui` 缺什么按 xwink-console 待回灌清单（`skills/xwink-engineering/references/todo.md`）开头的做法处理——缺组件在 `apps/site` 里先写，改组件走 `pnpm patch`（落在 `apps/site/patches/`），都记进清单，回灌发版后换回包里的。
 - **不描述变更史**：文档只写现状与原因，版本变化只进 `CHANGELOG.md`（`[Unreleased]` 记最终净变化）。
 
 通用协作约定（语言、提交与推送策略、注释风格、危险动作授权）以全局 `~/.claude/CLAUDE.md` 为单一事实来源，本文件不重复。
