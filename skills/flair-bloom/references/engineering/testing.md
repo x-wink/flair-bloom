@@ -82,6 +82,8 @@ cargo test -p burst-engine -- --ignored
 
 > L1.5（引擎管线确定性）已落地：`BurstEngine` 的调度器抽象成 `scheduler::Scheduler` trait，测试经 `BurstEngine::new_with_scheduler` 注入命令录制替身，断言引擎下发的命令序列。见 `pipeline_tests.rs`。
 
+**普通单测绝不真注入**：引擎的真注入只有 `scheduler.rs` 的 `inject` 一个出口，测试构建里它当作发送成功、什么也不发。原因：用 `BurstEngine::new()` 的单测会把规则真跑起来，目标键按 10 ms 连发进当前有焦点的窗口，跑 `cargo test` / `pnpm coverage` 时正在打字的输入框首当其冲。要真注入只走上面 `#[ignore]` 的 L2 冒烟与 `win-input` 的外设驱动真机测试（只敲 F13），二者都直接调 `win_input`。验证测试期间有没有漏出输入：前后读 `GetLastInputInfo`，SendInput 与真硬件事件都会刷新它。
+
 ## L3：发版前真机手动清单
 
 压力测试与冒烟都不发真实输入，发版前在 Windows 真机用 release 包按可用后端（SendInput / DDSimple / Interception）各验一遍：

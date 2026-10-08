@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 use tracing::{error, warn};
-use win_input::{key_events, DispatchResult, InputEvent};
+use win_input::{DispatchResult, InputEvent};
 
 const ACK_TIMEOUT: Duration = Duration::from_millis(500);
 
@@ -73,7 +73,22 @@ struct WinInputDispatcher;
 
 impl EventDispatcher for WinInputDispatcher {
     fn dispatch(&self, events: &[InputEvent]) -> Vec<DispatchResult> {
-        key_events(events)
+        inject(events)
+    }
+}
+
+/// 引擎唯一的真注入出口。单测里 `BurstEngine::new()` 也会走到这里，真注入会把测试规则的目标键
+/// （E、A、B…）按 10 ms 连发进当前有焦点的窗口——跑测试时正在打字的输入框首当其冲。所以测试
+/// 构建一律当作发送成功、什么也不发；真实注入链路由默认 `#[ignore]` 的 `smoke_tests` 直接调
+/// `win_input` 验证。
+fn inject(events: &[InputEvent]) -> Vec<DispatchResult> {
+    #[cfg(not(test))]
+    {
+        win_input::key_events(events)
+    }
+    #[cfg(test)]
+    {
+        vec![DispatchResult::Sent; events.len()]
     }
 }
 
@@ -689,7 +704,7 @@ pub(crate) fn release_simulated_keys(simulated_keys: &SimulatedKeys) {
         .map(|(key, _)| InputEvent::up(key))
         .collect::<Vec<_>>();
     if !events.is_empty() {
-        let _ = key_events(&events);
+        let _ = inject(&events);
     }
 }
 
