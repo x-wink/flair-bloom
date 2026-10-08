@@ -504,7 +504,6 @@ impl BurstEngine {
         let stop = rule.stop_key.unwrap_or(rule.trigger_key);
         let mut start_rule = false;
         let mut stop_ids = Vec::new();
-        let generation;
         {
             let mut runtime = revive(self.runtime.lock());
             if !runtime_can_start(&runtime) {
@@ -559,22 +558,28 @@ impl BurstEngine {
                 );
                 start_rule = !paused;
             }
-            generation = runtime.stop_generation;
-        }
-
-        for id in stop_ids {
-            self.scheduler.stop_rule(id, generation);
-        }
-        if start_rule {
-            self.scheduler.start_rule(rule, generation);
+            let generation = runtime.stop_generation;
+            // 命令在锁内发出，见 [`BurstEngine::start_rule`]。
+            for id in stop_ids {
+                self.scheduler.stop_rule(id, generation);
+            }
+            if start_rule {
+                self.scheduler.start_rule(rule, generation);
+            }
         }
         true
     }
 
     /// 长按按下。带 group 时插队：同组正在跑的规则暂停让位，自身入栈开跑。
+    ///
+    /// 启停命令必须在 runtime 锁内发给调度器：面板聚焦时键盘走 relay 命令线程、鼠标走钩子线程，
+    /// 两个线程可能同时改同一组。锁外发送时，状态变更的先后与命令到达调度器的先后可能相反——
+    /// 比如松开长按要恢复切换 T、同时 T 的停止键把它移出活跃集，`stop T` 先到、`start T` 后到，
+    /// 调度器里留下一条引擎以为已停的连发。发送只是无界通道入队加 SetEvent，不阻塞，
+    /// 持锁发送不会拖慢钩子线程。
     fn start_rule(&self, rule: Arc<BurstRule>) -> bool {
         let mut stop_ids = Vec::new();
-        let generation = {
+        {
             let mut runtime = revive(self.runtime.lock());
             if !runtime_can_start(&runtime) || runtime.active_rules.contains_key(&rule.id) {
                 return false;
@@ -599,12 +604,12 @@ impl BurstEngine {
                     paused: false,
                 },
             );
-            runtime.stop_generation
-        };
-        for id in stop_ids {
-            self.scheduler.stop_rule(id, generation);
+            let generation = runtime.stop_generation;
+            for id in stop_ids {
+                self.scheduler.stop_rule(id, generation);
+            }
+            self.scheduler.start_rule(rule, generation);
         }
-        self.scheduler.start_rule(rule, generation);
         true
     }
 
@@ -627,39 +632,38 @@ impl BurstEngine {
     /// 否则被暂停的切换规则；本就被暂停（栈中间先松）的只出栈，不影响栈顶。
     fn stop_rule(&self, rule_id: &str) -> bool {
         let mut resume = None;
-        let (was_running, generation) = {
-            let mut runtime = revive(self.runtime.lock());
-            let Some(active) = runtime.active_rules.remove(rule_id) else {
-                return false;
-            };
-            if let Some(group) = active.rule.group.as_deref() {
-                let top = runtime.hold_stacks.get_mut(group).and_then(|stack| {
-                    stack.retain(|id| id != rule_id);
-                    stack.last().cloned()
+        let mut runtime = revive(self.runtime.lock());
+        let Some(active) = runtime.active_rules.remove(rule_id) else {
+            return false;
+        };
+        if let Some(group) = active.rule.group.as_deref() {
+            let top = runtime.hold_stacks.get_mut(group).and_then(|stack| {
+                stack.retain(|id| id != rule_id);
+                stack.last().cloned()
+            });
+            if top.is_none() {
+                runtime.hold_stacks.remove(group);
+            }
+            if !active.paused {
+                let candidate = top.or_else(|| {
+                    runtime
+                        .active_rules
+                        .iter()
+                        .find(|(_, a)| {
+                            a.paused && a.rule.mode == BurstMode::Toggle && a.in_group(group)
+                        })
+                        .map(|(id, _)| id.clone())
                 });
-                if top.is_none() {
-                    runtime.hold_stacks.remove(group);
-                }
-                if !active.paused {
-                    let candidate = top.or_else(|| {
-                        runtime
-                            .active_rules
-                            .iter()
-                            .find(|(_, a)| {
-                                a.paused && a.rule.mode == BurstMode::Toggle && a.in_group(group)
-                            })
-                            .map(|(id, _)| id.clone())
-                    });
-                    if let Some(next) = candidate.and_then(|id| runtime.active_rules.get_mut(&id)) {
-                        next.paused = false;
-                        resume = Some(next.rule.clone());
-                    }
+                if let Some(next) = candidate.and_then(|id| runtime.active_rules.get_mut(&id)) {
+                    next.paused = false;
+                    resume = Some(next.rule.clone());
                 }
             }
-            (!active.paused, runtime.stop_generation)
-        };
+        }
+        let generation = runtime.stop_generation;
         // 与切换互斥替换同一契约：先停后启，调度器里同组任一时刻至多一条在跑。
-        if was_running {
+        // 命令在锁内发出，见 [`BurstEngine::start_rule`]。
+        if !active.paused {
             self.scheduler.stop_rule(rule_id.to_string(), generation);
         }
         if let Some(rule) = resume {

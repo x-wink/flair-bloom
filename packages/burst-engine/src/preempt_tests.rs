@@ -327,3 +327,93 @@ fn rule_states_are_partitioned_and_sorted() {
         vec!["a-hold", "b-free", "m-hold", "z-toggle"]
     );
 }
+
+/// 卡在第一次「停 h」上的调度器替身：给另一线程留出插进来的窗口，看命令顺序会不会与状态变更相反。
+struct GatedScheduler {
+    cmds: std::sync::Mutex<Vec<String>>,
+    entered: std::sync::Mutex<Option<std::sync::mpsc::Sender<()>>>,
+    other_done: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl crate::scheduler::Scheduler for GatedScheduler {
+    fn start_rule(&self, rule: std::sync::Arc<BurstRule>, _generation: u64) {
+        self.cmds.lock().unwrap().push(format!("start:{}", rule.id));
+    }
+    fn tap_once(&self, _rule: std::sync::Arc<BurstRule>, _generation: u64) {}
+    fn stop_rule(&self, rule_id: String, _generation: u64) {
+        if rule_id == "h" {
+            if let Some(entered) = self.entered.lock().unwrap().take() {
+                let _ = entered.send(());
+                // 命令在锁外发时，另一线程此刻能跑完整个停止流程；锁内发时它卡在 runtime 锁上，只能超时。
+                let _ = self
+                    .other_done
+                    .lock()
+                    .unwrap()
+                    .recv_timeout(std::time::Duration::from_millis(300));
+            }
+        }
+        self.cmds.lock().unwrap().push(format!("stop:{rule_id}"));
+    }
+    fn stop_all_async(&self, _generation: u64) {}
+    fn stop_all_blocking(&self, _generation: u64) -> bool {
+        true
+    }
+    fn shutdown_blocking(&self, _generation: u64) -> bool {
+        true
+    }
+    fn hp_degraded(&self) -> bool {
+        false
+    }
+}
+
+#[test]
+fn concurrent_hold_release_and_toggle_stop_keep_scheduler_in_sync() {
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let sched = std::sync::Arc::new(GatedScheduler {
+        cmds: Default::default(),
+        entered: std::sync::Mutex::new(Some(entered_tx)),
+        other_done: std::sync::Mutex::new(done_rx),
+    });
+    let engine = std::sync::Arc::new(crate::BurstEngine::new_with_scheduler(sched.clone()));
+    let mut t = toggle("t", KEY_A, "g");
+    t.stop_key = Some(KEY_STOP);
+    engine.set_rules(vec![t, hold("h", KEY_H, "g")]);
+    engine.set_global_enabled(true, false);
+
+    tap(&engine, KEY_A);
+    engine.on_key_press(KEY_H);
+    assert_eq!(engine.get_rule_states(), states(&["h"], &["t"]));
+
+    // 线程 A 松开长按：把 t 恢复为在跑，并发「停 h、启 t」。
+    let a = {
+        let engine = engine.clone();
+        std::thread::spawn(move || engine.on_key_release(KEY_H))
+    };
+    // 线程 B 在 A 发命令的窗口里按 t 的停止键。
+    entered_rx.recv().unwrap();
+    let b = {
+        let engine = engine.clone();
+        std::thread::spawn(move || {
+            tap(&engine, KEY_STOP);
+            let _ = done_tx.send(());
+        })
+    };
+    a.join().unwrap();
+    b.join().unwrap();
+
+    assert_eq!(engine.get_rule_states(), states(&[], &[]));
+    let last_t = sched
+        .cmds
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .find(|c| c.ends_with(":t"))
+        .cloned();
+    assert_eq!(
+        last_t.as_deref(),
+        Some("stop:t"),
+        "引擎认为 t 已停，调度器收到的最后一条也必须是停"
+    );
+}
