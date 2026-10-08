@@ -7,8 +7,10 @@ import './ContextMenu.css';
  * - active：当前选中态（自动在末尾渲染 ✓，可被 appendIcon 覆盖）
  * - subtitle：次级说明文字，第二行小字
  * - prependIcon/appendIcon：自定义图标插槽
- * - children：传入则渲染子菜单（hover/点击展开），此时 onClick 可省略
- * - disabled：禁用项，不响应点击与 hover 展开
+ * - children：传入则渲染子菜单（点击或 → 键展开），此时 onClick 可省略。不随 hover 展开、
+ *   划过别的项也不收起：往下去点后面的项时会划过它，hover 展开就成了误触（主题颜色一划过就弹出
+ *   一整列配色）；斜着移向子菜单时又会划过下面的项，hover 收起会把刚打开的子菜单关掉
+ * - disabled：禁用项，不响应点击
  */
 export type ContextMenuItem =
   | {
@@ -149,10 +151,6 @@ export default function ContextMenu({
                 disabled={item.disabled}
                 aria-haspopup={hasChildren ? 'menu' : undefined}
                 aria-expanded={hasChildren ? isSubOpen : undefined}
-                onMouseEnter={() => {
-                  if (item.disabled) return;
-                  setOpenSubIndex(hasChildren ? i : null);
-                }}
                 onKeyDown={(e) => {
                   if (e.key === 'ArrowDown') {
                     e.preventDefault();
