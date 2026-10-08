@@ -1,11 +1,9 @@
-//! 启动期按设置对齐两个开关：自动开全局、以管理员模式启动。
+//! 启动期的两个开关：自动开全局（判定）、以管理员模式启动（对齐）。
 
 use tauri::AppHandle;
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_store::StoreExt;
 use tracing::{info, warn};
-
-use crate::engine::BurstEngine;
 
 /// settings.json 中「启动后自动开全局」开关的键名。缺省视为关闭。
 pub const AUTO_ENABLE_ON_START_KEY: &str = "autoEnableOnStart";
@@ -25,19 +23,14 @@ pub fn auto_enable_on_start(app: &AppHandle) -> bool {
     bool_setting(app, AUTO_ENABLE_ON_START_KEY).unwrap_or(false)
 }
 
-/// 按设置在启动时打开全局开关。
+/// 判定这次启动该不该按设置打开全局开关。只判定不动手：真正打开由面板在启动收尾时走
+/// 与用户点开关同一条 `set_global_enabled`，播报、托盘、浮窗才与手动开启一致——
+/// 后端在面板建好前悄悄开，面板首帧读到的已是「开」，播报无从触发。
 ///
 /// 两道闸：协议没同意不开——协议弹窗还挡在前面，引擎却已经在注入按键，那道门就形同虚设；
 /// 开机自启时不开——登录即在后台连发，用户人可能都不在电脑前。后者在设置界面里是互斥的，
 /// 这里是 settings.json 被手工改坏时的兜底。
-///
-/// 返回是否真的开了。`set_global_enabled` 不通知任何人，启动期无所谓（面板和托盘都还没建），
-/// 但同意协议那条补开路径两者都在了，调用方得据此补一次状态同步。
-pub fn apply_auto_enable_on_start(
-    app: &AppHandle,
-    engine: &BurstEngine,
-    need_agreement: bool,
-) -> bool {
+pub fn should_auto_enable_on_start(app: &AppHandle, need_agreement: bool) -> bool {
     if !auto_enable_on_start(app) {
         return false;
     }
@@ -49,8 +42,6 @@ pub fn apply_auto_enable_on_start(
         warn!("开机自启已启用，跳过「启动后自动开全局」");
         return false;
     }
-    info!("按设置在启动时打开全局开关");
-    engine.set_global_enabled(true, true);
     true
 }
 

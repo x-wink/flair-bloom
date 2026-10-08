@@ -21,14 +21,13 @@ pub struct RelayKeyResult {
     pub handled: bool,
 }
 
+/// 面板、浮窗切换与启动后自动开全局共用。广播给两个窗口：浮窗启动即挂载、只在挂载时读一次，
+/// 不广播它会一直停在旧值；面板靠这条事件得知浮窗那边的切换，才会照常播报。
 #[tauri::command]
 pub fn set_global_enabled(app: AppHandle, state: State<EngineState>, enabled: bool) {
     state.0.set_global_enabled(enabled, true);
-    if let Some(tray) = app.tray_by_id("main") {
-        if let Ok(menu) = crate::tray::build_menu(&app, enabled) {
-            let _ = tray.set_menu(Some(menu));
-        }
-    }
+    crate::tray::refresh_menu(&app);
+    let _ = app.emit("global-enabled-changed", enabled);
 }
 
 /// 运行时更新全局热键（不写盘，写盘由 `save_profile` 负责）。

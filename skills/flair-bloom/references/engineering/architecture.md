@@ -29,6 +29,8 @@ FlairBloom.exe（单一 Tauri 进程）
 
 **单进程多窗口**：面板与浮窗是同一进程的独立 WebView，通过 `app.emit_all()` 事件通信（`float-active` / `global-enabled-changed` / `theme-changed` / `app-status-changed` / `update-*`），无 Named Pipe。窗口显隐统一走 `lib.rs` 的 `enter_panel_mode`（显示面板、隐藏浮窗）/ `enter_float_mode`（先显示浮窗再隐藏面板，浮窗缺失则保留面板）。激活态规则由前端轮询 `get_rule_states`（`panel/useRuleStates.ts`，面板与浮窗共用；运行 / 暂停分区取自同一快照），活跃集合在前端派生为两者并集。
 
+**全局开关的切换都广播**：面板 / 浮窗点开关走 `set_global_enabled` 命令，热键走引擎回调，托盘走菜单事件，三条路都刷新托盘（菜单与图标）并广播 `global-enabled-changed`。语音播报只在面板里、只看 `globalEnabled` 状态翻转，且跳过启动加载期。因此「启动后自动开全局」不在后端 `setup` 里直接开——那样面板首帧读到的已是「开」，播报无从触发：后端 `should_auto_enable_on_start` 只做判定（设置、协议已同意、未开机自启三道闸），面板等配置、输入模式恢复（含提权确认）、声音设置都落定后，走与用户点开关同一条 `set_global_enabled` 打开；协议待同意时判定为否，同意后面板再问一次。与启动时恢复配置输入模式是同一思路：后端报事实，前端按用户操作的路径补齐。
+
 WebView 聚焦时 `WH_KEYBOARD_LL` 全局钩子不触发，面板与浮窗都用 `useKeyRelay` 把键盘事件中继到后端 `relay_key_event` 命令，交由引擎统一处理热键 / Toggle 触发 / `pressed_keys` 维护，避免聚焦窗口时热键被吞；同时阻止非编辑区的默认快捷键（F12、Ctrl+Shift+I 等，仅生产构建）。
 
 **AppHandle 不进 packages**：`win-driver` / `win-input` / `win-sysinfo` / `burst-engine` 所有函数均不接受 `AppHandle`。资源目录由 `commands/driver.rs` 从 `app.path().resource_dir()` 取得后传入，Tauri 状态管理留在 commands 层。

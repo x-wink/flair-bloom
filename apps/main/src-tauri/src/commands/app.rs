@@ -1,6 +1,6 @@
 //! 协议同意 / 检查更新 / 退出。
 
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Manager, State};
 use tauri_plugin_store::StoreExt;
 use tracing::{info, warn};
 
@@ -8,7 +8,6 @@ use crate::bootstrap::{
     agreement::AGREEMENT_VERSION,
     update::{check_and_download, check_with_fallback, CheckTrigger, UpdateLock},
 };
-use crate::commands::engine::EngineState;
 
 pub(crate) const PENDING_UPDATE_DIR: &str = "pending_update";
 
@@ -28,7 +27,7 @@ pub fn needs_agreement(app: AppHandle) -> Result<bool, String> {
 }
 
 #[tauri::command]
-pub fn agree_license(app: AppHandle, engine: State<EngineState>) -> Result<(), String> {
+pub fn agree_license(app: AppHandle) -> Result<(), String> {
     let store = app
         .store(crate::STORE_PATH)
         .map_err(|e| format!("无法读取存储: {e}"))?;
@@ -39,15 +38,15 @@ pub fn agree_license(app: AppHandle, engine: State<EngineState>) -> Result<(), S
         "app_version_at_agree",
         serde_json::json!(env!("CARGO_PKG_VERSION")),
     );
-    store.save().map_err(|e| format!("保存协议状态失败: {e}"))?;
-    // 启动时因协议未同意而搁置的「启动后自动开全局」，同意之后就该生效——否则用户得再重启一次。
-    // 这条路径上面板和托盘都已经建好，开关又是后台悄悄开的，得补一次同步，
-    // 否则引擎已经在注入按键，面板和托盘还显示「全局已禁用」
-    if crate::bootstrap::startup::apply_auto_enable_on_start(&app, &engine.0, false) {
-        crate::tray::refresh_menu(&app);
-        let _ = app.emit("global-enabled-changed", true);
-    }
-    Ok(())
+    store.save().map_err(|e| format!("保存协议状态失败: {e}"))
+}
+
+/// 这次启动该不该按设置自动开全局，判定见 [`crate::bootstrap::startup::should_auto_enable_on_start`]。
+/// 面板在启动收尾与同意协议后各问一次，答「该」就走用户点开关的同一条路径打开。
+#[tauri::command]
+pub fn should_auto_enable_on_start(app: AppHandle) -> bool {
+    let need_agreement = crate::bootstrap::agreement::check_agreement(&app);
+    crate::bootstrap::startup::should_auto_enable_on_start(&app, need_agreement)
 }
 
 /// 浮窗"放大"按钮 / 其它呼出入口：显示主面板并隐藏浮窗。

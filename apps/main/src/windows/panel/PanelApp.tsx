@@ -115,6 +115,26 @@ const LAYOUT_KEY = 'layout';
 const AUTO_UPDATE_KEY = 'autoUpdate';
 // 与后端 bootstrap/startup.rs 的 AUTO_ENABLE_ON_START_KEY 同名
 const AUTO_ENABLE_ON_START_KEY = 'autoEnableOnStart';
+const VOICES_WAIT_MS = 1500;
+
+// WebView2 异步枚举系统语音，启动头一下 getVoices() 常是空的，这时朗读会落回默认语音而不是
+// 用户选的那个。等到语音就绪或超时，超时就照默认语音播。
+function waitForVoices(timeoutMs: number): Promise<void> {
+  if (!('speechSynthesis' in window)) return Promise.resolve();
+  const synth = window.speechSynthesis;
+  if (synth.getVoices().length > 0 || typeof synth.addEventListener !== 'function') {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      synth.removeEventListener('voiceschanged', done);
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    synth.addEventListener('voiceschanged', done);
+  });
+}
 
 // 面板布局：竖版规则列表 / 横版键鼠图。两者各自定尺寸，切换时 setSize + center。
 type PanelLayout = 'vertical' | 'horizontal';
@@ -445,6 +465,10 @@ export default function PanelApp() {
   const [autoEnableOnStart, setAutoEnableOnStart] = useState(false);
   const [sound, setSound] = useState<SoundSettings>(DEFAULT_SOUND);
   const soundRef = useRef<SoundSettings>(DEFAULT_SOUND);
+  const [soundSettled, setSoundSettled] = useState(false);
+  // checked：启动收尾那一问已经问过；enabled：本进程已按设置开过，同意协议后的补问不再重复开
+  const startupAutoEnableCheckedRef = useRef(false);
+  const startupAutoEnabledRef = useRef(false);
   const audioUrlCache = useRef(new Map<string, string>());
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const playbackSeq = useRef(0);
@@ -746,7 +770,8 @@ export default function PanelApp() {
           soundRef.current = merged;
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setSoundSettled(true));
 
     if (!('speechSynthesis' in window)) return;
 
@@ -1064,6 +1089,26 @@ export default function PanelApp() {
     playGlobalChange(globalEnabled);
   }, [globalEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 启动后自动开全局与恢复配置模式同一思路：后端只给判定，面板走用户点开关的同一条路径打开，
+  // 播报、托盘、浮窗才与手动开启一致。配置、输入模式、声音设置都落定后再开——输入模式可能
+  // 还要切或弹窗问提权，声音设置没读到会按默认值播报。
+  useEffect(() => {
+    if (startupAutoEnableCheckedRef.current) return;
+    if (!initialLoadSettled || !startupModeSettled || !soundSettled) return;
+    startupAutoEnableCheckedRef.current = true;
+    void applyStartupAutoEnable();
+  }, [initialLoadSettled, startupModeSettled, soundSettled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 协议没同意时后端判定为否；同意后 handleAgreed 再问一次。
+  async function applyStartupAutoEnable() {
+    if (startupAutoEnabledRef.current) return;
+    const should = await invoke<boolean>('should_auto_enable_on_start').catch(() => false);
+    if (!should || startupAutoEnabledRef.current) return;
+    startupAutoEnabledRef.current = true;
+    if (soundRef.current.voiceName) await waitForVoices(VOICES_WAIT_MS);
+    await setGlobal(true);
+  }
+
   // Toggle 规则启动/停止时播报语音，通过 activeRuleIds 变化检测状态翻转。
   // activeRuleIds 是 running ∪ paused：被长按插队的规则暂停 / 恢复不改变集合，插队不会多响。
   // 依赖 rules state 而非 ref，避免 queueMicrotask(initialLoadDone) 比 React re-render
@@ -1376,7 +1421,10 @@ export default function PanelApp() {
 
   async function toggleGlobal() {
     if (togglingGlobal) return;
-    const next = !globalEnabled;
+    await setGlobal(!globalEnabled);
+  }
+
+  async function setGlobal(next: boolean) {
     setTogglingGlobal(true);
     try {
       await invoke('set_global_enabled', { enabled: next });
@@ -2371,6 +2419,8 @@ export default function PanelApp() {
 
   function handleAgreed() {
     setShowAgreement(false);
+    // 启动收尾那一问还没问到时交给它，免得声音设置没读到就开、按默认值播报
+    if (startupAutoEnableCheckedRef.current) void applyStartupAutoEnable();
   }
 
   return (
