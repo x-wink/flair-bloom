@@ -39,6 +39,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      # 前端纯函数断言（含 macOS 12 WebKit 白屏护栏），CI 只装 Rust 不覆盖，发版前在这里拦
+      - name: Frontend unit tests
+        run: pnpm test:ui
+
       - name: Check packaged driver resources
         run: pnpm check:resources
 
