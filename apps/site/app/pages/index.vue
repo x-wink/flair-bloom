@@ -446,13 +446,13 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
           <XReveal>
             <h2 class="text-2xl font-semibold text-(--ui-fg-strong)">支持&帮助</h2>
           </XReveal>
-          <p class="mt-2 text-sm text-(--ui-fg-muted)">期望功能、优化建议、问题报告，欢迎骚扰，QQ 1041367524</p>
+          <p class="mt-2 text-sm text-(--ui-fg-muted)">期望功能、优化建议、问题报告，欢迎骚扰，邮箱 1041367524@qq.com</p>
           <div class="mt-8 grid gap-4 sm:grid-cols-3">
             <XReveal :delay="stagger(0)" class="ui-glow-card flex flex-col p-5">
               <h3 class="font-semibold text-(--ui-fg-strong)">问题反馈</h3>
               <p class="mt-2 text-sm text-(--ui-fg-muted)">
-                遇到问题或有想法，先到 GitHub Issues
-                留言；崩溃时应用会提示日志路径，附上日志更好定位。站内反馈入口即将开放。
+                遇到问题或有想法，到 GitHub Issues 留言或发邮件；崩溃时应用会提示日志路径，附上日志更好定位。
+                应用里 ☰ 菜单 →「支持&帮助」直达这里，「关于」里有作者邮箱。
               </p>
               <a
                 :href="`${REPOSITORY}/issues`"
