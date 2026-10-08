@@ -22,17 +22,17 @@ function renderInline(text: string, key: string): ReactNode[] {
   for (const match of text.matchAll(INLINE)) {
     const at = match.index ?? 0;
     if (at > last) out.push(text.slice(last, at));
-    const token = match[0];
+    const [token, code, bold, italic] = match;
 
-    if (token.startsWith('`')) {
+    if (code) {
       out.push(
         <code className="md-code" key={`${key}-${n}`}>
           {token.slice(1, -1)}
         </code>,
       );
-    } else if (token.startsWith('**')) {
+    } else if (bold) {
       out.push(<strong key={`${key}-${n}`}>{token.slice(2, -2)}</strong>);
-    } else if (token.startsWith('*')) {
+    } else if (italic) {
       out.push(<em key={`${key}-${n}`}>{token.slice(1, -1)}</em>);
     } else {
       const link = LINK.exec(token);
