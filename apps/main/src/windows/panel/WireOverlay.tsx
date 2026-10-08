@@ -7,11 +7,11 @@ interface Props {
   caps: Map<string, HTMLElement>;
 }
 
-function relRect(el: HTMLElement, origin: DOMRect, container: HTMLElement): Rect {
+function relRect(el: HTMLElement, origin: DOMRect): Rect {
   const r = el.getBoundingClientRect();
   return {
-    left: r.left - origin.left + container.scrollLeft,
-    top: r.top - origin.top + container.scrollTop,
+    left: r.left - origin.left,
+    top: r.top - origin.top,
     width: r.width,
     height: r.height,
   };
@@ -26,27 +26,23 @@ export default function WireOverlay({ hoverKey, wires, container, caps }: Props)
   const origin = container.getBoundingClientRect();
   const rectOf = (t: string) => {
     const el = caps.get(t);
-    return el ? relRect(el, origin, container) : undefined;
+    return el ? relRect(el, origin) : undefined;
   };
 
   const drawn = placeWires(wires, hoverKey, rectOf);
   if (drawn.length === 0) return null;
 
   return (
-    <svg
-      className="hkb-wires"
-      width={container.scrollWidth}
-      height={container.scrollHeight}
-      aria-hidden="true"
-    >
+    <svg className="hkb-wires" aria-hidden="true">
       <defs>
-        {drawn.map((l) => (
-          <mask key={l.id} id={`hkb-wire-mask-${l.id}`} maskUnits="userSpaceOnUse">
+        {/* mask id 按下标生成：规则 id 来自导入的 .qzh，可能带空格括号或重名，拼进 url(#…) 会失效 */}
+        {drawn.map((l, i) => (
+          <mask key={l.id} id={`hkb-wire-mask-${i}`} maskUnits="userSpaceOnUse">
             <path className="hkb-wire-reveal" d={l.d} pathLength={1} />
           </mask>
         ))}
       </defs>
-      {drawn.map((l) => {
+      {drawn.map((l, i) => {
         const { wire } = l;
         const cls = [
           'hkb-wire',
@@ -60,8 +56,8 @@ export default function WireOverlay({ hoverKey, wires, container, caps }: Props)
         return (
           <g key={l.id} className={cls}>
             {/* 光晕用下层同几何的宽描边而不是 drop-shadow：filter 在遮罩揭开动画里会整段闪 */}
-            <path className="hkb-wire-glow" d={l.d} mask={`url(#hkb-wire-mask-${l.id})`} />
-            <path className="hkb-wire-line" d={l.d} mask={`url(#hkb-wire-mask-${l.id})`} />
+            <path className="hkb-wire-glow" d={l.d} mask={`url(#hkb-wire-mask-${i})`} />
+            <path className="hkb-wire-line" d={l.d} mask={`url(#hkb-wire-mask-${i})`} />
             <circle className="hkb-wire-src" cx={l.start[0]} cy={l.start[1]} r={2} />
             {wire.kind === 'stop' ? (
               <rect
