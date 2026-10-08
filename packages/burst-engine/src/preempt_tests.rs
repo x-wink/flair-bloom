@@ -1,5 +1,5 @@
 //! 组内插队（「长按插队，切换让位；松手恢复」）的确定性测试：同时断言下发给调度器的命令序列
-//! 与 `get_rule_states` 的运行 / 暂停分区，对应路线图 `hold-interrupt.md` 0.2 行为表。
+//! 与 `get_rule_states` 的运行 / 暂停分区，对应路线图 `docs/roadmaps/archive/hold-interrupt.md` 0.2 行为表。
 
 use crate::test_support::{rule, setup};
 use crate::RuleStates;
