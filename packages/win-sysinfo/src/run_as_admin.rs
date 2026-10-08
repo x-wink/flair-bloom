@@ -9,8 +9,11 @@
 pub const LAYERS_SUBKEY: &str =
     "Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers";
 
+// 下面三个纯函数刻意不按平台条件编译，单元测试才能在任意平台跑；非 Windows 下只有测试用到。
+#[cfg_attr(not(windows), allow(dead_code))]
 const RUN_AS_ADMIN: &str = "RUNASADMIN";
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn has_run_as_admin(value: &str) -> bool {
     value
         .split_whitespace()
@@ -21,6 +24,7 @@ fn has_run_as_admin(value: &str) -> bool {
 ///
 /// 只增删 `RUNASADMIN` 这一个标志，别人（兼容性助手、高 DPI 设置）写进来的标志原样保留——
 /// 整串覆盖会把用户自己设的兼容性选项抹掉。开头的 `~` 是 Layers 的固定前缀，不是标志。
+#[cfg_attr(not(windows), allow(dead_code))]
 fn apply_layer(current: Option<&str>, enabled: bool) -> Option<String> {
     let mut flags: Vec<&str> = current
         .unwrap_or_default()

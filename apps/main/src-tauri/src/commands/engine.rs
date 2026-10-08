@@ -2,9 +2,10 @@
 
 use crate::engine::{BurstEngine, RuleStates};
 use qzh_profile::key_policy::{slot_policy, KeySlot, SlotPolicy};
+#[cfg(windows)]
+use qzh_profile::{find_rule_violations, KeyRejection};
 use qzh_profile::{
-    find_rule_violations, BurstRule, Hotkeys, InjectCaps, KeyId, KeyRejection, MAX_INTERVAL_MS,
-    MAX_RULES, MIN_INTERVAL_MS,
+    BurstRule, Hotkeys, InjectCaps, KeyId, MAX_INTERVAL_MS, MAX_RULES, MIN_INTERVAL_MS,
 };
 use serde::Serialize;
 use std::sync::{atomic::Ordering, Arc};
@@ -97,6 +98,7 @@ pub(crate) fn caps_for_mode(mode: win_input::InputMode) -> InjectCaps {
 }
 
 /// 拒绝原因的中文说明。文案留在应用层，`qzh-profile` 只给机器可读的枚举。
+#[cfg(windows)]
 pub(crate) fn rejection_message(reason: KeyRejection, mode_label: &str) -> String {
     match reason {
         KeyRejection::ModifierNotAllowed => {
