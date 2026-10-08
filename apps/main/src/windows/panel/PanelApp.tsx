@@ -106,7 +106,7 @@ const HOTKEY_LABELS: Record<string, string> = {
 
 const settingsStore = new LazyStore('settings.json');
 const CLOSE_BEHAVIOR_KEY = 'closeBehavior';
-/** D10：长按与切换第一次混进同一组时的提示，勾选「不再提示」后写 true。 */
+/** D10：某组变成长按与切换混排时的插队提示，勾选「不再提示」后写 true。 */
 const HOLD_IN_GROUP_HINT_KEY = 'holdInGroupHintDismissed';
 const SOUND_KEY = 'sound';
 const THEME_KEY = 'theme';
@@ -1622,7 +1622,9 @@ export default function PanelApp() {
   }
 
   /**
-   * 会改变分组成员的写入都走这里：某组第一次同时有长按与切换时提示一次插队语义（D10）。
+   * 会改变分组成员或成员模式的写入都走这里（拖拽、移入分组、换模式、重命名合组）：某组从
+   * 非混排变成长按与切换混排时提示插队语义（D10），直到勾选「不再提示」。按组的状态变化判定
+   * 而不只提示一次：用户每次造出混排组都是在依赖插队语义，没关提示就该再看到。
    * 双向都提示——长按拖进切换组、切换拖进长按组，结果一样，用户同样需要知道长按会插队。
    */
   function pushGroupMove(updater: (prev: BurstRule[]) => BurstRule[]) {
@@ -1725,8 +1727,9 @@ export default function PanelApp() {
     const trimmed = newName.trim();
     const name = trimmed || oldName;
     if (pendingGroupName === oldName) setPendingGroupName(name);
+    // 改成已有组的名字等于合组，可能造出混排组，同样要走 D10 判定。
     if (trimmed)
-      pushRules((prev) => prev.map((r) => (r.group === oldName ? { ...r, group: name } : r)));
+      pushGroupMove((prev) => prev.map((r) => (r.group === oldName ? { ...r, group: name } : r)));
   }
 
   function handleDropBeforeRule(ruleId: string, targetRuleId: string) {
