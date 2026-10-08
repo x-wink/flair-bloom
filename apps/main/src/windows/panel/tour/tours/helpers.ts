@@ -14,14 +14,17 @@ export function p(...lines: string[]): ReactNode {
 }
 
 /**
- * 实操判定的基线取「当前筛选下最后一条可见规则」，与 `rule-latest` 锚点同口径：刚添加的那条
- * 总在末尾。若取全部规则的末尾，筛选时两边会指到不同的卡——高亮的是可见的那张，判定却盯着
- * 被筛掉的那条。
+ * 实操判定的基线取「当前筛选下最后一条可见规则」，宿主的 `rule-latest` 锚点也直接用它：刚添加的
+ * 那条总在末尾。「可见」要同时排除被筛掉的和折叠组里的——否则高亮的是渲染出来的那张卡，判定却
+ * 盯着一张根本没渲染的。
  */
 export function lastRule(snapshot: TourSnapshot): TourRule | undefined {
-  const { filter } = snapshot;
-  const visible =
-    filter === 'all' ? snapshot.rules : snapshot.rules.filter((rule) => rule.mode === filter);
+  const { filter, collapsedGroups } = snapshot;
+  const visible = snapshot.rules.filter(
+    (rule) =>
+      (filter === 'all' || rule.mode === filter) &&
+      !(rule.group && collapsedGroups.includes(rule.group)),
+  );
   return visible[visible.length - 1];
 }
 

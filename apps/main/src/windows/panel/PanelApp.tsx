@@ -52,7 +52,13 @@ import UpdateProgressBar, { type UpdateDownloadProgress } from './components/Upd
 import { detectConflicts, severityForKey, severityForRule } from './conflicts';
 import TourRunner from './tour/TourRunner';
 import { findTour, TOURS } from './tour/tours';
-import { isSampleRule, SAMPLE_GROUP, SAMPLE_IDS, sampleRules } from './tour/tours/helpers';
+import {
+  isSampleRule,
+  lastRule,
+  SAMPLE_GROUP,
+  SAMPLE_IDS,
+  sampleRules,
+} from './tour/tours/helpers';
 import { keyToken } from './keyToken';
 import type { TourDef, TourExitResult, TourHost, TourSnapshot } from './tour/types';
 import { useTourProgress } from './tour/useTourProgress';
@@ -2104,6 +2110,7 @@ export default function PanelApp() {
       inputMode,
       layout,
       filter,
+      collapsedGroups: [...collapsedGroups].sort(),
       keyCaptureSeq,
       settingsOpen: showSettings,
       settingsTab,
@@ -2117,6 +2124,7 @@ export default function PanelApp() {
       inputMode,
       layout,
       filter,
+      collapsedGroups,
       keyCaptureSeq,
       showSettings,
       settingsTab,
@@ -2489,12 +2497,14 @@ export default function PanelApp() {
           (() => {
             const matches = (r: BurstRule) => filter === 'all' || r.mode === filter;
             const visible = rules.filter(matches);
-            const latestId = visible[visible.length - 1]?.id;
+            const latestId = lastRule(tourSnapshot)?.id;
             // 组容器按第一个成员出现的位置整体渲染，与拖拽排序（数组顺序）同一口径。
             const groupNames = [
               ...new Set(rules.filter((r) => r.group).map((r) => r.group as string)),
             ];
-            const latestGroup = groupNames[groupNames.length - 1];
+            const latestGroup = groupNames.includes(SAMPLE_GROUP)
+              ? SAMPLE_GROUP
+              : groupNames[groupNames.length - 1];
             const draggingRule = draggingId ? rules.find((r) => r.id === draggingId) : undefined;
             const canGroupDrop = filter === 'all';
             const groupList = groupNames.filter((g) => g !== pendingGroupName);

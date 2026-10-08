@@ -29,6 +29,8 @@ export interface TourSnapshot {
   layout: 'vertical' | 'horizontal';
   /** 竖版规则列表的筛选；只影响显示。 */
   filter: 'all' | 'hold' | 'toggle';
+  /** 竖版里已折叠的组名（已排序）。折叠组内的规则卡不渲染，「最后一条可见规则」要跳过它们。 */
+  collapsedGroups: string[];
   /**
    * 每成功录入一次「连发按键」+1。实操判定用它而不是比较键值：新建规则的连发按键默认
    * 就是 Q，用户照着提示按 Q 时键值不变，比较键值会让人永远停在「等你按一个键…」。

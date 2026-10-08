@@ -35,7 +35,7 @@ interface Props {
   rule: CardRule;
   isActive: boolean;
   isPaused: boolean;
-  /** 当前筛选下最后一条可见规则，承载教程锚点 `rule-latest`。 */
+  /** 教程判定的「最后一条可见规则」（`lastRule`），承载教程锚点 `rule-latest`。 */
   isLatest: boolean;
   showAdvanced: boolean;
   isDragging: boolean;

@@ -8,7 +8,10 @@ interface StatusItem {
 
 interface Props {
   name: string;
-  /** 最后一个组容器，承载教程锚点 `group-latest` / `group-header`。 */
+  /**
+   * 教程聚焦的组，承载锚点 `group-latest` / `group-header`：有示例组时是示例组（互斥组教程
+   * 讲的就是它），否则是最后一个组。
+   */
   isLatest: boolean;
   collapsed: boolean;
   /** 正在重命名时的草稿；undefined 表示未在编辑。 */
