@@ -33,3 +33,10 @@ Interception 驱动为可选组件，对应输入模式「游戏模式」。默�
 DDHID 模式因稳定性风险（可能导致蓝屏）已永久移除，安装链路与用户态 DLL 均已删除。驱动包保留在安装目录仅为卸载存量安装：如系统中已安装 DDHID 驱动，请在应用「诊断修复」中卸载。
 
 如对 DD 驱动的来源、签名或行为有疑问，请以原作者仓库说明为准。
+
+## serialport-rs
+
+- 项目：[serialport-rs](https://github.com/serialport/serialport-rs)
+- 许可证：MPL-2.0
+- 用途：「外设模式」经 USB 串口与外设驱动通信、按需枚举串口
+- 集成方式：`serialport` crate（v4）原样作为依赖静态链接，未修改其源码；源码见上方仓库或 crates.io

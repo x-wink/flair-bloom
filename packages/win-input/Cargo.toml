@@ -19,6 +19,7 @@ windows-sys = { version = "0.59", features = [
     "Win32_UI_WindowsAndMessaging",
 ] }
 interception-sys = "0.1.3"
+serialport = { version = "4", default-features = false }
 
 [lints]
 workspace = true

@@ -1,4 +1,4 @@
-﻿//! 驱动管理：Interception / DD-HID 安装卸载 + 提权重启。
+//! 驱动管理：Interception / DD-HID 安装卸载 + 提权重启。
 //!
 //! 业务逻辑委托给 `win-driver` crate，本层仅负责 Tauri 桥接与状态广播。
 
@@ -73,10 +73,9 @@ pub async fn uninstall_driver(app: AppHandle) -> Result<(), String> {
     {
         // 切回 SendInput 前先停连发、经旧后端阻塞释放已按下的目标键，且切换窗口内不启动新规则，
         // 避免目标键 down/up 跨新旧后端错配卡住（统一走 switch_input_backend）。
-        crate::commands::engine::switch_input_backend(
+        crate::commands::engine::leave_driver_backend(
             &app,
             &app.state::<crate::commands::engine::EngineState>().0,
-            win_input::InputMode::SendInput,
         );
         let res_dir = resource_dir(&app)?;
         let result = win_driver::interception::uninstall(&res_dir).await;
@@ -105,10 +104,9 @@ pub async fn uninstall_dd_hid_driver(app: AppHandle) -> Result<UninstallOutcome,
     {
         // 切回 SendInput 前先停连发、经旧后端阻塞释放已按下的目标键，且切换窗口内不启动新规则，
         // 避免目标键 down/up 跨新旧后端错配卡住（统一走 switch_input_backend）。
-        crate::commands::engine::switch_input_backend(
+        crate::commands::engine::leave_driver_backend(
             &app,
             &app.state::<crate::commands::engine::EngineState>().0,
-            win_input::InputMode::SendInput,
         );
         let res_dir = resource_dir(&app)?;
         let (pending_reboot, exe_result) = win_driver::dd_hid::uninstall(&res_dir).await?;

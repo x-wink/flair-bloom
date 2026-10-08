@@ -7,6 +7,7 @@
 //! - .qzh 损坏：AES Tag 校验失败时启动会回退默认配置，但损坏文件还在原地占位
 //! - 安装前置环境：HVCI 阻断内核驱动加载、SAC 阻断未知信誉 exe、
 //!   Defender 实时保护拦截 ddc.exe / ddhid63340.sys、待重启的 PnP 事务等
+//! - 外设驱动：扫串口看认不认得出来；Interception 设备槽用满时它的键盘 / 鼠标输入被吞
 //!
 //! 模块对外暴露三类入口：
 //! 1. [`diagnose_environment`]：只读，不提权，列出所有可疑残留与安装前置异常
@@ -168,6 +169,7 @@ pub async fn diagnose_environment(app: AppHandle) -> Result<RepairReport, String
         items.extend(diagnose_install_prerequisites(&app).await);
         items.extend(diagnose_dd_hid(&app));
         items.extend(diagnose_interception(&app));
+        items.extend(diagnose_hidstick());
     }
 
     items.extend(diagnose_profiles(&app));
@@ -562,6 +564,97 @@ fn diagnose_interception(_app: &AppHandle) -> Vec<DiagnosticItem> {
     out
 }
 
+/// 外设驱动：串口扫描 + Interception 槽位。扫描会对每个非转串口芯片的 USB 串口握一次手
+/// （开口拉 DTR、发 `ID`），只在用户点诊断时做；外设模式正用着的口不碰。
+#[cfg(windows)]
+fn diagnose_hidstick() -> Vec<DiagnosticItem> {
+    use win_input::hidstick::{scan_ports, slot_of, KEYBOARD_SLOTS, MOUSE_SLOTS};
+
+    const CATEGORY: &str = "外设驱动";
+    let in_use = win_input::hidstick_in_use();
+    let scans = scan_ports(in_use.as_ref().map(|(p, f)| (p.as_str(), f.as_str())));
+    let stick = scans.iter().find(|s| s.is_stick());
+
+    let mut out = vec![DiagnosticItem {
+        id: "hidstick.ports".to_string(),
+        category: CATEGORY.to_string(),
+        label: "串口扫描".to_string(),
+        severity: Severity::Info,
+        status: if stick.is_some() {
+            ItemStatus::Ok
+        } else {
+            ItemStatus::Missing
+        },
+        detail: if scans.is_empty() {
+            "没有 USB 串口。外设驱动要插原生 USB 口（主板后置口更稳）".to_string()
+        } else {
+            let lines: Vec<String> = scans.iter().map(|s| s.describe()).collect();
+            lines.join("；")
+        },
+        recommended_action: None,
+    }];
+
+    let Some(stick) = stick else {
+        return out;
+    };
+    let (status, severity, detail) = match win_input::interception::device_hardware_ids() {
+        None => (
+            ItemStatus::Ok,
+            Severity::Info,
+            "没启用游戏模式驱动（Interception），外设驱动不受设备槽限制".to_string(),
+        ),
+        Some(slots) => {
+            let keyboard = slot_of(&slots, KEYBOARD_SLOTS, stick.vid, stick.pid);
+            let mouse = slot_of(&slots, MOUSE_SLOTS, stick.vid, stick.pid);
+            let used = |range: std::ops::RangeInclusive<i32>| {
+                slots
+                    .iter()
+                    .filter(|(slot, _)| range.contains(slot))
+                    .count()
+            };
+            let slot_text = |slot: Option<i32>| match slot {
+                Some(n) => format!("{n} 号"),
+                None => "没分到".to_string(),
+            };
+            let summary = format!(
+                "键盘槽 {}、鼠标槽 {}（键盘槽在用 {}/10，鼠标槽在用 {}/10）",
+                slot_text(keyboard),
+                slot_text(mouse),
+                used(KEYBOARD_SLOTS),
+                used(MOUSE_SLOTS),
+            );
+            if keyboard.is_some() && mouse.is_some() {
+                (ItemStatus::Ok, Severity::Info, summary)
+            } else {
+                let lost = match (keyboard, mouse) {
+                    (None, None) => "键盘和鼠标",
+                    (None, _) => "键盘",
+                    _ => "鼠标",
+                };
+                (
+                    ItemStatus::Missing,
+                    Severity::Error,
+                    format!(
+                        "{summary}。外设驱动的{lost}没分到游戏模式驱动（Interception）的设备槽，\
+                         这部分输入会被驱动吞掉，设备管理器里却显示正常。每类槽只有 10 个，\
+                         拔插设备、装卸虚拟键盘都会占用，拔掉也不还，重启电脑后清零"
+                    ),
+                )
+            }
+        }
+    };
+    out.push(DiagnosticItem {
+        id: "hidstick.slots".to_string(),
+        category: CATEGORY.to_string(),
+        label: "游戏模式驱动设备槽".to_string(),
+        severity,
+        status,
+        detail,
+        recommended_action: None,
+    });
+    out
+}
+
 fn diagnose_profiles(app: &AppHandle) -> Vec<DiagnosticItem> {
     let mut out = Vec::new();
     let profiles_dir = match app.path().app_data_dir() {
@@ -730,10 +823,9 @@ pub async fn repair_dd_hid_residue(app: AppHandle) -> Result<RepairOutcome, Stri
 async fn run_dd_hid_repair(app: AppHandle) -> Result<RepairOutcome, String> {
     // 修复前先停连发、经旧后端阻塞释放已按下的目标键，再切回 SendInput，且切换窗口内不启动新规则：
     // 避免修复进行时 DLL 仍持有 sys 句柄，也避免正连发时切后端导致目标键 down/up 跨后端错配卡住。
-    crate::commands::engine::switch_input_backend(
+    crate::commands::engine::leave_driver_backend(
         &app,
         &app.state::<crate::commands::engine::EngineState>().0,
-        win_input::InputMode::SendInput,
     );
 
     let backup = ensure_backup_dir(&app)?;

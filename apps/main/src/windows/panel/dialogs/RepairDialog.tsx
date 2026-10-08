@@ -92,6 +92,7 @@ const INPUT_MODE_LABEL: Record<string, string> = {
   interception: '游戏模式',
   ddsimple: 'DD驱动',
   dd_hid: 'DDHID',
+  hidstick: '外设模式',
 };
 
 function driverStatusLabel(status: DriverStatus): string {
@@ -228,6 +229,8 @@ export default function RepairDialog({
   }, [confirm, relaunching, inputMode]);
 
   const displayIssues = buildDisplayIssues(report?.items ?? []);
+  // 串口扫描是信息项，不进问题列表；每个口一行，放在驱动状态里
+  const stickScan = report?.items.find((i) => i.id === 'hidstick.ports');
   const hasIssues = (report?.items ?? []).some((i) => i.severity !== 'info');
 
   const footerNode = (
@@ -330,6 +333,35 @@ export default function RepairDialog({
                   </Button>
                 )}
               </div>
+            </li>
+            <li className="repair-status-item--stack">
+              <div className="repair-status-row">
+                <span className="repair-status-key">外设驱动</span>
+                <span
+                  className={`repair-status-badge ${
+                    !stickScan
+                      ? 'repair-flag--neutral'
+                      : stickScan.status === 'ok'
+                        ? 'repair-flag--ok'
+                        : 'repair-flag--off'
+                  }`}
+                >
+                  {!stickScan
+                    ? scanning
+                      ? '扫描中'
+                      : '未扫描'
+                    : stickScan.status === 'ok'
+                      ? '已识别'
+                      : '未找到'}
+                </span>
+              </div>
+              {stickScan && (
+                <ul className="repair-port-list">
+                  {stickScan.detail.split('；').map((line) => (
+                    <li key={line}>{line}</li>
+                  ))}
+                </ul>
+              )}
             </li>
           </ul>
         </section>
@@ -453,6 +485,16 @@ function toDisplayIssue(item: DiagnosticItem): DisplayIssue {
       detail: '检测到旧输入驱动残留，可能影响输入模式切换。清理后需要重启电脑。',
       severity: item.severity,
       action: item.recommended_action,
+    };
+  }
+  // 槽位说明里有槽号与原因，后端那段比固定文案准，直接用
+  if (item.id === 'hidstick.slots') {
+    return {
+      id: item.id,
+      title: '外设驱动的输入被吞',
+      detail: item.detail,
+      severity: item.severity,
+      action: null,
     };
   }
   if (item.id === 'prereq.resources') {

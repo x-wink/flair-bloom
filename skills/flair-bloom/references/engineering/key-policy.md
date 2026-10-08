@@ -12,7 +12,7 @@
 
 限制来自两个源，模块里分开表达。**能力**是后端做不做得到，随输入模式变，由 `InjectCaps` 从 `win-input` 的 `InputMode` 谓词填充（DD-HID 移除后只剩 `coincident_toggle` 一位；将来若有后端受限，加能力位即可，`SlotPolicy` 会自动跟着变）；**策略**是产品上让不让做（热键禁鼠标、规则禁修饰键），与输入模式无关，写死在模块里。二者都不是对方，混在一起模型会裂：热键槽和启动键槽同为纯读，但前者禁鼠标后者不禁。
 
-DDSimple 下 `TriggerTargetToggle` 是**空集**，键盘键也不收（`SlotPolicy.keyboard` 为 false）——`ExtraInformation` 被驱动写死为 0，自注入只能靠时间窗口队列过滤，该队列对重合键无法可靠区分「用户按下」与「自身回灌」。能力判定写在 `accepts` 的开头，`slot_policy` 与 `find_rule_violations` 都由它派生，导出与判定因此不可能漂移。Hold 的重合态仍放行，那份不可靠性是已知且已接受的（见 `win-input/src/lib.rs` 顶部）。横版与 DD 互斥的根就在这里：横版每个键位都是重合态，故 `switchLayout` 直接以 `coincident_toggle` 为准，不再按模式名硬判。全面互斥仍带一层产品简化（Hold 的重合态其实允许），不是纯从模型推出来的。
+DDSimple 下 `TriggerTargetToggle` 是**空集**，键盘键也不收（`SlotPolicy.keyboard` 为 false）——`ExtraInformation` 被驱动写死为 0，自注入只能靠时间窗口队列过滤，该队列对重合键无法可靠区分「用户按下」与「自身回灌」。能力判定写在 `accepts` 的开头，`slot_policy` 与 `find_rule_violations` 都由它派生，导出与判定因此不可能漂移。Hold 的重合态仍放行，那份不可靠性是已知且已接受的（见 `win-input/src/lib.rs` 顶部）。外设模式同理：外设驱动敲出的是真硬件事件，同样只能靠时间窗过滤，`requires_distinct_target_for_toggle` 对它也返回 true；要放开得按设备区分来源（Raw Input）。横版与 DD 互斥的根就在这里：横版每个键位都是重合态，故 `switchLayout` 直接以 `coincident_toggle` 为准，不再按模式名硬判。全面互斥仍带一层产品简化（Hold 的重合态其实允许），不是纯从模型推出来的。
 
 ## 判定与提醒分两层
 

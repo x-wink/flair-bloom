@@ -20,7 +20,7 @@ import { SECT_PRESETS, type ThemeMode, type ThemeSettings } from '../theme';
 import './SettingsDialog.css';
 
 export type SettingsTab = 'general' | 'hotkeys' | 'sound' | 'profiles';
-type SettingsInputMode = 'sendinput' | 'interception' | 'ddsimple';
+type SettingsInputMode = 'sendinput' | 'interception' | 'ddsimple' | 'hidstick';
 type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
 
 /** 四个播报时机，也是 `${slot}Text` / `${slot}Source` 等字段的前缀。 */
@@ -71,6 +71,7 @@ interface Props {
   closeBehavior: CloseBehavior | null;
   interceptionInstalled: DriverStatus;
   ddHidInstalled: DriverStatus;
+  hidStickPresent: boolean;
   autostartEnabled: boolean;
   togglingAutostart: boolean;
   autoEnableOnStart: boolean;
@@ -142,12 +143,14 @@ const INPUT_MODE_LABELS: Record<SettingsInputMode, string> = {
   sendinput: '通用模式',
   interception: '游戏模式',
   ddsimple: 'DD驱动',
+  hidstick: '外设模式',
 };
 
 const INPUT_MODE_HINTS: Record<SettingsInputMode, string> = {
   sendinput: 'SendInput',
   interception: 'Interception',
   ddsimple: 'DD驱动',
+  hidstick: '外设驱动',
 };
 
 const CLOSE_BEHAVIOR_OPTIONS: {
@@ -193,6 +196,9 @@ function modeDetail(mode: SettingsInputMode, props: Props): string {
   if (mode === 'ddsimple') {
     return props.elevated ? '管理员已就绪' : '需要管理员';
   }
+  if (mode === 'hidstick') {
+    return props.hidStickPresent ? '已插入' : '未插入';
+  }
   return '无需驱动';
 }
 
@@ -203,8 +209,13 @@ function modeTag(mode: SettingsInputMode): { text: string; kind: 'recommend' | '
   return null;
 }
 
-/// 可选输入模式：游戏模式置顶主推，通用模式次之，DD驱动仅作备用。
-const SELECTABLE_INPUT_MODES: SettingsInputMode[] = ['interception', 'sendinput', 'ddsimple'];
+/// 可选输入模式：游戏模式置顶主推，通用模式次之，DD驱动仅作备用；外设模式要有外设驱动，放最后。
+const SELECTABLE_INPUT_MODES: SettingsInputMode[] = [
+  'interception',
+  'sendinput',
+  'ddsimple',
+  'hidstick',
+];
 
 function SliderRow({
   label,
@@ -552,8 +563,9 @@ export default function SettingsDialog(props: Props) {
               <CardList>
                 {SELECTABLE_INPUT_MODES.map((mode) => {
                   const tag = modeTag(mode);
-                  // DD 系列与横版键鼠图互斥：横版下禁用 DD 驱动选项。
-                  const ddBlocked = props.layout === 'horizontal' && mode === 'ddsimple';
+                  // 时间窗过滤的两档（DD、外设驱动）与横版键鼠图互斥：横版下禁用。
+                  const ddBlocked =
+                    props.layout === 'horizontal' && (mode === 'ddsimple' || mode === 'hidstick');
                   return (
                     <CardListButton
                       key={mode}

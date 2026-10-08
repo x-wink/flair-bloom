@@ -235,6 +235,9 @@ pub fn set_input_mode(
         check_rules_for_mode(&state.0.get_rules(), input_mode)?;
 
         switch_input_backend(&app, &state.0, input_mode);
+        if win_input::current_mode() == InputMode::HidStick {
+            crate::bootstrap::input::on_hid_stick_backend_up(&app);
+        }
 
         crate::commands::status::emit_status_changed(&app);
         Ok(())
@@ -266,12 +269,23 @@ pub(crate) fn switch_input_backend(
     }
 }
 
+/// 卸载 / 修复驱动前让出驱动通道：切回 SendInput。外设模式不经任何驱动，保持不动——否则用户为
+/// 腾 Interception 设备槽去卸游戏模式驱动，会被顺手踢出外设模式，连保存的模式也改掉。
+#[cfg(windows)]
+pub(crate) fn leave_driver_backend(app: &AppHandle, engine: &BurstEngine) {
+    if win_input::current_mode() == win_input::InputMode::HidStick {
+        return;
+    }
+    switch_input_backend(app, engine, win_input::InputMode::SendInput);
+}
+
 #[cfg(windows)]
 fn input_mode_label(mode: win_input::InputMode) -> &'static str {
     match mode {
         win_input::InputMode::SendInput => "通用模式",
         win_input::InputMode::Interception => "游戏模式",
         win_input::InputMode::DdSimple => "DD驱动",
+        win_input::InputMode::HidStick => "外设模式",
     }
 }
 

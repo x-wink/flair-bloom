@@ -28,6 +28,8 @@ pub struct AppStatus {
     pub elevated: bool,
     pub interception_installed: DriverStatus,
     pub dd_hid_installed: DriverStatus,
+    /// 外设驱动连着没有（插拔监视握过手才算）。外设模式的「驱动已装」。
+    pub hid_stick_present: bool,
     pub input_mode: String,
     pub configured_input_mode: String,
     pub scheduler_hp_degraded: bool,
@@ -53,6 +55,7 @@ impl AppStatus {
             elevated: collect_elevated(),
             interception_installed: collect_interception_installed(),
             dd_hid_installed: collect_dd_hid_installed(),
+            hid_stick_present: collect_hid_stick_present(),
             input_mode: collect_input_mode(),
             configured_input_mode: collect_configured_input_mode(app),
             scheduler_hp_degraded: app
@@ -145,6 +148,16 @@ fn collect_dd_hid_installed() -> DriverStatus {
 }
 
 #[cfg(windows)]
+fn collect_hid_stick_present() -> bool {
+    crate::bootstrap::input::hid_stick_connected()
+}
+
+#[cfg(not(windows))]
+fn collect_hid_stick_present() -> bool {
+    false
+}
+
+#[cfg(windows)]
 fn collect_input_mode() -> String {
     win_input::current_mode().as_str().to_string()
 }
@@ -228,6 +241,7 @@ mod tests {
             elevated: true,
             interception_installed: DriverStatus::Installed,
             dd_hid_installed: DriverStatus::PendingReboot,
+            hid_stick_present: false,
             input_mode: "dd_hid".to_string(),
             configured_input_mode: "dd_hid".to_string(),
             scheduler_hp_degraded: false,

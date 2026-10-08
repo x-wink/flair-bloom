@@ -224,13 +224,14 @@ const MAX_INTERVAL_MS = 10000;
 
 type BurstMode = 'hold' | 'toggle';
 type RuleFilter = 'all' | BurstMode;
-type InputMode = 'sendinput' | 'interception' | 'ddsimple';
+type InputMode = 'sendinput' | 'interception' | 'ddsimple' | 'hidstick';
 type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
 
 interface AppStatus {
   elevated: boolean;
   interception_installed: DriverStatus;
   dd_hid_installed: DriverStatus;
+  hid_stick_present: boolean;
   input_mode: string;
   configured_input_mode: string;
   scheduler_hp_degraded: boolean;
@@ -262,19 +263,21 @@ const INPUT_MODE_LABELS: Record<InputMode, string> = {
   sendinput: '通用模式',
   interception: '游戏模式',
   ddsimple: 'DD驱动',
+  hidstick: '外设模式',
 };
-const INPUT_MODE_LIST: InputMode[] = ['sendinput', 'interception', 'ddsimple'];
+const INPUT_MODE_LIST: InputMode[] = ['sendinput', 'interception', 'ddsimple', 'hidstick'];
 function isInputMode(value: string): value is InputMode {
   return (INPUT_MODE_LIST as string[]).includes(value);
 }
 
 function inputModeRequiresAdmin(mode: InputMode): boolean {
-  return mode !== 'sendinput';
+  return mode === 'interception' || mode === 'ddsimple';
 }
 
-// DD 驱动（DDSimple）。横版键鼠图无法表达其单键规则约束，二者互斥。
-function isDdInputMode(mode: InputMode): boolean {
-  return mode === 'ddsimple';
+// 自注入只能靠时间窗过滤的两档（DD 驱动、外设驱动）：切换连发建不出重合态，横版键鼠图无法表达，二者互斥。
+// 已在横版时的拦截只能看目标模式名——切过去之前拿不到它的能力位。
+function blocksHorizontalLayout(mode: InputMode): boolean {
+  return mode === 'ddsimple' || mode === 'hidstick';
 }
 
 interface BurstRule {
@@ -428,6 +431,17 @@ export default function PanelApp() {
   const [inputMode, setInputMode] = useState<InputMode>('sendinput');
   const [interceptionInstalled, setInterceptionInstalled] = useState<DriverStatus>('not_installed');
   const [ddHidInstalled, setDdHidInstalled] = useState<DriverStatus>('not_installed');
+  const [hidStickPresent, setHidStickPresent] = useState(false);
+  // 插拔事件在挂载期注册，要调到最新渲染的处理函数
+  const hidStickConnectedRef = useRef<() => Promise<void>>(async () => {});
+  const hidStickDisconnectedRef = useRef<() => Promise<void>>(async () => {});
+  // 「检测到外设驱动」确认框开着时不再叠一个（启动自查与连上事件可能前后脚）
+  const stickPromptingRef = useRef(false);
+  const startupStickCheckedRef = useRef(false);
+  // 连上时正开着别的确认框：confirm 是单实例，再弹会把那个框当「取消」顶掉，先记下等它关了再问
+  const stickPromptDeferredRef = useRef(false);
+  // 插入确认框 await 期间可能已重渲染，确认后要用最新的 selectInputMode
+  const selectInputModeRef = useRef<(target: InputMode) => Promise<void>>(async () => {});
   const [elevated, setElevated] = useState(false);
   const [sysInfo, setSysInfo] = useState<{
     platform: string;
@@ -616,6 +630,7 @@ export default function PanelApp() {
     setElevated(status.elevated);
     setInterceptionInstalled(status.interception_installed);
     setDdHidInstalled(status.dd_hid_installed);
+    setHidStickPresent(status.hid_stick_present);
     setSysInfo({
       platform: status.platform,
       os_family: status.os_family,
@@ -913,6 +928,12 @@ export default function PanelApp() {
     const unlistenGlobal = listen<boolean>('global-enabled-changed', (e) => {
       setGlobalEnabled(e.payload);
     });
+    const unlistenStickConnected = listen('hid-stick-connected', () => {
+      void hidStickConnectedRef.current();
+    });
+    const unlistenStickDisconnected = listen('hid-stick-disconnected', () => {
+      void hidStickDisconnectedRef.current();
+    });
     const unlistenDownloading = listen<{ version: string; silent: boolean }>(
       'update-downloading',
       (e) => {
@@ -971,6 +992,8 @@ export default function PanelApp() {
       unlistenAgreement.then((fn) => fn());
       unlistenStatus.then((fn) => fn());
       unlistenGlobal.then((fn) => fn());
+      unlistenStickConnected.then((fn) => fn());
+      unlistenStickDisconnected.then((fn) => fn());
       unlistenDownloading.then((fn) => fn());
       unlistenProgress.then((fn) => fn());
       unlistenFailed.then((fn) => fn());
@@ -986,6 +1009,9 @@ export default function PanelApp() {
   profileNameRef.current = profileName;
   hotkeysRef.current = hotkeys;
   switchToProfileRef.current = switchToProfile;
+  hidStickConnectedRef.current = handleHidStickConnected;
+  hidStickDisconnectedRef.current = handleHidStickDisconnected;
+  selectInputModeRef.current = selectInputMode;
 
   const refreshProfileList = useCallback(async () => {
     try {
@@ -1088,6 +1114,21 @@ export default function PanelApp() {
     if (!initialLoadDone.current) return;
     playGlobalChange(globalEnabled);
   }, [globalEnabled]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 启动时外设驱动本就插着：连上事件可能早于面板开始监听，落定后自己查一次。等配置调整通知
+  // 处理完、协议同意之后再查——前者只弹一次，被顶掉就再也看不到；后者挡着时问了也是白问
+  useEffect(() => {
+    if (startupStickCheckedRef.current) return;
+    if (!initialLoadSettled || !startupModeSettled || !noticeSettled || showAgreement) return;
+    startupStickCheckedRef.current = true;
+    void hidStickConnectedRef.current();
+  }, [initialLoadSettled, startupModeSettled, noticeSettled, showAgreement]);
+
+  useEffect(() => {
+    if (confirmOpen || !stickPromptDeferredRef.current) return;
+    stickPromptDeferredRef.current = false;
+    void hidStickConnectedRef.current();
+  }, [confirmOpen]);
 
   // 启动后自动开全局与恢复配置模式同一思路：后端只给判定，面板走用户点开关的同一条路径打开，
   // 播报、托盘、浮窗才与手动开启一致。配置、输入模式、声音设置都落定后再开——输入模式可能
@@ -1486,11 +1527,64 @@ export default function PanelApp() {
     });
   }
 
+  // 后端只报连上 / 断开，状态由这里现取。断开时外设模式已被后端回退成通用模式。
+  // 后端只报连上 / 断开，状态由这里现取；取不到返回 undefined。
+  async function refreshAppStatus(): Promise<AppStatus | undefined> {
+    try {
+      const status = await invoke<AppStatus>('get_app_status');
+      applyAppStatus(status);
+      return status;
+    } catch {
+      return undefined;
+    }
+  }
+
+  // 后端先把外设模式回退成通用模式、再报断开，现取的状态已是回退后的。
+  async function handleHidStickDisconnected() {
+    const wasHidStick = inputMode === 'hidstick';
+    const status = await refreshAppStatus();
+    if (wasHidStick && status?.input_mode !== 'hidstick') {
+      toast.warning('外设驱动断开了，已回退到通用模式。插回后会问你要不要切回外设模式');
+    }
+  }
+
+  // 外设驱动连上（含启动时本就插着）而当前不是外设模式：问一句，同意就走手动选模式的同一条路径。
+  // 判断用现取的状态：事件可能紧跟在一次切换之后到，渲染里的 inputMode 还是旧值。
+  // 启动没落定前不问，落定后那次自查会补上；横版下切不过去，只提示不弹确认。
+  async function handleHidStickConnected() {
+    if (stickPromptingRef.current || !startupModeSettled) return;
+    const status = await refreshAppStatus();
+    if (!status?.hid_stick_present || status.input_mode === 'hidstick') return;
+    if (switchingMode || showAgreement) return;
+    if (layout === 'horizontal') {
+      toast.info('检测到外设驱动。横版键鼠图下用不了外设模式，切回竖版后可在输入模式里选它');
+      return;
+    }
+    if (confirmOpen) {
+      stickPromptDeferredRef.current = true;
+      return;
+    }
+    const current = isInputMode(status.input_mode)
+      ? INPUT_MODE_LABELS[status.input_mode]
+      : '当前模式';
+    stickPromptingRef.current = true;
+    try {
+      const ok = await confirm({
+        title: '检测到外设驱动',
+        description: `要切换到外设模式吗？连发改由外设驱动作为真实的 USB 键盘鼠标敲出，即插即用、不用管理员权限。当前是${current}，之后也能在输入模式里切回来。`,
+        confirmText: '切换到外设模式',
+        cancelText: '不用',
+      });
+      if (ok) await selectInputModeRef.current('hidstick');
+    } finally {
+      stickPromptingRef.current = false;
+    }
+  }
+
   async function selectInputMode(target: InputMode) {
-    // DD 驱动与横版键鼠图互斥：横版下禁止切到 DD 驱动。
-    if (isDdInputMode(target) && layout === 'horizontal') {
+    if (blocksHorizontalLayout(target) && layout === 'horizontal') {
       setModePickerOpen(false);
-      toast.warning('横版键鼠图不支持 DD 驱动模式，请先切回竖版规则列表');
+      toast.warning(`横版键鼠图不支持${INPUT_MODE_LABELS[target]}，请先切回竖版规则列表`);
       return;
     }
     if (switchingMode || target === inputMode) return;
@@ -1532,7 +1626,9 @@ export default function PanelApp() {
         toast.warning(
           target === 'interception'
             ? '驱动未就绪，请重启电脑后再试'
-            : `切换未生效，已停留在${INPUT_MODE_LABELS[actual]}`,
+            : target === 'hidstick'
+              ? `没连上外设驱动，已停留在${INPUT_MODE_LABELS[actual]}。确认插好（主板后置口更稳），或重新插拔一下再试`
+              : `切换未生效，已停留在${INPUT_MODE_LABELS[actual]}`,
         );
       }
     } catch (e) {
@@ -2875,7 +2971,7 @@ export default function PanelApp() {
         onClose={() => setModePickerOpen(false)}
         target={modeBtnRef}
         location="bottom-left"
-        items={(['interception', 'sendinput', 'ddsimple'] as InputMode[]).map((m) => ({
+        items={(['interception', 'sendinput', 'ddsimple', 'hidstick'] as InputMode[]).map((m) => ({
           label: INPUT_MODE_LABELS[m],
           subtitle:
             m === 'sendinput'
@@ -2888,9 +2984,13 @@ export default function PanelApp() {
                   : interceptionInstalled === 'pending_reboot'
                     ? '推荐 · 驱动待重启生效'
                     : '推荐 · 点击安装驱动'
-                : elevated
-                  ? '备用 · 内置DD驱动，无需重启'
-                  : '备用 · 需要管理员',
+                : m === 'hidstick'
+                  ? hidStickPresent
+                    ? '外设 · 已插入'
+                    : '外设 · 需插入外设驱动'
+                  : elevated
+                    ? '备用 · 内置DD驱动，无需重启'
+                    : '备用 · 需要管理员',
           active: inputMode === m,
           onClick: () => void selectInputMode(m),
         }))}
@@ -2988,6 +3088,7 @@ export default function PanelApp() {
           closeBehavior={closeBehaviorPreference}
           interceptionInstalled={interceptionInstalled}
           ddHidInstalled={ddHidInstalled}
+          hidStickPresent={hidStickPresent}
           autostartEnabled={sysInfo.autostart_enabled}
           autoEnableOnStart={autoEnableOnStart}
           runAsAdmin={sysInfo.run_as_admin}

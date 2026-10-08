@@ -14,7 +14,7 @@ mod tray;
 
 use bootstrap::{
     agreement::{check_agreement, AGREEMENT_VERSION},
-    input::{init_input_backend, wait_for_predecessor_exit},
+    input::{init_input_backend, start_hid_stick_watcher, wait_for_predecessor_exit},
     logging,
     profile::load_or_init_profile,
     startup::apply_run_as_admin,
@@ -233,6 +233,19 @@ pub fn run() {
                 });
             }
 
+            // 外设驱动链路断开：win-input 已自行回退 SendInput，这里只报事件。回调可能跑在调度线程上，
+            // 同全局开关回调一样派发出去，不在原线程上 emit。
+            #[cfg(windows)]
+            {
+                let handle = app.handle().clone();
+                win_input::set_on_hidstick_offline(move || {
+                    let handle = handle.clone();
+                    tauri::async_runtime::spawn(async move {
+                        crate::bootstrap::input::on_hid_stick_link_lost(&handle);
+                    });
+                });
+            }
+
             // 面板显隐热键回调
             {
                 let handle = app.handle().clone();
@@ -255,6 +268,7 @@ pub fn run() {
             let need_agreement = check_agreement(app.handle());
             load_or_init_profile(app.handle(), &burst_engine);
             init_input_backend(app.handle());
+            start_hid_stick_watcher(app.handle());
             apply_run_as_admin(app.handle());
             tray::setup_tray(app.handle(), engine_for_tray)?;
 

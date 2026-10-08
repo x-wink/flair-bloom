@@ -1,4 +1,4 @@
-//! Windows 输入注入子系统：SendInput / Interception / DDSimple / DD-HID 四档后端。
+//! Windows 输入注入子系统：SendInput / Interception / DDSimple / 外设驱动（外设模式）四档后端。
 //!
 //! 统一入口：[`key_down`] / [`key_up`]（跨平台 stub）与 [`dispatch`]（Windows only）。
 //! 非 Windows 平台提供空实现，不影响编译。
@@ -7,11 +7,15 @@
 mod dd_common;
 #[cfg(windows)]
 pub mod ddsimple;
+#[cfg(any(test, windows))]
+pub mod hidstick;
 #[cfg(windows)]
 pub mod interception;
 
 #[cfg(windows)]
 use ddsimple::DdSimpleBackend;
+#[cfg(windows)]
+use hidstick::{HidSend, HidStickBackend};
 #[cfg(windows)]
 use interception::InterceptionBackend;
 use qzh_profile::key_id::KeyId;
@@ -210,6 +214,8 @@ pub enum InputMode {
     Interception,
     #[serde(rename = "ddsimple")]
     DdSimple,
+    #[serde(rename = "hidstick")]
+    HidStick,
 }
 
 #[cfg(windows)]
@@ -220,6 +226,7 @@ impl InputMode {
             "sendinput" => Some(Self::SendInput),
             "interception" => Some(Self::Interception),
             "ddsimple" | "dd_simple" => Some(Self::DdSimple),
+            "hidstick" => Some(Self::HidStick),
             _ => None,
         }
     }
@@ -229,6 +236,7 @@ impl InputMode {
             Self::SendInput => "sendinput",
             Self::Interception => "interception",
             Self::DdSimple => "ddsimple",
+            Self::HidStick => "hidstick",
         }
     }
 
@@ -236,12 +244,14 @@ impl InputMode {
     /// 写死为 0），自注入只能靠 `PENDING_INJECTIONS` 时间窗口队列过滤。该队列对
     /// `target == trigger / stop` 的 Toggle 规则无法可靠区分「用户真实按下停止键」与
     /// 「自身注入回灌」，会导致连发自停或停不掉。故 DD 系列禁止 Toggle 目标键与启动/停止键相同。
+    /// 外设驱动敲出的是真硬件事件，同样只能靠时间窗过滤，约束相同；要放开得按设备区分来源（Raw Input）。
     pub fn requires_distinct_target_for_toggle(&self) -> bool {
-        matches!(self, Self::DdSimple)
+        matches!(self, Self::DdSimple | Self::HidStick)
     }
 
+    /// 两档驱动要管理员权限；SendInput 与外设驱动（普通串口）不要。
     pub fn requires_admin(&self) -> bool {
-        !matches!(self, Self::SendInput)
+        matches!(self, Self::Interception | Self::DdSimple)
     }
 }
 
@@ -250,6 +260,12 @@ static INTERCEPTION_BACKEND: OnceLock<Mutex<Option<InterceptionBackend>>> = Once
 #[cfg(windows)]
 #[cfg(windows)]
 static DD_SIMPLE_BACKEND: OnceLock<Mutex<Option<DdSimpleBackend>>> = OnceLock::new();
+#[cfg(windows)]
+static HIDSTICK_BACKEND: OnceLock<Mutex<Option<HidStickBackend>>> = OnceLock::new();
+#[cfg(windows)]
+type OfflineListener = Box<dyn Fn() + Send + Sync>;
+#[cfg(windows)]
+static HIDSTICK_OFFLINE_LISTENER: OnceLock<OfflineListener> = OnceLock::new();
 #[cfg(windows)]
 static CURRENT_MODE: OnceLock<std::sync::atomic::AtomicU8> = OnceLock::new();
 #[cfg(windows)]
@@ -263,6 +279,12 @@ static DD_KEY_UP_LOGGED: AtomicBool = AtomicBool::new(false);
 static DD_FALLBACK_LOGGED: AtomicBool = AtomicBool::new(false);
 #[cfg(windows)]
 static INTERCEPTION_MOUSE_FALLBACK_LOGGED: AtomicBool = AtomicBool::new(false);
+#[cfg(windows)]
+static HIDSTICK_UNMAPPED_LOGGED: AtomicBool = AtomicBool::new(false);
+/// 外设模式下按下改走了 SendInput 的键（外设驱动拒收或键不在 HID 键盘页）。它们的松开也必须走
+/// SendInput：松开发给外设驱动会回 OK，系统却永远收不到这次抬起，键就卡住了。
+#[cfg(windows)]
+static HIDSTICK_SENDINPUT_DOWN: OnceLock<Mutex<std::collections::HashSet<KeyId>>> = OnceLock::new();
 
 #[cfg(any(test, windows))]
 const MODE_SENDINPUT: u8 = 0;
@@ -270,12 +292,15 @@ const MODE_SENDINPUT: u8 = 0;
 const MODE_INTERCEPTION: u8 = 1;
 #[cfg(any(test, windows))]
 const MODE_DD_SIMPLE: u8 = 3;
+#[cfg(any(test, windows))]
+const MODE_HIDSTICK: u8 = 4;
 
 #[cfg(windows)]
 fn u8_to_mode(v: u8) -> InputMode {
     match v {
         MODE_INTERCEPTION => InputMode::Interception,
         MODE_DD_SIMPLE => InputMode::DdSimple,
+        MODE_HIDSTICK => InputMode::HidStick,
         _ => InputMode::SendInput,
     }
 }
@@ -296,6 +321,9 @@ enum DispatchRoute {
     DdSimpleKeyboard(u32),
     DdSimpleWheel { up: bool },
     DdSimpleMouse(MouseButton),
+    HidStickKeyboard(u32),
+    HidStickWheel { up: bool },
+    HidStickMouse(MouseButton),
 }
 
 #[cfg(any(test, windows))]
@@ -323,6 +351,17 @@ fn resolve_route(mode: u8, key: KeyId, is_up: bool) -> DispatchRoute {
             }
         }
         (MODE_DD_SIMPLE, KeyId::Mouse(btn)) => DispatchRoute::DdSimpleMouse(btn),
+        (MODE_HIDSTICK, KeyId::Keyboard(vk)) => DispatchRoute::HidStickKeyboard(vk),
+        (MODE_HIDSTICK, KeyId::Mouse(btn)) if is_wheel_button(btn) => {
+            if is_up {
+                DispatchRoute::Noop
+            } else {
+                DispatchRoute::HidStickWheel {
+                    up: matches!(btn, MouseButton::WheelUp),
+                }
+            }
+        }
+        (MODE_HIDSTICK, KeyId::Mouse(btn)) => DispatchRoute::HidStickMouse(btn),
         _ => DispatchRoute::SendInput,
     }
 }
@@ -340,6 +379,12 @@ pub fn init_backend(mode: InputMode) {
     DD_KEY_UP_LOGGED.store(false, std::sync::atomic::Ordering::SeqCst);
     DD_FALLBACK_LOGGED.store(false, std::sync::atomic::Ordering::SeqCst);
     INTERCEPTION_MOUSE_FALLBACK_LOGGED.store(false, std::sync::atomic::Ordering::SeqCst);
+    HIDSTICK_UNMAPPED_LOGGED.store(false, std::sync::atomic::Ordering::SeqCst);
+    if let Some(set) = HIDSTICK_SENDINPUT_DOWN.get() {
+        revive(set.lock()).clear();
+    }
+    // 外设驱动独占一个串口，切去任何一档（含重新选外设模式）都先关掉旧连接
+    release_hidstick();
 
     match mode {
         InputMode::Interception => {
@@ -376,6 +421,25 @@ pub fn init_backend(mode: InputMode) {
                 warn!("DD Simple 加载失败，降级为 SendInput 模式");
             }
         }
+        InputMode::HidStick => {
+            let cell = HIDSTICK_BACKEND.get_or_init(|| Mutex::new(None));
+            // 插拔监视可能正握着同一个口（启动时它在后台握第一轮），打不开就稍等再试一次
+            let opened = HidStickBackend::open(hidstick_went_offline).or_else(|_| {
+                std::thread::sleep(std::time::Duration::from_millis(300));
+                HidStickBackend::open(hidstick_went_offline)
+            });
+            match opened {
+                Ok(backend) => {
+                    *revive(cell.lock()) = Some(backend);
+                    current.store(MODE_HIDSTICK, std::sync::atomic::Ordering::SeqCst);
+                    info!("输入后端已切换为外设模式");
+                }
+                Err(e) => {
+                    current.store(MODE_SENDINPUT, std::sync::atomic::Ordering::SeqCst);
+                    warn!("外设模式不可用（{e}），降级为 SendInput 模式");
+                }
+            }
+        }
         InputMode::SendInput => {
             if let Some(lock) = DD_SIMPLE_BACKEND.get() {
                 if revive(lock.lock()).take().is_some() {
@@ -391,6 +455,82 @@ pub fn init_backend(mode: InputMode) {
             info!("输入后端已切换为 SendInput 模式");
         }
     }
+}
+
+#[cfg(windows)]
+fn release_hidstick() {
+    // 先出锁再 drop：drop 要 join 心跳线程，最多等一次回复超时
+    let old = HIDSTICK_BACKEND
+        .get()
+        .and_then(|lock| revive(lock.lock()).take());
+    drop(old);
+}
+
+/// 释放已断开的后端，关掉它占着的口：不关的话外设驱动插回来常拿到同一个口名，却因旧句柄还在
+/// 而打不开，插拔监视握不上手，「插回再问」就不弹。只放已离线的那个，免得期间用户已经切回外设
+/// 模式、新开的后端被误放。
+#[cfg(windows)]
+fn release_offline_hidstick() {
+    let old = HIDSTICK_BACKEND.get().and_then(|lock| {
+        let mut guard = revive(lock.lock());
+        match guard.as_ref() {
+            Some(backend) if !backend.is_online() => guard.take(),
+            _ => None,
+        }
+    });
+    drop(old);
+}
+
+/// 外设驱动断开（拔出、写失败、心跳无应答）时调用，可能在调度线程或心跳线程上。回退模式后
+/// 另起线程释放后端：调用方可能正持有后端的锁，在这里放会死锁。
+#[cfg(windows)]
+fn hidstick_went_offline() {
+    if let Some(current) = CURRENT_MODE.get() {
+        let _ = current.compare_exchange(
+            MODE_HIDSTICK,
+            MODE_SENDINPUT,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        );
+    }
+    clear_pending_injections();
+    warn!("外设模式已回退为 SendInput 模式");
+    let _ = std::thread::Builder::new()
+        .name("hidstick-release".into())
+        .spawn(release_offline_hidstick);
+    if let Some(listener) = HIDSTICK_OFFLINE_LISTENER.get() {
+        listener();
+    }
+}
+
+/// 外面先发现外设驱动没了（插拔监视看到它的口消失）：走与心跳失败同一条断开路径，
+/// 让「回退通用模式」先于「已断开」事件落定，界面拿到的状态才是回退后的。
+#[cfg(windows)]
+pub fn hidstick_link_down(reason: &str) {
+    if let Some(lock) = HIDSTICK_BACKEND.get() {
+        if let Some(backend) = revive(lock.lock()).as_ref() {
+            backend.link_lost(reason);
+        }
+    }
+}
+
+/// 注册外设驱动断开后的回调（只认第一次注册）。回调跑在调度或心跳线程上，必须立即返回，
+/// UI 通知应派发到异步运行时。
+#[cfg(windows)]
+pub fn set_on_hidstick_offline(f: impl Fn() + Send + Sync + 'static) {
+    let _ = HIDSTICK_OFFLINE_LISTENER.set(Box::new(f));
+}
+
+/// 外设模式正连着的外设驱动 `(口名, 固件版本)`。链路已断的不算：它占着的口马上会被释放，
+/// 插拔监视要能重新握手。
+#[cfg(windows)]
+pub fn hidstick_in_use() -> Option<(String, String)> {
+    let lock = HIDSTICK_BACKEND.get()?;
+    let guard = revive(lock.lock());
+    guard
+        .as_ref()
+        .filter(|b| b.is_online())
+        .map(|b| (b.port_name().to_string(), b.firmware().to_string()))
 }
 
 #[cfg(windows)]
@@ -696,6 +836,62 @@ fn dispatch(key: KeyId, is_up: bool) -> DispatchResult {
             }
             send_via_sendinput(key, is_up)
         }
+        DispatchRoute::HidStickKeyboard(vk) => {
+            dispatch_hidstick(key, is_up, |backend| backend.send_key(vk, is_up))
+        }
+        DispatchRoute::HidStickWheel { up } => {
+            dispatch_hidstick(key, false, |backend| backend.send_wheel(up))
+        }
+        DispatchRoute::HidStickMouse(btn) => {
+            dispatch_hidstick(key, is_up, |backend| backend.send_mouse(btn, is_up))
+        }
+    }
+}
+
+/// 外设驱动敲出的事件回到钩子时就是真硬件事件，与 DD 一样先登记 `PENDING_INJECTIONS` 再发；
+/// 没发出去就撤销登记、这一条改走 SendInput，不让按键被直接丢掉。按下走了 SendInput 的键，
+/// 松开也走 SendInput（见 [`HIDSTICK_SENDINPUT_DOWN`]）。
+#[cfg(windows)]
+fn dispatch_hidstick(
+    key: KeyId,
+    is_up: bool,
+    send: impl FnOnce(&HidStickBackend) -> HidSend,
+) -> DispatchResult {
+    let fallback_downs = HIDSTICK_SENDINPUT_DOWN.get_or_init(|| Mutex::new(Default::default()));
+    if is_up && revive(fallback_downs.lock()).remove(&key) {
+        return fallback_via_sendinput(key, is_up);
+    }
+    if let Some(lock) = HIDSTICK_BACKEND.get() {
+        if let Some(backend) = revive(lock.lock()).as_ref() {
+            record_injection(key, is_up);
+            match send(backend) {
+                HidSend::Sent => {
+                    record_relay_injection(key, is_up);
+                    return DispatchResult::Sent;
+                }
+                HidSend::Unmapped => {
+                    if !HIDSTICK_UNMAPPED_LOGGED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        warn!("{key:?} 不在 HID 键盘页，外设模式下改走 SendInput");
+                    }
+                }
+                HidSend::Failed => {}
+            }
+            try_consume_injection(key, is_up);
+        }
+    }
+    let result = fallback_via_sendinput(key, is_up);
+    // 滚轮只有「按下」没有松开，不记
+    if !is_up && result.was_sent() && !matches!(key, KeyId::Mouse(b) if is_wheel_button(b)) {
+        revive(fallback_downs.lock()).insert(key);
+    }
+    result
+}
+
+#[cfg(windows)]
+fn fallback_via_sendinput(key: KeyId, is_up: bool) -> DispatchResult {
+    match send_via_sendinput(key, is_up) {
+        DispatchResult::Sent => DispatchResult::FallbackSent,
+        other => other,
     }
 }
 
@@ -758,6 +954,15 @@ mod tests {
         assert!(!InputMode::SendInput.requires_admin());
         assert!(InputMode::Interception.requires_admin());
         assert!(InputMode::DdSimple.requires_admin());
+        assert!(!InputMode::HidStick.requires_admin());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn hidstick_mode_round_trips_its_name() {
+        assert_eq!(InputMode::from_str("hidstick"), Some(InputMode::HidStick));
+        assert_eq!(InputMode::HidStick.as_str(), "hidstick");
+        assert_eq!(u8_to_mode(MODE_HIDSTICK), InputMode::HidStick);
     }
 
     #[cfg(windows)]
@@ -766,6 +971,8 @@ mod tests {
         // DD 系列驱动注入无法携带 SIM_MARKER（驱动清零 ExtraInformation），
         // 同键 Toggle 无法可靠区分自注入与物理停止键，故两者都禁止。
         assert!(InputMode::DdSimple.requires_distinct_target_for_toggle());
+        // 外设驱动同理：真硬件事件只能靠时间窗过滤。
+        assert!(InputMode::HidStick.requires_distinct_target_for_toggle());
         // 非 DD 系列不受限。
         assert!(!InputMode::SendInput.requires_distinct_target_for_toggle());
         assert!(!InputMode::Interception.requires_distinct_target_for_toggle());
@@ -852,6 +1059,26 @@ mod tests {
         assert_eq!(
             resolve_route(MODE_DD_SIMPLE, mouse(MouseButton::X2), true),
             DispatchRoute::DdSimpleMouse(MouseButton::X2)
+        );
+    }
+
+    #[test]
+    fn hidstick_routes_keyboard_mouse_and_wheel() {
+        assert_eq!(
+            resolve_route(MODE_HIDSTICK, KeyId::Keyboard(0x51), true),
+            DispatchRoute::HidStickKeyboard(0x51)
+        );
+        assert_eq!(
+            resolve_route(MODE_HIDSTICK, mouse(MouseButton::X1), false),
+            DispatchRoute::HidStickMouse(MouseButton::X1)
+        );
+        assert_eq!(
+            resolve_route(MODE_HIDSTICK, mouse(MouseButton::WheelUp), false),
+            DispatchRoute::HidStickWheel { up: true }
+        );
+        assert_eq!(
+            resolve_route(MODE_HIDSTICK, mouse(MouseButton::WheelDown), true),
+            DispatchRoute::Noop
         );
     }
 

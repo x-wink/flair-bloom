@@ -79,6 +79,36 @@
   border-bottom: none;
 }
 
+/* 外设驱动一行：上面是名称与状态，下面逐行列串口扫描结果 */
+.repair-status-list li.repair-status-item--stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--fb-space-2);
+}
+
+.repair-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fb-space-4);
+}
+
+.repair-port-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-faint);
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.repair-status-list .repair-port-list li {
+  display: block;
+  padding: 0;
+  border-bottom: none;
+}
+
 .repair-status-key {
   color: var(--fb-text-weak);
   flex: 0 0 auto;

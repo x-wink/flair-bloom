@@ -25,7 +25,7 @@ export interface TourRule {
 export interface TourSnapshot {
   rules: TourRule[];
   globalEnabled: boolean;
-  inputMode: 'sendinput' | 'interception' | 'ddsimple';
+  inputMode: 'sendinput' | 'interception' | 'ddsimple' | 'hidstick';
   layout: 'vertical' | 'horizontal';
   /** 竖版规则列表的筛选；只影响显示。 */
   filter: 'all' | 'hold' | 'toggle';

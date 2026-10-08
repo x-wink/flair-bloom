@@ -185,6 +185,42 @@ fn find_mouse() -> Option<InterceptionDevice> {
     None
 }
 
+/// Interception 20 个设备槽各自挂的硬件 ID，空槽不列；槽号划分见 `hidstick::KEYBOARD_SLOTS`。
+/// 只读、不需要管理员；驱动没装或没加载时返回 `None`。
+///
+/// 槽位按设备出现的先后往后分，拔掉的设备不还槽，重启前不回收：每类满 10 个之后再插进来的
+/// 设备分不到槽，它的输入会被驱动吞掉（设备管理器里却显示正常）。诊断靠这里看出这件事。
+pub fn device_hardware_ids() -> Option<Vec<(i32, String)>> {
+    // SAFETY: interception_create_context 失败返回 null
+    let ctx = unsafe { interception_create_context() };
+    if ctx.is_null() {
+        return None;
+    }
+    let mut out = Vec::new();
+    for device in 1..=20 {
+        let mut buf = [0u16; 512];
+        // SAFETY: ctx 有效；buf 按字节长度传入，驱动最多写这么多，返回写入（或需要）的字节数
+        let written = unsafe {
+            interception_get_hardware_id(
+                ctx,
+                device,
+                buf.as_mut_ptr().cast(),
+                (buf.len() * 2) as c_uint,
+            )
+        };
+        let len = (written as usize / 2).min(buf.len());
+        let id = String::from_utf16_lossy(&buf[..len]);
+        // 硬件 ID 是多字符串，第一段最具体
+        let first = id.split('\0').next().unwrap_or_default();
+        if !first.is_empty() {
+            out.push((device, first.to_string()));
+        }
+    }
+    // SAFETY: ctx 由上面 create 成功返回，此后不再使用
+    unsafe { interception_destroy_context(ctx) };
+    Some(out)
+}
+
 /// 检测 Interception 驱动是否已安装（尝试创建 context）。
 pub fn is_driver_installed() -> bool {
     // SAFETY: interception_create_context 失败返回 null

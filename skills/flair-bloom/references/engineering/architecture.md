@@ -55,19 +55,24 @@ apps/site（独立 pnpm 项目，消费私有制品 @xwink/ui；引用 apps/main
 
 ## 输入模式与注入通道
 
-`win_input::dispatch(KeyId, is_up)` 是统一入口，按 `(mode, KeyId)` 分发到对应后端。三档通道由用户在设置中选择：
+`win_input::dispatch(KeyId, is_up)` 是统一入口，按 `(mode, KeyId)` 分发到对应后端。四档通道由用户在设置中选择：
 
 | 模式                           | 实现                                                    | 说明                                                                                                                                                                                                                                         |
 | ------------------------------ | ------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | SendInput（通用模式，默认）    | `win-input/src/lib.rs`                                  | 键盘 `SendInput INPUT_KEYBOARD` + `KEYEVENTF_SCANCODE`；鼠标 `INPUT_MOUSE` + `MOUSEEVENTF_*`（X1/X2 用 `MOUSEEVENTF_XDOWN/UP` + `mouseData=XBUTTON1/2`）。`dwExtraInfo = SIM_MARKER` 标记自身注入事件防循环                                  |
 | Interception（游戏模式，主推） | `win-input/src/interception.rs`                         | 键盘 + 鼠标设备各扫描一次，鼠标状态位映射 `INTERCEPTION_MOUSE_BUTTON_4/5_DOWN/UP`（X1/X2）。`interception_send` 返回写入 stroke 数，鼠标 / 滚轮失败回退 SendInput。需要安装驱动并重启，以管理员运行                                          |
 | DDSimple（DD驱动，备用）       | `win-input/src/ddsimple.rs` + `dd_common.rs`（dd63330） | 键盘 `DD_key`，鼠标走 `MOUSE_INPUT_DATA.ButtonFlags`，原生支持 X1/X2 侧键；滚轮用 DD SDK 上滚 / 下滚编码。无需重启但需管理员。`ExtraInformation` 被驱动写死为 0，`SIM_MARKER` 无法幸存，自注入回灌改由 `PENDING_INJECTIONS` 时间窗口队列过滤 |
+| HidStick（外设模式）           | `win-input/src/hidstick.rs`（`serialport` crate）       | 挨个 USB 串口握手（`ID` 回 `ID xwink-hand …` 才算），跳过 CH34x / CP210x / FTDI / PL2303 等转串口芯片（常把 DTR 接到开发板复位脚，握手一拉就复位）、乐鑫的口先试；不认 VID/PID，PID 是固件自定的。一行一条指令（`KD`/`KU` 带 HID usage、`MD`/`MU`、`MW`）、逐条等 `OK`，协议以 xwink-body 仓 `firmware.md`「HID 棒固件」为准。即插即用、无需管理员。外设驱动敲出的是真硬件事件，自注入同 DD 靠 `PENDING_INJECTIONS` 过滤；不在 HID 键盘页的键（媒体键）逐条回退 SendInput |
 
 X1/X2 在 DD 模式 / 鼠标设备缺失时按 once 旗标 warn 一次后自动回退 SendInput。`dd63330.dll` 纳入打包资源、运行时完整性校验（`packages/resource-integrity`）与发版前 `pnpm check:resources`。
 
 **DD-HID 已永久移除**（驱动不稳定会导致蓝屏）：注入后端、`InputMode::DdHid`、安装链路与 `ddhid.63340.dll` 全部删除，`InputMode::from_str("dd_hid")` 返回 `None`，存量用户的 `input_mode` 配置在 `collect_configured_input_mode` 自动回落 SendInput。仅保留卸载与残留清理：`win_driver::dd_hid` 的检测与 `uninstall`、`uninstall_dd_hid_driver` 命令、`repair_dd_hid_residue`、诊断报告导出，以及随包分发的 `ddhid-driver/`（`ddc.exe -u` 要用）。
 
-**输入模式与布局互斥**：DDSimple 的单键规则约束无法用横版键鼠图表达（横版每个键位都是 `trigger == target` 的重合态，DD 下重合态切换连发是空集，见 [key-policy](key-policy.md)），故二者互斥——`selectInputMode`（横版下禁选 DD 驱动）与 `switchLayout`（DD 驱动下禁切横版）两个 choke point 拦截并提示。后者按后端下发的 `coincident_toggle` 能力位判断而非模式名，且用 `aria-disabled` 而非 `disabled`：禁用的按钮不触发 `onClick`，原因提示就永远跑不到。
+**外设驱动连接**：后端只报事实——插拔监视线程（`bootstrap/input.rs` + `hidstick::StickTracker`，后台每 1.5 s 枚举一次，只对新出现的口握一次手）、外设模式下的链路断开（心跳或下发失败，`win_input::set_on_hidstick_offline`）与手动连上（`set_input_mode` 成功）汇到同一个连接态，翻转时发 `hid-stick-connected` / `hid-stick-disconnected`。自动握手只碰乐鑫 VID 的口（`pick_auto_candidates`）、不在启动主线程上做：用户没点外设模式时不能拖慢启动，也不能去拉别家设备的 DTR（Arduino Uno 一类会被复位）；手动选外设模式与诊断才按 `pick_candidates` 握全部非转串口芯片的口。外设模式正用着的口不再握手；链路断了而口还在时监视线程忘掉它、下一轮重握。断开的顺序固定为「win-input 回退 SendInput 并另起线程释放旧口 → 报断开」：口不释放，插回来常拿到同一个口名却打不开；监视线程先看到口消失时也经 `hidstick_link_down` 走同一条路径。刷新状态、提示、问要不要切过去都是面板的事：不在外设模式时收到「连上」弹确认（启动时本就插着的那一下可能早于面板开始监听，面板启动落定后自查一次），同意后走 `selectInputMode`。外设驱动拒收某个按下（六键已满等）时这一下改走 SendInput，它的松开也必须走 SendInput（`HIDSTICK_SENDINPUT_DOWN`），否则系统收不到抬起、键卡住。卸载 / 修复驱动时 `leave_driver_backend` 不动外设模式。防卡键两端都做：固件在 DTR 掉或按着键 1 s 无指令时松开全部，这边释放后端时发 `RESET`；心跳只在没按着键时发，否则会替卡死的引擎续命、废掉固件那道保险。
+
+**外设驱动与 Interception 设备槽**：Interception 的 `keyboard.sys` / `mouse.sys` 是键盘类 / 鼠标类的上层过滤驱动，每类 10 个设备槽，按设备出现先后往后分配，拔掉不还、重启才清零（实测鼠标槽 12、14–17 空着，新插的仍分到 18）。某类槽满后再插进来的设备分不到槽，输入被过滤驱动吞掉，设备管理器却显示正常——外设驱动对每条指令照回 `OK`，低级钩子一个键也收不到。装卸 DD-HID 每次都会留下一个虚拟键盘占槽。诊断修复的「外设驱动」两项（`repair.rs` 的 `diagnose_hidstick`）：串口扫描对每个非转串口芯片的 USB 串口握一次手（外设模式正用着的口不碰），设备槽检查用 `interception::device_hardware_ids`（只读、不要管理员）按 VID/PID 找外设驱动的键盘与鼠标各占几号槽，缺哪个报错并建议重启。**别用「移除全部键盘再重扫」去清槽**：实测 `keyboard.sys` 不会因此卸载，重新加回的键盘（包括用户的实体键盘）全都分不到槽而失灵，只能重启。
+
+**输入模式与布局互斥**：DDSimple 与 HidStick 的单键规则约束无法用横版键鼠图表达（横版每个键位都是 `trigger == target` 的重合态，DD 下重合态切换连发是空集，见 [key-policy](key-policy.md)），故二者互斥——`selectInputMode`（横版下禁选这两档）与 `switchLayout`（这两档下禁切横版）两个 choke point 拦截并提示。后者按后端下发的 `coincident_toggle` 能力位判断而非模式名，且用 `aria-disabled` 而非 `disabled`：禁用的按钮不触发 `onClick`，原因提示就永远跑不到。
 
 ## 连发引擎（`packages/burst-engine`）
 
