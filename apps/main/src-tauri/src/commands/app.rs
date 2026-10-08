@@ -1,4 +1,4 @@
-//! 协议同意 / 检查更新 / 退出。
+//! 协议同意 / 检查更新 / 支持&帮助 / 退出。
 
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_store::StoreExt;
@@ -10,6 +10,67 @@ use crate::bootstrap::{
 };
 
 pub(crate) const PENDING_UPDATE_DIR: &str = "pending_update";
+
+/// 产品页的「支持&帮助」一节。
+const SUPPORT_URL: &str = "https://app.xwink.fun/flair-bloom/#support";
+/// QQ 邮箱网页版。「写邮件」打开它、邮箱由前端先复制好：不走 mailto，没设默认邮件程序就打不开，
+/// 设了的多半是启动很慢的 Outlook，点下去像没响应；也不拼写信链接，QQ 邮箱没有公开的写信参数，
+/// 「邮我」分享链接（`qm_share?t=qm_mailme&email=`）带明文邮箱、新版 `wx.mail.qq.com/home/index#/compose`
+/// （带不带 `to=`）实测都只落到收件箱；地址栏里能预填收件人的写信链接带的是本人会话 `sid` 与草稿 `mailid`，
+/// 换个人就失效。
+const QQ_MAIL_URL: &str = "https://mail.qq.com/";
+
+/// 用系统默认程序打开外部链接：`support` 是产品页的支持一节，`mail` 是 QQ 邮箱网页版。只认这几个
+/// 写死的目标、前端只传名字：没装 opener 插件，也就不给 WebView 开「打开任意网址」的口子。
+#[tauri::command]
+pub fn open_link(target: String) -> Result<(), String> {
+    let link = match target.as_str() {
+        "support" => SUPPORT_URL,
+        "mail" => QQ_MAIL_URL,
+        other => return Err(format!("未知链接: {other}")),
+    };
+    shell_open(link)
+}
+
+fn shell_open(link: &str) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+        // 走 ShellExecute 交给协议处理器（默认浏览器），锚点原样带过去
+        let wide = |s: &str| s.encode_utf16().chain(Some(0)).collect::<Vec<u16>>();
+        let (verb, target) = (wide("open"), wide(link));
+        // SAFETY: verb、target 是以 0 结尾的 UTF-16 串，活到调用返回；其余参数按文档可为空
+        let code = unsafe {
+            ShellExecuteW(
+                std::ptr::null_mut(),
+                verb.as_ptr(),
+                target.as_ptr(),
+                std::ptr::null(),
+                std::ptr::null(),
+                SW_SHOWNORMAL,
+            )
+        } as isize;
+        // 文档约定：返回值大于 32 才算成功
+        if code <= 32 {
+            return Err(format!("没有能打开它的程序（错误码 {code}）"));
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let opener = if cfg!(target_os = "macos") {
+            "open"
+        } else {
+            "xdg-open"
+        };
+        std::process::Command::new(opener)
+            .arg(link)
+            .spawn()
+            .map_err(|e| format!("无法打开: {e}"))?;
+    }
+    Ok(())
+}
 
 #[tauri::command]
 pub fn needs_agreement(app: AppHandle) -> Result<bool, String> {

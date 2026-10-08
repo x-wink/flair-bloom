@@ -126,6 +126,12 @@
   color: var(--fb-color-primary);
 }
 
+/* 邮箱可选中复制，不被 about-value 的省略截断 */
+.about-email {
+  user-select: text;
+  font-variant-numeric: tabular-nums;
+}
+
 .about-key--inline {
   color: var(--fb-text-weak);
   font-size: var(--fb-fs-sm);

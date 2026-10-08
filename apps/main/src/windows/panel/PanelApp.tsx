@@ -16,7 +16,7 @@ import {
 } from 'react';
 import iconUrl from '../../assets/icon-32.png';
 import bgUrl from '../../assets/icon.png';
-import { APP_NAME } from '../../constants';
+import { APP_NAME, AUTHOR_EMAIL } from '../../constants';
 import HorizontalLayout from './HorizontalLayout';
 import RuleCard, { type CardDragHandlers } from './RuleCard';
 import RuleGroup from './RuleGroup';
@@ -2436,6 +2436,31 @@ export default function PanelApp() {
     }
   }
 
+  function openSupport() {
+    invoke('open_link', { target: 'support' }).catch((e) => toast.error(`打开支持&帮助失败：${e}`));
+  }
+
+  // 先复制邮箱再打开 QQ 邮箱网页：网页版没有能预填收件人的写信链接，只能让用户粘贴
+  async function writeMail() {
+    let copied = true;
+    try {
+      await navigator.clipboard.writeText(AUTHOR_EMAIL);
+    } catch {
+      copied = false;
+    }
+    try {
+      await invoke('open_link', { target: 'mail' });
+    } catch {
+      toast.warning(`打不开浏览器，请手动发邮件到 ${AUTHOR_EMAIL}`);
+      return;
+    }
+    toast.success(
+      copied
+        ? '已复制邮箱，在打开的 QQ 邮箱里点「写信」，粘贴到收件人'
+        : `在打开的 QQ 邮箱里点「写信」，收件人填 ${AUTHOR_EMAIL}`,
+    );
+  }
+
   function handleShowAbout() {
     setMenuOpen(false);
     setShowAbout(true);
@@ -3070,6 +3095,13 @@ export default function PanelApp() {
           },
           { type: 'divider' },
           { label: '诊断修复', onClick: handleShowRepair },
+          {
+            label: '支持&帮助',
+            onClick: () => {
+              setMenuOpen(false);
+              openSupport();
+            },
+          },
           { label: '关于', onClick: handleShowAbout },
         ]}
       />
@@ -3204,24 +3236,8 @@ export default function PanelApp() {
               scheduler_hp_degraded: sysInfo.scheduler_hp_degraded,
             } satisfies AboutDialogInfo
           }
-          pendingUpdate={updateReady ?? updateAvailable}
-          checkingUpdate={updateProgress !== null && !updateProgress.done}
           onClose={() => setShowAbout(false)}
-          onCheckUpdate={() => {
-            setShowAbout(false);
-            handleCheckUpdate();
-          }}
-          onShowUpdateNotice={() => {
-            setShowAbout(false);
-            setUpdateNotice({
-              info: { version: appVersion, notes: changelogSection(appVersion) },
-              mode: 'current',
-            });
-          }}
-          onShowAgreement={() => {
-            setShowAbout(false);
-            setShowAgreement(true);
-          }}
+          onWriteMail={() => void writeMail()}
           onOpenDir={(kind) => {
             invoke('open_app_dir', { kind }).catch((err) => {
               toast.warning(`打开目录失败：${err}`);

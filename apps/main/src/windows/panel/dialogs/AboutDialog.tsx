@@ -1,7 +1,6 @@
 import { useState } from 'react';
-import { APP_NAME } from '../../../constants';
+import { APP_NAME, AUTHOR_EMAIL } from '../../../constants';
 import Button from '../components/Button';
-import type { UpdateNoticeInfo } from './UpdateNoticeDialog';
 import DialogShell from './DialogShell';
 import './AboutDialog.css';
 
@@ -23,13 +22,8 @@ export interface AboutDialogInfo {
 
 interface Props {
   info: AboutDialogInfo;
-  /** 查到但尚未装上的新版本；仅用于「检查更新」那一行的角标。 */
-  pendingUpdate: UpdateNoticeInfo | null;
-  checkingUpdate: boolean;
   onClose: () => void;
-  onCheckUpdate: () => void;
-  onShowUpdateNotice: () => void;
-  onShowAgreement: () => void;
+  onWriteMail: () => void;
   onOpenDir: (kind: 'install' | 'data' | 'log' | 'drivers') => void;
   onCopied: () => void;
   onCopyFailed: (err: unknown) => void;
@@ -59,12 +53,8 @@ function DirRow({ label, onOpen }: { label: string; onOpen: () => void }) {
 
 export default function AboutDialog({
   info,
-  pendingUpdate,
-  checkingUpdate,
   onClose,
-  onCheckUpdate,
-  onShowUpdateNotice,
-  onShowAgreement,
+  onWriteMail,
   onOpenDir,
   onCopied,
   onCopyFailed,
@@ -130,6 +120,21 @@ export default function AboutDialog({
     <DialogShell className="about-card" headerContent={headerNode} footer={footerNode}>
       <div className="about-body">
         <section className="about-section">
+          <p className="about-section-label">联系作者</p>
+          <ul className="about-list">
+            <li>
+              <span className="about-key">邮箱</span>
+              <span className="about-value about-value--with-action">
+                <span className="about-email">{AUTHOR_EMAIL}</span>
+                <Button size="sm" variant="outline" tone="primary" onClick={onWriteMail}>
+                  写邮件
+                </Button>
+              </span>
+            </li>
+          </ul>
+        </section>
+
+        <section className="about-section">
           <p className="about-section-label">运行环境</p>
           <ul className="about-list">
             <InfoRow
@@ -166,47 +171,6 @@ export default function AboutDialog({
             {info.os_family === 'windows' && (
               <DirRow label="驱动目录" onOpen={() => onOpenDir('drivers')} />
             )}
-          </ul>
-        </section>
-
-        <section className="about-section">
-          <p className="about-section-label">版本与协议</p>
-          <ul className="about-list">
-            <li>
-              <span className="about-key">检查更新</span>
-              <span className="about-value about-value--with-action">
-                {pendingUpdate && (
-                  <span className="about-flag about-flag--primary">
-                    新版本 v{pendingUpdate.version}
-                  </span>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  tone="primary"
-                  loading={checkingUpdate}
-                  onClick={onCheckUpdate}
-                >
-                  检查更新
-                </Button>
-              </span>
-            </li>
-            <li>
-              <span className="about-key">更新公告</span>
-              <span className="about-value about-value--with-action">
-                <Button size="sm" variant="outline" onClick={onShowUpdateNotice}>
-                  查看公告
-                </Button>
-              </span>
-            </li>
-            <li>
-              <span className="about-key">用户协议</span>
-              <span className="about-value about-value--with-action">
-                <Button size="sm" variant="outline" onClick={onShowAgreement}>
-                  查看
-                </Button>
-              </span>
-            </li>
           </ul>
         </section>
       </div>

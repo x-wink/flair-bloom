@@ -23,7 +23,7 @@ use bootstrap::{
 use commands::{
     app::{
         agree_license, apply_pending_update, check_update, exit_app, minimize_to_float,
-        needs_agreement, set_autostart, set_run_as_admin, should_auto_enable_on_start,
+        needs_agreement, open_link, set_autostart, set_run_as_admin, should_auto_enable_on_start,
         show_main_panel,
     },
     ddhid_diagnostic::export_dd_hid_diagnostic_report,
@@ -193,6 +193,7 @@ pub fn run() {
             needs_agreement,
             agree_license,
             should_auto_enable_on_start,
+            open_link,
             check_update,
             apply_pending_update,
             exit_app,
