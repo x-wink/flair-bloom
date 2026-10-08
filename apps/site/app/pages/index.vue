@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useTheme } from '@xwink/ui';
+import { useHashAnchor, useTheme } from '@xwink/ui';
 
 const { releases, latest, status } = useReleases();
 const { isDark, preference: themePreference, toggle: toggleTheme } = useTheme();
@@ -34,8 +34,9 @@ const railSections = [
   { id: 'support', label: '支持' },
 ];
 
-// 公告异步读完会把下方内容撑开：锚点跳完得纠偏，滚走后过期的 hash 要清掉
-useAnchors();
+// 公告异步读完会把下方内容撑开：锚点跳完得纠偏，滚走后过期的 hash 要清掉。
+// 归页面管而不交给 XScrollRail：轨还藏着，靠一个看不见的组件兜这件事读代码的人想不到
+useHashAnchor();
 
 // 同一列表里的卡片错峰进场；封顶是因为长列表后面的卡片等太久，滚到时反而像卡住
 const stagger = (index: number) => 120 + Math.min(index, 4) * 90;
@@ -510,8 +511,13 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
          暂时整条藏起来（要放出来就把 class 换回 hidden xl:block——lg 下轨会压在卡片上）：
          库按「占住视口中部」判当前章节，本页首屏与最后一节都比视口矮，占不到中部，
          高亮会指错邻节；等 @xwink/ui 补上首尾兜底再开。
-         clearHash 同理关掉，不然刚跳到 #support 就把 hash 抹掉，清理交给 useAnchors -->
-    <XScrollRail :sections="railSections" :clear-hash="false" class="hidden" />
+         锚点纠偏与清 hash 由页面的 useHashAnchor 做，轨上那份关掉，免得两份一起跟 -->
+    <XScrollRail
+      :sections="railSections"
+      :align-hash="false"
+      :clear-hash="false"
+      class="hidden"
+    />
 
     <footer class="border-t border-(--ui-border-muted)">
       <div
