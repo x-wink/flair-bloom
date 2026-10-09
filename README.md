@@ -95,15 +95,15 @@
 
 每个主题都有一组应用内教程（☰ 菜单 → 新手教程，学过的会打勾），说明书原文在仓库里：
 
-| 主题             | 学什么                                                                | 说明书                                                                     |
-| ---------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| 上手三步         | 添加第一条规则、录键、打开总开关（首次启动、教程更新后自动进入）      | [getting-started](skills/flair-bloom/references/manual/getting-started.md) |
-| 游戏模式与驱动   | 为什么游戏里要装驱动、怎么装、装不上怎么办                            | [game-mode](skills/flair-bloom/references/manual/game-mode.md)             |
-| 规则玩法         | 长按 / 切换连发、点标签换模式、"开始键"和"被连的键"分开、⚠ 冲突提醒   | [rules](skills/flair-bloom/references/manual/rules.md)                     |
-| 互斥组与多段宏   | 多段宏一键切换互不打架；跑宏时按住长按键临时插队，松手宏自己接着跑    | [groups](skills/flair-bloom/references/manual/groups.md)                   |
-| 横版键鼠图与浮窗 | 在键盘 / 鼠标示意图上点键设连发，收进右下角常驻悬浮条                 | [layouts](skills/flair-bloom/references/manual/layouts.md)                 |
-| 多套配置         | 不同角色 / 心法各存一套，一键切换，导出 `.qzh` 分享                   | [profiles](skills/flair-bloom/references/manual/profiles.md)               |
-| 热键、声音与外观 | 游戏里一键开关 / 显隐面板，语音或音频播报，21 个门派配色              | [settings](skills/flair-bloom/references/manual/settings.md)               |
+| 主题             | 学什么                                                              | 说明书                                                                     |
+| ---------------- | ------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| 上手三步         | 添加第一条规则、录键、打开总开关（首次启动、教程更新后自动进入）    | [getting-started](skills/flair-bloom/references/manual/getting-started.md) |
+| 游戏模式与驱动   | 为什么游戏里要装驱动、怎么装、装不上怎么办                          | [game-mode](skills/flair-bloom/references/manual/game-mode.md)             |
+| 规则玩法         | 长按 / 切换连发、点标签换模式、"开始键"和"被连的键"分开、⚠ 冲突提醒 | [rules](skills/flair-bloom/references/manual/rules.md)                     |
+| 互斥组与多段宏   | 多段宏一键切换互不打架；跑宏时按住长按键临时插队，松手宏自己接着跑  | [groups](skills/flair-bloom/references/manual/groups.md)                   |
+| 横版键鼠图与浮窗 | 在键盘 / 鼠标示意图上点键设连发，收进右下角常驻悬浮条               | [layouts](skills/flair-bloom/references/manual/layouts.md)                 |
+| 多套配置         | 不同角色 / 心法各存一套，一键切换，导出 `.qzh` 分享                 | [profiles](skills/flair-bloom/references/manual/profiles.md)               |
+| 热键、声音与外观 | 游戏里一键开关 / 显隐面板，语音或音频播报，21 个门派配色            | [settings](skills/flair-bloom/references/manual/settings.md)               |
 
 所有键都能连：键盘、鼠标左 / 右 / 中 / 两个侧键、滚轮上下，随便组合（"按住侧键连左键""按 F 连滚轮下滚"）。
 
@@ -161,6 +161,7 @@
 - 配置文件被外部改动后自动重新加载
 - 产品页补实拍截图，站内反馈入口
 - 桌宠：桌面上一只随连发状态动的小东西，点击穿透、可拖、右键菜单（设计稿见 [pet-mode](docs/roadmaps/pet-mode.md)）
+- 界面迁到 Vue 与 xwink 组件库，新手教程沉淀进组件库复用（路线图见 [vue-migration](docs/roadmaps/vue-migration.md)）
 - 亲友专属功能与兑换码激活：宏录制回放、随机抖动、按前台游戏自动切配置（设计稿见 [license](docs/roadmaps/license.md)）
 - 坏版本降险：远端最低可用版本、分批灰度、静默更新延迟安装
 - 代码签名（Azure Trusted Signing），不再被 SmartScreen 拦
