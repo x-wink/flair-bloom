@@ -17,9 +17,9 @@ pub use key_policy::{
     KeySlot, SanitizeReport, SlotPolicy,
 };
 pub use profile::{
-    Advanced, BurstMode, BurstRule, Hotkeys, Profile, ProfileError, ProfileMeta,
-    CURRENT_SCHEMA_VERSION, DEFAULT_INTERVAL_MS, MAX_INTERVAL_MS, MAX_RULES,
-    MIN_EFFECTIVE_INTERVAL_MS, MIN_INTERVAL_MS,
+    sanitize_signature, Advanced, BurstMode, BurstRule, Hotkeys, Profile, ProfileError,
+    ProfileMeta, CURRENT_SCHEMA_VERSION, DEFAULT_INTERVAL_MS, MAX_INTERVAL_MS, MAX_RULES,
+    MAX_SIGNATURE_CHARS, MIN_EFFECTIVE_INTERVAL_MS, MIN_INTERVAL_MS,
 };
 pub use schema_migrate::migrate_profile;
 
@@ -74,6 +74,7 @@ mod tests {
                 created_at: 0,
                 updated_at: 0,
                 app_version: "0".into(),
+                signature: String::new(),
             },
             rules: vec![],
             hotkeys: Hotkeys::default(),

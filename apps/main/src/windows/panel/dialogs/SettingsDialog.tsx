@@ -14,6 +14,7 @@ import { VolumeIcon } from '../components/icons';
 import Tabs from '../components/Tabs';
 import { useToast } from '../components/Toast';
 import type { ConflictSeverity } from '../conflicts';
+import { SIGNATURE_MAX_CHARS } from '../signature';
 import DialogShell from './DialogShell';
 import ProfileCardList, { type SettingsProfileEntry } from './ProfileCardList';
 import { SECT_PRESETS, type ThemeMode, type ThemeSettings } from '../theme';
@@ -84,6 +85,10 @@ interface Props {
   profileName: string;
   profileCount: number;
   isDefaultProfile: boolean;
+  /** 持有 `flair.signature` 权益；没有时界面完全不露署名入口。 */
+  signatureEnabled: boolean;
+  signature: string;
+  onSignatureChange: (signature: string) => void;
   onClose: () => void;
   onSelectInputMode: (mode: SettingsInputMode) => void;
   onToggleGlobal: () => void;
@@ -177,6 +182,41 @@ function SettingsSection({
       <h3 className="settings-section-title">{title}</h3>
       {children}
     </section>
+  );
+}
+
+function SignatureRow({
+  value,
+  onCommit,
+}: {
+  value: string;
+  onCommit: (signature: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  // 失焦或回车才写盘：每敲一个字都写会让配置文件跟着输入法候选一起抖
+  const commit = () => {
+    if (draft.trim() !== value) onCommit(draft);
+  };
+  return (
+    <div className="settings-row settings-row--stack">
+      <div className="settings-row-main">
+        <span className="settings-row-title">面板背景署名</span>
+        <span className="settings-row-desc">跟着当前配置走，留空显示默认署名</span>
+      </div>
+      <input
+        type="text"
+        className="settings-text-input"
+        value={draft}
+        maxLength={SIGNATURE_MAX_CHARS}
+        placeholder="花间游悟 · 斗转星移"
+        aria-label="面板背景署名"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
+      />
+    </div>
   );
 }
 
@@ -888,6 +928,17 @@ export default function SettingsDialog(props: Props) {
                 <p className="settings-note">默认配置会在修改规则或热键时自动另存为新配置。</p>
               )}
             </SettingsSection>
+
+            {props.signatureEnabled && (
+              <SettingsSection title="水印署名">
+                {/* 切配置或保存后署名变了就重挂载，丢掉旧草稿 */}
+                <SignatureRow
+                  key={`${props.profileName}\u0000${props.signature}`}
+                  value={props.signature}
+                  onCommit={props.onSignatureChange}
+                />
+              </SettingsSection>
+            )}
           </>
         )}
       </div>

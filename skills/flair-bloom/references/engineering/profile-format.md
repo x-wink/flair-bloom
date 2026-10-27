@@ -35,6 +35,8 @@
 | 3              | `MouseButton` 新增 `WheelUp` / `WheelDown`                                  | v0.2.4   |
 | 4              | `BurstRule` 新增可选 `group` 字段（Toggle 互斥分组）                        | v0.2.5   |
 
+不升版本的默认值字段：`meta.signature`（水印署名，空串即未设置）。它在反序列化时就经 `sanitize_signature` 去控制字符、去首尾空白、截到 16 字符，导入、列表、保存所有读路径一处收口。`save_profile` 一律沿用文件里的旧值（前端自动保存每次从头拼 `meta`、不带署名），只有 `set_profile_signature` 能改，且要求持有 `flair.signature` 权益。
+
 `tauri-plugin-store` 的 `settings.json` 复用同一迁移基础设施。已知键：`closeBehavior`、`holdInGroupHintDismissed`（某组变成长按与切换混排时的插队提示已勾「不再提示」）、`sound`、`theme`、`layout`、`autoUpdate`（与后端 `bootstrap/update.rs` 同名同读）、`autoEnableOnStart`（与 `bootstrap/startup.rs` 同名同读）、`tours`（`{ completed: string[], introVersion: string }`，`introVersion` 是已自动展示过的教程版本，与协议版本同一套语义）、`runAsAdmin`（「以管理员模式启动」的用户意图，注册表标志被更新抹掉时靠它自愈）、当前激活配置路径。开机自启与「以管理员模式启动」不在这里：前者由 `tauri-plugin-autostart` 写 `HKCU\Run`，后者写 `HKCU\...\AppCompatFlags\Layers`，都以注册表为准，界面只读回显。
 
 ## 输入约束
@@ -62,6 +64,6 @@
 - 时间：`iat` 允许领先本机 24 小时，超出判时钟回拨——Windows 上时区设错让系统 UTC 偏几小时很常见，回拨本来只是顺手的一道；`exp` 到点即过期。
 - 公钥：私钥只在 billing。`crypto/build.rs` 把公钥按 `kid` 编进二进制，`kid` = SPKI DER 的 SHA-256 做 base64url 取前 22 字符（与 billing 同算法），构建时由 JWK 的 `x` 重算核对，不一致即失败。
   - `FLAIR_LICENSE_PUBKEYS`：billing 交付的 JWK 数组，`release.yml` 从同名 Secret 注入。发版构建（无 `debug_assertions`）缺失或为空串即失败；本地发版构建不需要激活时显式设为 `[]`。
-  - `packages/crypto/license-dev-keys.json`：本地 billing 开发密钥的公钥，只在 `debug_assertions` 下编入。
+  - `packages/crypto/license-dev-keys.json`：开发公钥，只在 `debug_assertions` 下编入：一把是 xwink-console 本地 billing 的开发密钥（私钥是那边入库的开发值），一把是 flair 自己的样例密钥（私钥签完 `license-dev-sample.jws` 即弃）。把样例许可证拷成 `{app_data_dir}/license.jws`，开发构建就带上署名权益，不用起 billing。
   - 轮换：新版本加新钥，旧钥只验不签；止血时新版本移除旧钥，该钥签出的许可证全部失效、要重新激活。
-- 权益：只有自定义水印署名 `flair.signature`（`crypto::ENT_SIGNATURE`）一项；其余功能对所有用户开放。激活与署名尚未接入应用，进度见 `docs/roadmaps/license.md`。
+- 权益：只有自定义水印署名 `flair.signature`（`crypto::ENT_SIGNATURE`）一项；其余功能对所有用户开放。署名的存取见上文 `meta.signature`；兑换码激活尚未接入应用，进度见 `docs/roadmaps/license.md`。

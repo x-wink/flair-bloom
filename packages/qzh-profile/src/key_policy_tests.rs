@@ -282,6 +282,7 @@ fn profile_with(rules: Vec<BurstRule>, hotkeys: Hotkeys) -> Profile {
             created_at: 0,
             updated_at: 0,
             app_version: "0".to_string(),
+            signature: String::new(),
         },
         rules,
         hotkeys,

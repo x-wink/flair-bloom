@@ -1,1 +1,4 @@
-[]
+[
+  { "kty": "OKP", "crv": "Ed25519", "x": "i8nQTY3Qvm5QdCnE0MRtal6BQSFbMzj27seaI5zOlzU", "kid": "MdQRhSNutFP1A6K2bYAiDb" },
+  { "kty": "OKP", "crv": "Ed25519", "x": "qX5Dq73ZtcQKU10a3BPMLs7uxHpv1ZrgfZOVZSnI8t8", "kid": "LC-CJNk3u6_pRGXkXz2_mD", "alg": "EdDSA", "use": "sig" }
+]

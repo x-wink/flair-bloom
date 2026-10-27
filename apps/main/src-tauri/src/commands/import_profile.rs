@@ -402,6 +402,7 @@ pub fn import_external_config(
             created_at: now,
             updated_at: now,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
+            signature: String::new(),
         },
         rules,
         hotkeys,

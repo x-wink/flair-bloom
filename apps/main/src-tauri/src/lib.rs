@@ -37,11 +37,12 @@ use commands::{
         set_input_mode, set_rules, EngineState,
     },
     import_profile::{import_external_config, preview_import, scan_import_configs},
+    license::{get_license_status, LicenseState},
     log::{log_from_frontend, open_app_dir},
     profile::{
         delete_profile, export_profile, fork_active_profile, get_active_profile_path,
         import_qzh_profile, init_default_profile, list_profiles, load_profile, rename_profile,
-        save_profile, take_profile_notice, ProfileNotice,
+        save_profile, set_profile_signature, take_profile_notice, ProfileNotice,
     },
     repair::{
         diagnose_environment, repair_clean_logs, repair_corrupted_profiles, repair_dd_hid_residue,
@@ -181,6 +182,8 @@ pub fn run() {
             is_elevated,
             relaunch_as_admin,
             save_profile,
+            set_profile_signature,
+            get_license_status,
             load_profile,
             list_profiles,
             init_default_profile,
@@ -218,6 +221,8 @@ pub fn run() {
             delete_sound_file,
         ])
         .setup(move |app| {
+            app.manage(LicenseState::load(app.handle()));
+
             // 全局热键回调：同步托盘菜单与前端开关状态
             // 注意：这两个回调均由 WH_KEYBOARD_LL hook 线程同步调用。
             // 在 hook 返回前，WebView2（若聚焦）无法向主线程 STA 投递 COM 消息，

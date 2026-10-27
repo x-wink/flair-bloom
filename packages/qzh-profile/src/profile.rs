@@ -61,6 +61,24 @@ pub struct ProfileMeta {
     pub updated_at: u64,
     /// 写入此文件时使用的应用版本号（CARGO_PKG_VERSION）。
     pub app_version: String,
+    /// 面板水印署名，空串即未设置；只在持有 `flair.signature` 权益时显示，没有权益也原样保留。
+    /// 反序列化即经 [`sanitize_signature`] 净化，导入、列表、保存等所有读路径都不用各自再记得调。
+    #[serde(default, deserialize_with = "deserialize_signature")]
+    pub signature: String,
+}
+
+/// 署名的最大字符数（按 Unicode 标量计，不按字节）。竖版面板宽度下 16 个汉字刚好一行。
+pub const MAX_SIGNATURE_CHARS: usize = 16;
+
+/// 去掉控制字符与首尾空白，截到 [`MAX_SIGNATURE_CHARS`] 个字符。
+pub fn sanitize_signature(raw: &str) -> String {
+    let cleaned: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let truncated: String = cleaned.trim().chars().take(MAX_SIGNATURE_CHARS).collect();
+    truncated.trim_end().to_string()
+}
+
+fn deserialize_signature<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
+    String::deserialize(d).map(|s| sanitize_signature(&s))
 }
 
 /// 单条连发规则：把 `trigger_key` 触发的事件转换为针对 `target_key` 的连发输出。

@@ -245,3 +245,9 @@ fn malformed_tokens_are_invalid_format() {
         );
     }
 }
+
+#[test]
+fn dev_sample_verifies_with_embedded_dev_keys() {
+    let license = verify_license(include_str!("../license-dev-sample.jws"), NOW).unwrap();
+    assert!(license.grants(ENT_SIGNATURE));
+}

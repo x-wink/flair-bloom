@@ -89,6 +89,7 @@ import UpdateNoticeDialog, {
   type UpdateNoticeMode,
 } from './dialogs/UpdateNoticeDialog';
 import { changelogSection } from './changelog';
+import { grantsSignature, type LicenseStatus, watermarkSignature } from './signature';
 import './PanelApp.css';
 
 /** 后端 `take_profile_notice` 的返回形态，与 `qzh_profile::SanitizeReport` 同源。 */
@@ -296,6 +297,7 @@ interface ProfileMeta {
   created_at: number;
   updated_at: number;
   app_version: string;
+  signature?: string;
 }
 
 interface Profile {
@@ -591,6 +593,14 @@ export default function PanelApp() {
   // WebView2 聚焦时全局键盘钩子失效，将键盘事件中继到后端引擎（与浮窗共用）。
   useKeyRelay();
   const isDefaultProfile = profileName === DEFAULT_PROFILE_NAME;
+
+  const [license, setLicense] = useState<LicenseStatus | undefined>(undefined);
+  useEffect(() => {
+    invoke<LicenseStatus | null>('get_license_status')
+      .then((status) => setLicense(status ?? undefined))
+      .catch(() => {});
+  }, []);
+  const activeSignature = watermarkSignature(license, profileList, profileName);
 
   // 加载配置时被净化掉的项，取走一次就弹一次。启动加载先于窗口创建，事件会丢，
   // 故后端把结果存在 ProfileNotice 里等前端来取；运行期切换配置再靠事件触发这里重取。
@@ -2099,6 +2109,20 @@ export default function PanelApp() {
     }
   }
 
+  async function handleSignatureChange(signature: string) {
+    try {
+      // 默认配置是出厂预设，和改规则一样先另存为新配置再写
+      await ensureWritableProfile();
+      await invoke<string>('set_profile_signature', {
+        name: profileNameRef.current,
+        signature,
+      });
+      await refreshProfileList();
+    } catch (e) {
+      toast.error(`保存署名失败：${e}`);
+    }
+  }
+
   async function handleDeleteProfileByName(name: string) {
     if (name === DEFAULT_PROFILE_NAME) {
       toast.warning('默认配置不可删除');
@@ -2547,6 +2571,7 @@ export default function PanelApp() {
   return (
     <div
       className={`panel ${layout === 'horizontal' ? 'panel--h' : 'panel--v'}${globalEnabled ? ' on' : ' off'}`}
+      data-signature={activeSignature}
       style={{ ['--panel-bg' as string]: `url(${bgUrl})` }}
     >
       <header className="panel-header" data-tauri-drag-region>
@@ -3133,6 +3158,9 @@ export default function PanelApp() {
           profileName={profileName}
           profileCount={profileList.length}
           isDefaultProfile={isDefaultProfile}
+          signatureEnabled={grantsSignature(license)}
+          signature={activeSignature ?? ''}
+          onSignatureChange={(s) => void handleSignatureChange(s)}
           onClose={() => setShowSettings(false)}
           onSelectInputMode={(mode) => {
             setShowSettings(false);

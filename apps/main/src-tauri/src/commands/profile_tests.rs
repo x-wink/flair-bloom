@@ -105,6 +105,7 @@ fn profile_summary_counts_rules_and_hotkeys() {
             created_at: 1,
             updated_at: 2,
             app_version: "test".to_string(),
+            signature: String::new(),
         },
         rules: vec![
             BurstRule {
@@ -203,4 +204,45 @@ fn import_base_name_falls_back_to_placeholder() {
         pick_import_base_name(DEFAULT_PROFILE_NAME, DEFAULT_PROFILE_NAME),
         "导入配置"
     );
+}
+
+fn meta(created_at: u64, signature: &str) -> ProfileMeta {
+    ProfileMeta {
+        name: "p".into(),
+        created_at,
+        updated_at: 0,
+        app_version: String::new(),
+        signature: signature.into(),
+    }
+}
+
+#[test]
+fn carry_over_keeps_existing_signature_when_frontend_omits_it() {
+    let mut incoming = meta(0, "");
+    carry_over_meta(&mut incoming, Some(meta(100, "小花")), 500);
+    assert_eq!(incoming.created_at, 100);
+    assert_eq!(incoming.signature, "小花");
+}
+
+#[test]
+fn carry_over_ignores_signature_sent_by_frontend() {
+    // 署名只走 set_profile_signature：自动保存带来的值一律以文件为准
+    let mut incoming = meta(0, "伪造");
+    carry_over_meta(&mut incoming, Some(meta(100, "")), 500);
+    assert_eq!(incoming.signature, "");
+}
+
+#[test]
+fn carry_over_new_file_uses_now_and_no_signature() {
+    let mut incoming = meta(0, "伪造");
+    carry_over_meta(&mut incoming, None, 500);
+    assert_eq!(incoming.created_at, 500);
+    assert_eq!(incoming.signature, "");
+}
+
+#[test]
+fn carry_over_keeps_explicit_created_at() {
+    let mut incoming = meta(42, "");
+    carry_over_meta(&mut incoming, Some(meta(100, "")), 500);
+    assert_eq!(incoming.created_at, 42);
 }

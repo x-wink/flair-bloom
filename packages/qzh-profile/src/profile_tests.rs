@@ -10,6 +10,7 @@ fn make_profile(rules: Vec<BurstRule>) -> Profile {
             created_at: 0,
             updated_at: 0,
             app_version: "0".into(),
+            signature: String::new(),
         },
         rules,
         hotkeys: Hotkeys::default(),
@@ -125,4 +126,48 @@ fn burst_rule_serializes_keyid_shape() {
     let v = serde_json::to_value(&r).unwrap();
     assert_eq!(v["trigger_key"], json!({"kind":"keyboard","code":81}));
     assert_eq!(v["target_key"], json!({"kind":"mouse","code":"left"}));
+}
+
+#[test]
+fn sanitize_signature_strips_controls_trims_and_truncates_by_chars() {
+    assert_eq!(sanitize_signature("  花间\u{7}游悟\n  "), "花间游悟");
+    let long: String = "署".repeat(MAX_SIGNATURE_CHARS + 5);
+    assert_eq!(
+        sanitize_signature(&long).chars().count(),
+        MAX_SIGNATURE_CHARS
+    );
+    // 截断后落在空格上时不留尾随空白
+    let padded = format!("{} 尾", "a".repeat(MAX_SIGNATURE_CHARS - 1));
+    assert_eq!(
+        sanitize_signature(&padded),
+        "a".repeat(MAX_SIGNATURE_CHARS - 1)
+    );
+    assert_eq!(sanitize_signature("\u{1b}[31m"), "[31m");
+}
+
+#[test]
+fn meta_without_signature_deserializes_to_empty() {
+    let meta: ProfileMeta = serde_json::from_value(json!({
+        "name": "a", "created_at": 1, "updated_at": 2, "app_version": "0.5.0"
+    }))
+    .unwrap();
+    assert_eq!(meta.signature, "");
+}
+
+#[test]
+fn meta_signature_is_sanitized_on_deserialize() {
+    let meta: ProfileMeta = serde_json::from_value(json!({
+        "name": "a", "created_at": 1, "updated_at": 2, "app_version": "0.5.0",
+        "signature": format!("\t{}\u{0}", "长".repeat(40)),
+    }))
+    .unwrap();
+    assert_eq!(meta.signature, "长".repeat(MAX_SIGNATURE_CHARS));
+}
+
+#[test]
+fn meta_signature_round_trips() {
+    let mut p = make_profile(vec![]);
+    p.meta.signature = "亲友 · 小花".into();
+    let back: Profile = serde_json::from_value(serde_json::to_value(&p).unwrap()).unwrap();
+    assert_eq!(back.meta.signature, "亲友 · 小花");
 }

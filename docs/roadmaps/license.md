@@ -42,7 +42,7 @@ Goal: 亲友在应用内输入兑换码、联网一次，换回 billing 签发�
   - 轮换与止血：新版本加新钥，旧钥只验不签。止血时新版本移除旧钥，代价是该钥签出的许可证全部失效，要重新激活（同码在重下发上限内可自助恢复）。
 - **D9：内嵌公钥是顺手的门，不是防线** — 作者定（2026-10-09）：flair 开源免费，许可证只是亲友定制，被反编译或 fork 去掉校验影响不大；不做设备绑定，不上传硬件信息，许可证文件被拷走也接受。同理，时钟回拨只做 `iat` 下界这一道（拨到签发之前判无效，允许领先本机 24 小时：Windows 上时区设错让系统 UTC 偏几小时很常见，不放宽会刚激活就判回拨），拨回到期之前能绕过有期限的许可证，接受。
 - **D10：水印署名的形态** — 作者定（2026-10-09）：
-  - 字段：一整段自由文本，存在每套配置里（`meta.signature`，`#[serde(default)]`，不升 schema 版本），切配置时水印跟着换。限长按字符数计（初值 16 字，实现时按竖版宽度调），去掉控制字符，由 `sanitize_profile` 统一净化。
+  - 字段：一整段自由文本，存在每套配置里（`meta.signature`，`#[serde(default)]`，不升 schema 版本），切配置时水印跟着换。限长 16 个字符（按 Unicode 标量计），去掉控制字符与首尾空白。反序列化即净化（`deserialize_with`），导入、列表、保存所有读路径一处收口；`save_profile` 一律沿用文件里的旧值，只有 `set_profile_signature`（要求权益）能改 — 理由：前端自动保存每次从头拼 `meta`、不带署名，不沿用旧值署名就会被清掉；`sanitize_profile` 只管按键策略，列表与导入等读路径不经过它。
   - 导出分享：导出的 `.qzh` 带上署名，导入方没有这项权益时显示默认署名，字段原样保留。
   - 入口：没有权益的用户界面上完全不露出署名入口。
   - 渲染：保留伪元素，面板根上有 `data-signature` 时用 `content: attr(data-signature)` 覆盖默认署名；没有权益或署名为空时不写这个属性，回落 CSS 里的默认值。`attr()` 取到的值按纯文本插入，不经 HTML 解析。
@@ -53,8 +53,8 @@ Goal: 亲友在应用内输入兑换码、联网一次，换回 billing 签发�
   - flair 必须校验 `typ`、`aud`、`iss` 三项；权益凭证的 `typ` 是 `xwink-entitlement+jwt`，两类互不接受。
   - 理由：JWS 是通行格式，jose 与 `ed25519-dalek` 都现成支持；许可证不进 JWKS，不必跟权益凭证同用 ES256。
 - **D12：`kid` 与公钥交付沿用 xwink 口径** — 与 billing 对齐（2026-10-27）：`kid` = 公钥 SPKI DER 的 SHA-256 做 base64url 后取前 22 字符（Ed25519 的 SPKI DER 是固定前缀 `302a300506032b6570032100` 加 32 字节公钥）；billing 交付 JWK `{kty:"OKP", crv:"Ed25519", x, kid}`。flair 的 build script 由 `x` 重算 `kid` 并与交付值核对，不一致即构建失败 — 理由：Secrets 里贴错一个字符时在构建期暴露，而不是在亲友激活时。
-- **D13：billing 没有预发环境，开发期打本地 billing** — 与 billing 对齐（2026-10-27）：debug 构建的激活地址是 `http://localhost:8400/api/v1`（xwink-console 里 `pnpm db:up && pnpm service:billing`），配开发密钥，其公钥只在 debug 构建里被接受（D8）；发版构建固定打生产 `https://billing.xwink.fun/api/v1`。测试码由 billing 的本地建批次脚本产出。
-- **D14：会员服务协议版本在激活时现取** — 与 billing 对齐（2026-10-27）：激活前调 uc 公开接口 `GET https://uc.xwink.fun/api/v1/auth/agreements/current?codes=membership` 取当前版本，正文页 `https://uc.xwink.fun/auth/terms/membership` 用系统浏览器打开；不在构建时写死 — 理由：激活本来就联网，现取能避免协议改版后旧版本客户端一律 `AGREEMENT_VERSION_OUTDATED`。接口返回空数组（尚无已发布协议）时不显示勾选、不传 `agreementVersion`；作者定（2026-10-27）：billing 在线上没有已发布协议时接受缺省，协议发布后必须带当前版本 — 理由：会员服务协议还在律师审，不让它卡住激活上线。
+- **D13：billing 没有预发环境，开发期打本地 billing** — 与 billing 对齐（2026-10-27）：debug 构建的激活地址是 `http://localhost:8400/api/v1`（xwink-console 里 `pnpm db:up && pnpm service:all`：billing 激活前要向本地 uc 取协议版本，只起 billing 会回 503），配开发密钥，其公钥只在 debug 构建里被接受（D8）；发版构建固定打生产 `https://billing.xwink.fun/api/v1`。测试码由 billing 的本地建批次脚本产出。
+- **D14：会员服务协议版本在激活时现取** — 与 billing 对齐（2026-10-27）：激活前调 uc 公开接口 `GET https://uc.xwink.fun/api/v1/auth/agreements/current?codes=membership` 取当前版本，正文页 `https://uc.xwink.fun/auth/terms/membership` 用系统浏览器打开；不在构建时写死 — 理由：激活本来就联网，现取能避免协议改版后旧版本客户端一律 `AGREEMENT_VERSION_OUTDATED`。接口返回空数组（尚无已发布协议）时不显示勾选、不传 `agreementVersion`（本地 uc 发布着草稿 `0.1.0-draft`，所以本地联调走的是「要带版本」那一支，生产目前走缺省那一支）；作者定（2026-10-27）：billing 在线上没有已发布协议时接受缺省，协议发布后必须带当前版本 — 理由：会员服务协议还在律师审，不让它卡住激活上线。
 - **D15：billing L1 现在开工，由 xwink-console-c1 做** — 作者定（2026-10-27）：L1 预估 2 个会话；接口激活，不改成脚本离线签发 — 理由：亲友自助重装重下发、激活记录从第一天起记在 billing，日后要卖码时不再改链路。
 - **D16：测试码只在本地，生产不建** — 作者定（2026-10-27）：开发与联调全在本地 billing；生产验收用第一张发给亲友的真码，作者在发版候选构建上先激活，亲友自己激活时算一次重下发（上限 3 内）。
 - **D17：AES 主密钥不轮换，现有常量即正式密钥** — 作者定（2026-10-27）：`aes.rs` 的 `MASTER_KEY` 只作混淆、不保密，T1 删掉它的 TODO，`profile-format.md` 改写为现状 — 理由：它从首个版本起加密所有用户的 `.qzh`，换掉就让老配置与跨版本分享全部解不开；仓库公开，旧密钥已永久公开，按 D9 的逻辑新密钥也能从二进制取出，换了没有收益。将来真要轮换，用文件头 `flags` 记密钥编号并回退旧钥解密。
@@ -88,29 +88,32 @@ Goal: 亲友在应用内输入兑换码、联网一次，换回 billing 签发�
 - **Depends on:** D11 与 c1 对齐。
 - **Done:** `cargo test -p crypto` 27 条全过，`license.rs` / `kid.rs` 行与函数覆盖 100%；去掉 `typ`、`aud` 校验的变异让 3 条用例变红。夹具改用 xwink-console 的 jose 加 `computeKeyId` 在 Node 里签（跨实现核对，比本地 billing 样本更早到位）；`iat` 允许领先本机 24 小时（见 D9）。发版构建实测：未设置 / 空串失败，`[]` 通过，`kid` 错一位失败，正确 JWK 编入。GitHub Secret `FLAIR_LICENSE_PUBKEYS` 已建（2026-10-27），billing 生产密钥出来前值为 `[]`，T4 前换成生产公钥 JWK。
 
-### T2 — 署名字段与水印渲染 · 进度: 未开始
+### T2 — 署名字段与水印渲染 · 进度: 已完成（2026-10-27）
 
 - **Fixes:** I5
 - **Change:**
-  - `ProfileMeta` 加 `signature: String`（`#[serde(default)]`，空串即未设置）；`sanitize_profile` 去控制字符、按字符数截断。
-  - 后端维护一份「当前权益」状态（启动时读许可证验签得出，见 T3），经命令暴露给前端；本卡先用 debug 构建的测试许可证文件驱动。
-  - 面板根节点有权益且署名非空时写 `data-signature`；CSS 改为 `content: attr(data-signature)` 覆盖。配置编辑处在有权益时显示署名输入框，无权益时不渲染。
-  - 说明书 `manual/profiles.md` 补署名一段（只在有权益时可见的写法），对应教程不动。
+  - `ProfileMeta` 加 `signature`（按 D10 反序列化即净化）；`save_profile` 经 `carry_over_meta` 沿用旧署名；新命令 `set_profile_signature` 校验权益后写入。
+  - `commands/license.rs`：启动读 `{app_data_dir}/license.jws`，内存只存原文、每次查询按当前时间重新验签（运行中到期自动失效）；`get_license_status` 暴露给前端。
+  - 前端 `panel/signature.ts` 判定水印取值，面板根节点有权益且署名非空时写 `data-signature`，CSS `content: attr(data-signature)` 覆盖；设置 → 配置文件在有权益时多一栏「水印署名」，失焦或回车写盘，改默认配置先另存。
+  - 开发公钥两把：本地 billing 的开发密钥与 flair 样例密钥；样例许可证 `packages/crypto/license-dev-sample.jws` 拷成 `license.jws` 即可在开发构建里试署名。
+  - 说明书 `manual/profiles.md` 补署名一段，教程不动；`architecture.md` 存储路径表加 `license.jws`，`profile-format.md` 写字段与读写规则。
 - **Acceptance:** 有权益时改署名水印立刻变、切配置跟着换；无权益时界面无任何署名入口、水印是默认值、`.qzh` 里已有的署名原样保留；导出再导入署名不丢；超长与控制字符被净化。
 - **Test:** `qzh-profile` 单测覆盖净化与缺字段反序列化；前端 `pnpm test:ui` 覆盖有 / 无权益两种渲染；Windows 真机看一次横竖版水印。
 - **Rollback:** 字段带 `serde(default)`、不升 schema，回退版本时旧版忽略该字段，配置不受损。
 - **Depends on:** T1。
+- **Done:** 单测：`qzh-profile` 净化 / 缺字段 / 反序列化截断 / 往返 4 条，主应用 `carry_over_meta` 4 条与许可证状态 4 条，crypto 补样例许可证 1 条，`pnpm test:ui` 4 条；clippy、tsc、oxlint、oxfmt 全过。**真机未验**：mac 上没有 WebView2 调试通道，横竖版水印与设置栏的实跑并入 T3 联调一起过。
 
 ### T3 — 激活链路与状态面板 · 进度: 未开始
 
 - **Fixes:** I6、I7
 - **Change:**
-  - `src-tauri` 加 HTTP 客户端（复用 updater 依赖树里已有的 `reqwest`，走 rustls）与 `activate_license` 命令：按 D14 取协议版本，`POST {base}/billing/licenses/activations`，请求体 `{ code, agreementVersion?, licenseId? }`（重装时带上本地已有的 `jti`）；成功响应 `{ licenseId, license, issuedCount, issueLimit, expiresAt? }`，先验签 `license` 再落盘到 `{app_data_dir}/license.jws`，刷新权益状态。
-  - 错误按响应体 `error.code` 映射：`REDEMPTION_CODE_NOT_FOUND`、`LICENSE_CODE_TYPE_MISMATCH` → 码无效；`REDEMPTION_CODE_VOID` / `REDEMPTION_CODE_EXPIRED` → 已作废 / 已过期；`LICENSE_REISSUE_LIMIT` → 重下发次数用完；`AGREEMENT_VERSION_OUTDATED` → 重新取协议请用户再勾一次；429 → 按 `Retry-After` 提示稍后再试；400 与未知码 → 通用失败并记 `traceId` 到日志；连接失败 → 网络不通。billing 限流是每 IP 每分钟 5 次、每天 20 次，界面不做自动重试。
-  - 启动时读 `license.jws` 离线验签，无文件或验签失败都按无权益处理并 warn 一次，不弹窗。
+  - `src-tauri` 加 HTTP 客户端（复用 updater 依赖树里已有的 `reqwest`，走 rustls）与 `activate_license` 命令：按 D14 取协议版本，`POST {base}/billing/licenses/activations`，请求体 `{ code, agreementVersion? }`；成功响应 `{ licenseId, license, reissueCount, reissueLimit, expiresAt? }`（计数不含首次激活：上限 3 即激活 1 次加重下发 3 次），先验签 `license` 再落盘到 `{app_data_dir}/license.jws`，刷新权益状态。
+  - 不带 `licenseId`：本地有许可证文件时再激活只会是换码，带上反而撞 `LICENSE_MISMATCH`；重装时文件已不在，同码不带它也按重下发处理。
+  - 错误按响应体 `error.details.code` 映射（`error.code` 只是 `CONFLICT` 这类通用码）：`REDEMPTION_CODE_NOT_FOUND`、`LICENSE_CODE_TYPE_MISMATCH` → 码无效；`REDEMPTION_CODE_VOID` → 已作废（首次与重下发都挡）；`REDEMPTION_CODE_EXPIRED` → 已过期（只挡首次激活）；`LICENSE_REISSUE_LIMIT` → 重下发次数用完；`AGREEMENT_VERSION_REQUIRED` / `AGREEMENT_VERSION_OUTDATED` → 按 `details.currentVersion` 刷新协议请用户再勾一次；`LICENSE_APP_UNAVAILABLE` / `AGREEMENT_UNAVAILABLE`（503）→ 服务暂不可用；429 → 按 `Retry-After` 提示稍后再试；其余与 `LICENSE_MISMATCH` → 通用失败并记 `traceId` 到日志；连接失败 → 网络不通。billing 限流是每 IP 每分钟 5 次、每天 20 次，界面不做自动重试。
   - 激活对话框（React）：兑换码输入、会员服务协议勾选与版本显示（正文用系统浏览器打开）、「激活需要联网一次」提示、错误分类文案；状态区显示许可证 id、激活时间、到期（永久或剩余天数）、已授权的「自定义署名」；入口按 D18。
-  - 产品承诺两处改为「除检查更新与激活兑换码外不联网」；`architecture.md` 存储路径表加 `license.jws`；说明书 `manual/settings.md` 补激活一段。
-- **Acceptance:** debug 构建对本地 billing 用测试码激活成功、重启后仍有权益、断网启动仍有权益；同码重下发拿到同一许可证 id，第四次显示次数用完；作废码、类型不符、协议过期、限流、断网各显示对应文案；uc 协议接口返回空数组时不显示勾选也能激活；不点激活的用户全程零网络请求（抓包或日志核）。
+  - 激活成功后更新 `LicenseState` 并通知前端刷新许可证状态（署名栏与水印即时出现）。
+  - 产品承诺两处改为「除检查更新与激活兑换码外不联网」；说明书 `manual/settings.md` 补激活一段。
+- **Acceptance:** debug 构建对本地 billing 用测试码激活成功、重启后仍有权益、断网启动仍有权益；同码重下发拿到同一许可证 id，第五次请求显示次数用完；作废码、类型不符、协议过期、限流、断网各显示对应文案；激活后不重启即出现署名栏，T2 的横竖版水印与设置栏一并实跑；uc 协议接口返回空数组时不显示勾选也能激活；不点激活的用户全程零网络请求（抓包或日志核）。
 - **Test:** 错误码映射与落盘读回写单测（HTTP 层用本地假服务）；真机按说明书走一遍激活。
 - **Rollback:** 激活入口可整体隐藏；已落盘的许可证不影响核心功能，回退版本时文件被忽略。
 - **Depends on:** T1、T2、billing L1 能在本地起（生产验收要 L1 上生产）。
@@ -140,7 +143,7 @@ billing L1 上生产 + 批次 ─────┘
 | 任务卡   | 预估      | 实际 | 偏差说明 |
 | -------- | --------- | ---- | -------- |
 | T1       | 0.8 会话  | ✅   |          |
-| T2       | 1 会话    |      |          |
+| T2       | 1 会话    | ✅   |          |
 | T3       | 1.5 会话  |      |          |
 | T4       | 0.5 会话  |      |          |
 | **合计** | **3.8 会话** |   |          |

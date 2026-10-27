@@ -131,6 +131,18 @@ pub(crate) fn set_active_path(app: &AppHandle, path: &str) {
     }
 }
 
+/// 把文件里已有、前端不负责的元信息带到要写入的 meta 上。
+///
+/// - `created_at`：前端传 0 时沿用旧值，新文件取当前时间。
+/// - `signature`：一律沿用旧值。前端自动保存每次从头拼 meta、不带署名，照抄才不会把署名清掉；
+///   没有权益的用户导入的配置也靠这里原样保留。改署名只走 [`set_profile_signature`]。
+fn carry_over_meta(meta: &mut ProfileMeta, old: Option<ProfileMeta>, now: u64) {
+    if meta.created_at == 0 {
+        meta.created_at = old.as_ref().map_or(now, |m| m.created_at);
+    }
+    meta.signature = old.map(|m| m.signature).unwrap_or_default();
+}
+
 #[tauri::command]
 pub fn save_profile(
     app: AppHandle,
@@ -146,14 +158,7 @@ pub fn save_profile(
 
     let file_path = dir.join(format!("{}.qzh", sanitize_filename(&name)));
 
-    // 若文件已存在，保留原始 created_at；否则设为当前时间
-    if profile.meta.created_at == 0 {
-        if let Some(old_meta) = load_meta_from_file(&file_path) {
-            profile.meta.created_at = old_meta.created_at;
-        } else {
-            profile.meta.created_at = now;
-        }
-    }
+    carry_over_meta(&mut profile.meta, load_meta_from_file(&file_path), now);
     profile.meta.updated_at = now;
     profile.meta.app_version = env!("CARGO_PKG_VERSION").to_string();
     profile.schema_version = CURRENT_SCHEMA_VERSION;
@@ -171,6 +176,26 @@ pub fn save_profile(
     state.0.set_rules(rules);
     state.0.set_hotkeys(hotkeys);
     Ok(path)
+}
+
+/// 改指定配置的水印署名，返回净化后的值。需要 `flair.signature` 权益；界面在没有权益时
+/// 本来就不露入口，这里再挡一道只是不让绕过界面直接调命令的写进去。
+#[tauri::command]
+pub fn set_profile_signature(
+    app: AppHandle,
+    license: State<super::license::LicenseState>,
+    name: String,
+    signature: String,
+) -> Result<String, String> {
+    if !license.grants(crypto::ENT_SIGNATURE) {
+        return Err("没有自定义署名的权益".into());
+    }
+    let path = profile_path_for_name(&profiles_dir(&app)?, &name);
+    let mut profile = read_profile_from_file(&path)?;
+    profile.meta.signature = qzh_profile::sanitize_signature(&signature);
+    profile.meta.updated_at = now_secs();
+    write_profile_file_to_path(&path, &profile)?;
+    Ok(profile.meta.signature)
 }
 
 /// 加载期净化的待提醒结果。启动加载先于窗口创建，事件会丢，故一律先存这里，
@@ -365,6 +390,7 @@ pub(crate) fn create_default_profile(
             created_at: now,
             updated_at: now,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
+            signature: String::new(),
         },
         rules: factory_default_rules(),
         hotkeys: Hotkeys::default(),
