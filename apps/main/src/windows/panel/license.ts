@@ -94,7 +94,7 @@ export interface MembershipAgreement {
 
 /** 后端 `ActivationError`，按 `kind` 区分；带字段的几种是 serde 的结构体变体。 */
 export type ActivationError =
-  | { kind: 'invalid_code' | 'void' | 'expired' | 'reissue_limit' }
+  | { kind: 'invalid_code' | 'void' | 'expired' | 'license_expired' | 'reissue_limit' }
   | { kind: 'already_activated'; license: LicenseStatus | null }
   | { kind: 'agreement_changed'; current_version: string | null }
   | { kind: 'unavailable' | 'network' | 'clock_skew' | 'invalid_license' }
@@ -109,6 +109,8 @@ export function activationErrorText(err: ActivationError | undefined): string {
       return '这张兑换码已作废';
     case 'expired':
       return '这张兑换码已过期';
+    case 'license_expired':
+      return '这张兑换码的许可证已到期，不能再重新激活';
     case 'reissue_limit':
       return '这张兑换码的重新激活次数已用完';
     case 'already_activated':

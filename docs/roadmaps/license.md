@@ -91,7 +91,7 @@ Goal: 亲友在应用内输入兑换码、联网一次，换回 billing 签发�
 - **Test:** `cargo test -p crypto`，用例在测试里现签（`ed25519-dalek` 的 `SigningKey`），不入库私钥；L1 落地后补一条本地 billing 真实签出的许可证作夹具，钉住两边编码一致。
 - **Rollback:** 应用里还没有调用方，回退即还原文件。
 - **Depends on:** D11 与 c1 对齐。
-- **Done:** `cargo test -p crypto` 27 条全过，`license.rs` / `kid.rs` 行与函数覆盖 100%；去掉 `typ`、`aud` 校验的变异让 3 条用例变红。夹具改用 xwink-console 的 jose 加 `computeKeyId` 在 Node 里签（跨实现核对，比本地 billing 样本更早到位）；`iat` 允许领先本机 24 小时（见 D9）。发版构建实测：未设置 / 空串 / `[]` 失败，`FLAIR_LICENSE_ALLOW_NO_KEYS=1` 豁免通过，`kid` 错一位失败，正确 JWK 编入。GitHub Secret `FLAIR_LICENSE_PUBKEYS` 已建（2026-10-27），billing 生产公钥到位前值为 `[]`——这期间任何发版构建都会失败，T4 前换成生产公钥 JWK。
+- **Done:** `cargo test -p crypto` 27 条全过，`license.rs` / `kid.rs` 行与函数覆盖 100%；去掉 `typ`、`aud` 校验的变异让 3 条用例变红。夹具改用 xwink-console 的 jose 加 `computeKeyId` 在 Node 里签（跨实现核对，比本地 billing 样本更早到位）；`iat` 允许领先本机 24 小时（见 D9）。发版构建实测：未设置 / 空串 / `[]` 失败，`FLAIR_LICENSE_ALLOW_NO_KEYS=1` 豁免通过，`kid` 错一位失败，正确 JWK 编入。GitHub Secret `FLAIR_LICENSE_PUBKEYS` 已填生产公钥（2026-10-27，billing 0.6.0，`kid` `fgvgx7fMl-G-xiO0AFwZZK`，已按 `x` 重算核对、实编发版构建通过）。
 
 ### T2 — 署名字段与水印渲染 · 进度: 已完成（2026-10-27）
 
@@ -114,7 +114,7 @@ Goal: 亲友在应用内输入兑换码、联网一次，换回 billing 签发�
 - **Change:**
   - `src-tauri` 加 HTTP 客户端（复用 updater 依赖树里已有的 `reqwest`，走 rustls）与 `activate_license` 命令：按 D14 取协议版本，`POST {base}/billing/licenses/activations`，请求体 `{ code, agreementVersion? }`；成功响应 `{ licenseId, license, reissueCount, reissueLimit, expiresAt? }`（计数不含首次激活：上限 3 即激活 1 次加重下发 3 次），先验签 `license` 再落盘到 `{app_data_dir}/license.jws`，刷新权益状态。
   - 不带 `licenseId`：本地有许可证文件时再激活只会是换码，带上反而撞 `LICENSE_MISMATCH`；重装时文件已不在，同码不带它也按重下发处理。
-  - 错误按响应体 `error.details.code` 映射（`error.code` 只是 `CONFLICT` 这类通用码）：`REDEMPTION_CODE_NOT_FOUND`、`LICENSE_CODE_TYPE_MISMATCH` → 码无效；`REDEMPTION_CODE_VOID` → 已作废（首次与重下发都挡）；`REDEMPTION_CODE_EXPIRED` → 已过期（只挡首次激活）；`LICENSE_REISSUE_LIMIT` → 重下发次数用完；`AGREEMENT_VERSION_REQUIRED` / `AGREEMENT_VERSION_OUTDATED` → 按 `details.currentVersion` 刷新协议请用户再勾一次；`LICENSE_APP_UNAVAILABLE` / `AGREEMENT_UNAVAILABLE`（503）→ 服务暂不可用；429 → 按 `Retry-After` 提示稍后再试；其余与 `LICENSE_MISMATCH` → 通用失败并记 `traceId` 到日志；连接失败 → 网络不通。billing 限流是每 IP 每分钟 5 次、每天 20 次，界面不做自动重试。
+  - 错误按响应体 `error.details.code` 映射（`error.code` 只是 `CONFLICT` 这类通用码）：`REDEMPTION_CODE_NOT_FOUND`、`LICENSE_CODE_TYPE_MISMATCH` → 码无效；`REDEMPTION_CODE_VOID` → 已作废（首次与重下发都挡）；`REDEMPTION_CODE_EXPIRED` → 已过期（只挡首次激活）；`LICENSE_EXPIRED`（410，许可证到期后再重下发）→ 许可证已到期；`LICENSE_REISSUE_LIMIT` → 重下发次数用完；`AGREEMENT_VERSION_REQUIRED` / `AGREEMENT_VERSION_OUTDATED` → 按 `details.currentVersion` 刷新协议请用户再勾一次；`LICENSE_APP_UNAVAILABLE` / `AGREEMENT_UNAVAILABLE`（503）→ 服务暂不可用；429 → 按 `Retry-After` 提示稍后再试；其余与 `LICENSE_MISMATCH` → 通用失败并记 `traceId` 到日志；连接失败 → 网络不通。billing 限流是每 IP 每分钟 5 次、每天 20 次，界面不做自动重试。
   - 激活对话框（React）：兑换码输入、会员服务协议勾选与版本显示（正文用系统浏览器打开）、「激活需要联网一次」提示、错误分类文案；状态区显示许可证 id、激活时间、到期（永久或剩余天数）、已授权的「自定义署名」；入口按 D18。
   - 许可证可叠加（D19）：`LicenseState` 存全部原文，`summarize` 按权益键合并有效期；`get_license_status` 返回 `{ entitlements, licenses }`。激活写 `licenses/<码哈希>.jws` 后重读目录，命令返回 `{ granted, summary }`，前端据此即时显示署名栏与水印，并按 D22 列出这张码带来的权益与「前往」入口。
   - 重复兑换（D21）：同码文件已存在且未带 `overwrite` 时直接返回 `already_activated`（附现有许可证），不发请求；用户确认覆盖后带 `overwrite: true` 重发。
@@ -166,10 +166,16 @@ billing L1 上生产 + 批次 ─────┘
 - **R2：两边编码细节不一致**（base64url 填充、`ent` 形状、`exp` 缺省）— 单测只能证明自洽，L1 落地后用本地 billing 真实签出的许可证补夹具钉住。
 - **R3：公钥轮换止血让旧许可证全部失效**（D8）— 亲友在重下发上限内可自助恢复。
 - **R4：漏配 Secrets** — D8 让发版构建直接失败，不会发出坏版本。
-- **R5：生产公钥到位前要发别的版本** — Secret 现在是 `[]`，发版构建会被 D8 挡下，不会带着兑换全失败的入口出去。T4 之前确要发别的改动，只能等生产公钥换进 Secret，或另开分支不含兑换码改动。
+- **R5：T4 验收前发版** — 生产公钥已在 Secret，发版构建不再被挡；但生产码未建、Windows 未验收，作者定等 T4 后再发（2026-10-27）。
 
 ## 8. 范围外 / Out of scope · follow-ups
 
 - 认领到 xwink 账号（billing L2 之后，随 flair 接入 xwink 登录另立）。
 - 其他亲友专属功能（宏录制回放、随机抖动、条件配置集、桌宠动画包），见 README「接下来」。
 - 到期提醒 banner：首批码都是永久的，出现有期限的批次再做。
+
+## 9. 交接 / Handoff
+
+- **进度（2026-10-27）：** T1–T3 完成并推送；`/code-review`（范围 `v0.5.0..`）10 条已修；GitHub Secret 已填 billing 0.6.0 的生产公钥；CHANGELOG `[Unreleased]` 已按 D23 写好。产品页 `@xwink/ui` 升到 beta.16（beta.11 被私有源的旧版本自动清理挤掉，作者已关掉该清理），Site 工作流恢复绿。
+- **遗留：** 重复兑换的确认框只有单测、未实跑；Windows 上的署名水印与激活未实跑（WebView2、系统证书校验）。
+- **下一步入口 = T4：** 作者定生产的 flair 码等能在 Windows 上验收时再建（向 xwink-console 会话要，`flair.signature`、永久、重下发 3 次，生产写入逐次经作者点头）→ Windows 发版候选构建用第一张真码激活、填署名、重启、再兑换一次看覆盖确认 → 按 release 发版，推 tag 前取得作者授权。本地联调起法见 D13（xwink-console `pnpm db:up && pnpm service:all`），真实契约测试 `FLAIR_TEST_LICENSE_CODE=<本地码> cargo test -p flair-bloom live_activation -- --ignored`。

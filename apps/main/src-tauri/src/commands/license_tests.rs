@@ -142,6 +142,10 @@ fn business_codes_map_to_kinds() {
         ActivationError::ReissueLimit
     );
     assert_eq!(
+        billing_error(410, "LICENSE_EXPIRED", none.clone()),
+        ActivationError::LicenseExpired
+    );
+    assert_eq!(
         billing_error(503, "LICENSE_APP_UNAVAILABLE", none.clone()),
         ActivationError::Unavailable
     );

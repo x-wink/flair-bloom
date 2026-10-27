@@ -207,6 +207,8 @@ pub enum ActivationError {
     Void,
     /// 码已过期（只挡首次激活）。
     Expired,
+    /// 这张码的许可证已到期，不能再重新激活。
+    LicenseExpired,
     /// 这张码本机已经激活过；带上它现有的许可证（验得过时），由用户决定是否覆盖。
     AlreadyActivated {
         /// 本机已有的那张许可证。
@@ -456,6 +458,7 @@ fn map_activation_error(status: u16, retry_after: Option<&str>, body: &[u8]) -> 
         }
         Some("REDEMPTION_CODE_VOID") => ActivationError::Void,
         Some("REDEMPTION_CODE_EXPIRED") => ActivationError::Expired,
+        Some("LICENSE_EXPIRED") => ActivationError::LicenseExpired,
         Some("LICENSE_REISSUE_LIMIT") => ActivationError::ReissueLimit,
         Some("AGREEMENT_VERSION_REQUIRED" | "AGREEMENT_VERSION_OUTDATED") => {
             ActivationError::AgreementChanged {
