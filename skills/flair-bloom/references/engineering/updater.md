@@ -28,7 +28,7 @@ gh-proxy 是第三方免费服务，它挂了就退到 GitHub 直连（国内约
 | ------------ | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 安装包托管   | GitHub Releases                    | `.exe` / `.msi` / `.nsis.zip` + `.sig`                                                                                                             |
 | updater 端点 | GitHub Releases                    | `tauri-action` 每次发布上传 `latest.json`（Tauri 标准 manifest）                                                                                   |
-| 私钥         | GitHub Actions Secrets             | `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)`；Ed25519 许可证私钥同样只在签发 / 构建时注入                                                                |
+| 密钥         | GitHub Actions Secrets             | `TAURI_SIGNING_PRIVATE_KEY(_PASSWORD)`；许可证公钥 `FLAIR_LICENSE_PUBKEYS`（私钥在 billing，见 [profile-format](profile-format.md)） |
 | CI 构建      | GitHub Actions `release.yml`       | 推 `v*` tag 触发 Windows x64 构建、发布 Draft                                                                                                      |
 | Release 正文 | `CHANGELOG.md`                     | `scripts/extract-changelog.ts` 提取当前版本节                                                                                                      |
 | 产品页       | app.xwink.fun/flair-bloom          | `apps/site` 纯静态 SSG；域名与 server 块归 xwink-console 仓的 app-site 单元                                                                        |

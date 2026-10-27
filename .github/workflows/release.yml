@@ -69,6 +69,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # 未配置的 secret 展开成空串，crypto 的 build script 会让构建失败而不是发出验不了许可证的版本
+          FLAIR_LICENSE_PUBKEYS: ${{ secrets.FLAIR_LICENSE_PUBKEYS }}
         with:
           projectPath: apps/main
           tagName: ${{ github.ref_name }}

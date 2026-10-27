@@ -16,9 +16,9 @@
 ```
 
 - `FileHeader`（19 字节）定义在 `packages/qzh-format/src/header.rs`；`magic + version + flags` 作为 AAD，文件头篡改即验证失败。
-- 密钥派生 HKDF-SHA256，输入为内嵌 32 字节应用常量。**AES 主密钥当前为编译期常量占位符**（`packages/crypto/src/aes.rs` 顶部 `MASTER_KEY`），发布前需替换为 build script 注入的真实密钥。
+- 密钥派生 HKDF-SHA256，输入为内嵌 32 字节应用常量（`packages/crypto/src/aes.rs` 的 `MASTER_KEY`）。它只作混淆、不保密、不轮换：首个版本起所有用户的 `.qzh` 都用它加密，换掉会让老配置与跨版本分享全部解不开；仓库公开，密钥也能从二进制取出，换了没有收益。真要轮换时用文件头 `flags` 记密钥编号并回退旧钥解密。
 - 高层入口：`qzh_format::read_encrypted(path)` / `write_encrypted(path, &T)` 封装 header + aad + decrypt + parse / serialize + encrypt + atomic-rename；`qzh_profile::load_from_path` / `save_to_path` 在此之上叠加 schema 迁移、`clamp_intervals` 与业务校验。
-- 宏序列文件复用同一格式，schema 由 `macro_seq.rs` 定义（`MAX_STEPS = 256`，亲友功能）。
+- 宏序列文件复用同一格式，schema 由 `macro_seq.rs` 定义（`MAX_STEPS = 256`）。
 
 ## JSON schema 与迁移（策略 B）
 
@@ -56,9 +56,12 @@
 
 启动时先检查协议：store 里 `{ agreed, agreed_at, agreement_version, app_version_at_agree }`，未同意或 `agreement_version` 与代码硬编码的 `AGREEMENT_VERSION`（`bootstrap/agreement.rs`）不一致时面板展示协议页并屏蔽其他路由；正文滚动到底才激活同意；拒绝则退出。正文 `apps/main/src/assets/EULA.md` 以 `?raw` 内联进包。条款要点：使用风险自担、仅供个人娱乐与学习、禁止商用、免责、知识产权。当前协议 v1.4。
 
-## 许可证（Ed25519 离线校验）
+## 许可证（billing 离线签发）
 
-- payload：`version u8` / `issue_time u64`（防时钟回拨下界校验）/ `expiry u64` / `features u32`（位掩码，见 `license.rs::feature_bits`）。
-- 兑换码 `QZHUA-XXXXX-XXXXX-XXXXX-XXXXX`（Base32：64 字节签名 + JSON payload）。
-- 私钥仅在 `apps/keygen` 使用、寄存 GitHub Secrets，不进主应用二进制；主应用只内置校验公钥，**当前为全零占位，发布前替换**。
-- 功能分层：核心功能（长按 / Toggle 连发、键鼠滚轮、配置管理、自动更新）免费；亲友专属（宏录制回放、随机抖动、条件配置集、桌宠扩展动画包）由 `feature_bits` 控制。`MOUSE_BURST` 位预留但当前不限制——鼠标连发对所有用户开放。激活 UI 与功能开关尚未实现，设计见 `docs/roadmaps/license.md`（draft）。
+- 格式：EdDSA（Ed25519）JWS 紧凑串，与 xwink-console 的 billing 约定。头部 `alg: EdDSA`、`typ: xwink-license+jwt`、`kid`；载荷 `iss: billing`、`aud: flair`、`jti`（许可证 id）、`ent`（权益键数组）、`iat`，永久许可证不带 `exp`。`crypto::verify_license` 依次校验 `alg`、`typ`、`kid`、签名、`iss`、`aud`、时间；`typ` 把 xwink 的权益凭证（`xwink-entitlement+jwt`）挡在外面。
+- 时间：`iat` 允许领先本机 24 小时，超出判时钟回拨——Windows 上时区设错让系统 UTC 偏几小时很常见，回拨本来只是顺手的一道；`exp` 到点即过期。
+- 公钥：私钥只在 billing。`crypto/build.rs` 把公钥按 `kid` 编进二进制，`kid` = SPKI DER 的 SHA-256 做 base64url 取前 22 字符（与 billing 同算法），构建时由 JWK 的 `x` 重算核对，不一致即失败。
+  - `FLAIR_LICENSE_PUBKEYS`：billing 交付的 JWK 数组，`release.yml` 从同名 Secret 注入。发版构建（无 `debug_assertions`）缺失或为空串即失败；本地发版构建不需要激活时显式设为 `[]`。
+  - `packages/crypto/license-dev-keys.json`：本地 billing 开发密钥的公钥，只在 `debug_assertions` 下编入。
+  - 轮换：新版本加新钥，旧钥只验不签；止血时新版本移除旧钥，该钥签出的许可证全部失效、要重新激活。
+- 权益：只有自定义水印署名 `flair.signature`（`crypto::ENT_SIGNATURE`）一项；其余功能对所有用户开放。激活与署名尚未接入应用，进度见 `docs/roadmaps/license.md`。

@@ -9,7 +9,6 @@ members = [
     "packages/win-input",
     "packages/burst-engine",
     "packages/win-driver",
-    "apps/keygen",
     "apps/main/src-tauri",
 ]
 resolver = "2"

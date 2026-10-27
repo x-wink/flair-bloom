@@ -45,7 +45,7 @@ packages/crypto      packages/migrate
          ↑                    │
     packages/qzh-profile ─────┘
          ↑
-    apps/main/src-tauri      apps/keygen（依赖 crypto）
+    apps/main/src-tauri
 
 packages/win-input  ← packages/burst-engine ← apps/main/src-tauri
 packages/win-driver / win-sysinfo / resource-integrity ← apps/main/src-tauri

@@ -4,7 +4,7 @@
 
 ```sh
 pnpm dev                        # 启动 Tauri 开发模式（热重载）
-pnpm build                      # 构建生产包
+pnpm build                      # 构建生产包（需 FLAIR_LICENSE_PUBKEYS，本地不需要激活时设为 []）
 pnpm lint / pnpm lint:fix       # oxlint 检查 / 自动修复前端代码（范围 apps/main/src）
 pnpm format / pnpm format:check # oxfmt 格式化 / 格式检查（CI 用）
 pnpm skills:check               # 教程 ↔ 说明书一一对应 + SKILL.md / CLAUDE.md / README.md 相对链接存在
@@ -99,9 +99,8 @@ apps/main/src/windows/panel/    # 面板窗口（React）
   tour/                         # 新手引导：types.ts、TourRunner.tsx、useTourProgress.ts、tours/<id>.ts
 apps/main/src/windows/float/    # 浮窗（panel-float.html）
 apps/main/src/assets/           # EULA.md、图标（SVG 源文件 currentColor / 1em）
-apps/keygen/                    # 兑换码生成 CLI
 apps/site/                      # 产品页（独立 pnpm 项目，不在根 workspace，见其 README）
-packages/crypto/src/            # aes.rs（AES-256-GCM）、license.rs（Ed25519 verify_license + LicensePayload）
+packages/crypto/src/            # aes.rs（AES-256-GCM）、license.rs（billing 许可证 JWS 验签）、kid.rs；build.rs 编入公钥列表
 packages/migrate/src/lib.rs     # run_migrations() 泛型迁移运行器
 packages/qzh-format/src/        # header.rs（FileHeader）、lib.rs（read_encrypted / write_encrypted）
 packages/qzh-profile/src/       # key_id.rs、profile.rs（Profile / BurstRule + validate）、key_policy.rs、macro_seq.rs、schema_migrate.rs、lib.rs

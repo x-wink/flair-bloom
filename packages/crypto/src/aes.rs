@@ -1,7 +1,6 @@
 //! AES-256-GCM 对称加解密。
 //!
-//! 主密钥由编译期常量注入（发布前需替换为 build-script 注入的真实密钥），
-//! 经 HKDF-SHA256 派生为 32 字节会话密钥；nonce 每次随机生成、随密文一并落盘。
+//! 主密钥是编译期常量，经 HKDF-SHA256 派生为 32 字节会话密钥；nonce 每次随机生成、随密文一并落盘。
 
 use aes_gcm::{
     aead::{Aead, KeyInit},
@@ -13,7 +12,7 @@ use sha2::Sha256;
 use thiserror::Error;
 
 const APP_SALT: &[u8] = b"FlairBloom-AES256-GCM-v1";
-// TODO(security): replace with build-script-injected key before release
+// 只作混淆、不保密、不轮换：所有已发版本的 .qzh 都用它加密，换掉老配置就解不开（license 路线图 D17）
 const MASTER_KEY: &[u8; 32] = b"FlairBloom_MasterKey_Placeholder";
 
 /// AES-256-GCM 加解密失败。错误信息刻意不暴露细节，避免给攻击者提供 oracle。
