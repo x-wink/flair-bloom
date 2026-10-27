@@ -162,7 +162,8 @@
 - 产品页补实拍截图，站内反馈入口
 - 桌宠：桌面上一只随连发状态动的小东西，点击穿透、可拖、右键菜单（设计稿见 [pet-mode](docs/roadmaps/pet-mode.md)）
 - 界面迁到 Vue 与 xwink 组件库，新手教程沉淀进组件库复用（路线图见 [vue-migration](docs/roadmaps/vue-migration.md)）
-- 亲友专属功能与兑换码激活：宏录制回放、随机抖动、按前台游戏自动切配置（设计稿见 [license](docs/roadmaps/license.md)）
+- 亲友兑换码激活：面板水印改成自己写的署名（路线图见 [license](docs/roadmaps/license.md)）
+- 宏录制回放、随机抖动、按前台游戏自动切配置
 - 坏版本降险：远端最低可用版本、分批灰度、静默更新延迟安装
 - 代码签名（Azure Trusted Signing），不再被 SmartScreen 拦
 - Mac 版；多平台下载页
