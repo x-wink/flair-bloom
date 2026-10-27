@@ -1,8 +1,9 @@
 //! 把许可证公钥列表编进 `$OUT_DIR/license_keys.rs`。
 //!
-//! - `FLAIR_LICENSE_PUBKEYS`：billing 交付的 JWK 数组（`[{kty,crv,x,kid}]`），发版构建必填。
-//!   缺失或为空串即构建失败——GitHub 未配置的 secret 展开成空串，漏配时不能悄悄发出一个
-//!   所有激活都失败的版本。本地发版构建不需要激活时显式写 `[]`。
+//! - `FLAIR_LICENSE_PUBKEYS`：billing 交付的 JWK 数组（`[{kty,crv,x,kid}]`），发版构建必须
+//!   至少一把。缺失、空串（GitHub 未配置的 secret 展开成空串）或 `[]` 都让构建失败：漏配时
+//!   不能悄悄发出一个兑换码入口还在、所有激活都失败的版本。
+//! - `FLAIR_LICENSE_ALLOW_NO_KEYS=1`：本地打不需要兑换的发版包时的显式豁免，CI 不设。
 //! - `license-dev-keys.json`：本地 billing 开发密钥的公钥，只在 `debug_assertions` 下编入，
 //!   发版构建不认开发密钥签的许可证。
 
@@ -14,21 +15,25 @@ use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
 mod kid;
 
 const ENV_KEYS: &str = "FLAIR_LICENSE_PUBKEYS";
+const ENV_ALLOW_NO_KEYS: &str = "FLAIR_LICENSE_ALLOW_NO_KEYS";
 const DEV_KEYS_FILE: &str = "license-dev-keys.json";
 
 fn main() {
     println!("cargo:rerun-if-env-changed={ENV_KEYS}");
+    println!("cargo:rerun-if-env-changed={ENV_ALLOW_NO_KEYS}");
     println!("cargo:rerun-if-changed={DEV_KEYS_FILE}");
     println!("cargo:rerun-if-changed=src/kid.rs");
 
     let debug = env::var_os("CARGO_CFG_DEBUG_ASSERTIONS").is_some();
+    let allow_no_keys = env::var(ENV_ALLOW_NO_KEYS).is_ok_and(|v| v == "1");
     let mut keys = match env::var(ENV_KEYS) {
         Ok(json) if !json.trim().is_empty() => parse_jwks(&json, ENV_KEYS),
-        _ if debug => Vec::new(),
-        _ => panic!(
-            "发版构建必须设置 {ENV_KEYS}（billing 许可证公钥的 JWK 数组）；本地发版构建不需要激活时显式设为 []"
-        ),
+        _ => Vec::new(),
     };
+    assert!(
+        debug || allow_no_keys || !keys.is_empty(),
+        "发版构建的 {ENV_KEYS} 至少要有一把 billing 许可证公钥（JWK 数组）；本地打不需要兑换的包时设 {ENV_ALLOW_NO_KEYS}=1"
+    );
     if debug {
         let json = fs::read_to_string(DEV_KEYS_FILE)
             .unwrap_or_else(|e| panic!("读取 {DEV_KEYS_FILE} 失败：{e}"));

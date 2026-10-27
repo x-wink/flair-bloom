@@ -14,7 +14,7 @@ import { VolumeIcon } from '../components/icons';
 import Tabs from '../components/Tabs';
 import { useToast } from '../components/Toast';
 import type { ConflictSeverity } from '../conflicts';
-import { SIGNATURE_MAX_CHARS } from '../signature';
+import { clampSignature } from '../license';
 import DialogShell from './DialogShell';
 import ProfileCardList, { type SettingsProfileEntry } from './ProfileCardList';
 import { SECT_PRESETS, type ThemeMode, type ThemeSettings } from '../theme';
@@ -207,10 +207,9 @@ function SignatureRow({
         type="text"
         className="settings-text-input"
         value={draft}
-        maxLength={SIGNATURE_MAX_CHARS}
         placeholder="花间游悟 · 斗转星移"
         aria-label="面板背景署名"
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={(e) => setDraft(clampSignature(e.target.value))}
         onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === 'Enter') e.currentTarget.blur();

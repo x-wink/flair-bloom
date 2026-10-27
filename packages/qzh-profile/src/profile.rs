@@ -70,15 +70,32 @@ pub struct ProfileMeta {
 /// 署名的最大字符数（按 Unicode 标量计，不按字节）。竖版面板宽度下 16 个汉字刚好一行。
 pub const MAX_SIGNATURE_CHARS: usize = 16;
 
-/// 去掉控制字符与首尾空白，截到 [`MAX_SIGNATURE_CHARS`] 个字符。
+/// 去掉控制字符、不可见的格式字符与首尾空白，截到 [`MAX_SIGNATURE_CHARS`] 个字符。
 pub fn sanitize_signature(raw: &str) -> String {
-    let cleaned: String = raw.chars().filter(|c| !c.is_control()).collect();
+    let cleaned: String = raw
+        .chars()
+        .filter(|&c| !c.is_control() && !is_invisible_format(c))
+        .collect();
     let truncated: String = cleaned.trim().chars().take(MAX_SIGNATURE_CHARS).collect();
     truncated.trim_end().to_string()
 }
 
+/// 双向文字控制符与零宽字符：混进分享来的署名会让水印倒排或看不见。
+fn is_invisible_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
+    )
+}
+
+/// 别的工具或手改的文件可能写 `null`；外观字段不能让整份配置读不出来，按空串处理。
 fn deserialize_signature<'de, D: serde::Deserializer<'de>>(d: D) -> Result<String, D::Error> {
-    String::deserialize(d).map(|s| sanitize_signature(&s))
+    Option::<String>::deserialize(d).map(|s| sanitize_signature(s.as_deref().unwrap_or_default()))
 }
 
 /// 单条连发规则：把 `trigger_key` 触发的事件转换为针对 `target_key` 的连发输出。

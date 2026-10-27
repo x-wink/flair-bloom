@@ -20,12 +20,14 @@ const SUPPORT_URL: &str = "https://app.xwink.fun/flair-bloom/#support";
 /// 换个人就失效。
 const QQ_MAIL_URL: &str = "https://mail.qq.com/";
 
-/// 用系统默认程序打开外部链接：`support` 是产品页的支持一节，`mail` 是 QQ 邮箱网页版。只认这几个
+/// 用系统默认程序打开外部链接：`support` 是产品页的支持一节，`mail` 是 QQ 邮箱网页版，`membership`
+/// 是 xwink 会员服务协议正文。只认这几个
 /// 写死的目标、前端只传名字：没装 opener 插件，也就不给 WebView 开「打开任意网址」的口子。
 #[tauri::command]
 pub fn open_link(target: String) -> Result<(), String> {
     let link = match target.as_str() {
         "support" => SUPPORT_URL,
+        "membership" => super::license::MEMBERSHIP_TERMS_URL,
         "mail" => QQ_MAIL_URL,
         other => return Err(format!("未知链接: {other}")),
     };

@@ -37,7 +37,7 @@ use commands::{
         set_input_mode, set_rules, EngineState,
     },
     import_profile::{import_external_config, preview_import, scan_import_configs},
-    license::{get_license_status, LicenseState},
+    license::{activate_license, get_license_status, get_membership_agreement, LicenseState},
     log::{log_from_frontend, open_app_dir},
     profile::{
         delete_profile, export_profile, fork_active_profile, get_active_profile_path,
@@ -184,6 +184,8 @@ pub fn run() {
             save_profile,
             set_profile_signature,
             get_license_status,
+            get_membership_agreement,
+            activate_license,
             load_profile,
             list_profiles,
             init_default_profile,

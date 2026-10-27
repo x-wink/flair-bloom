@@ -171,3 +171,21 @@ fn meta_signature_round_trips() {
     let back: Profile = serde_json::from_value(serde_json::to_value(&p).unwrap()).unwrap();
     assert_eq!(back.meta.signature, "亲友 · 小花");
 }
+
+#[test]
+fn sanitize_signature_strips_bidi_and_zero_width() {
+    assert_eq!(
+        sanitize_signature("\u{202E}花小\u{200B}\u{2066}x\u{FEFF}"),
+        "花小x"
+    );
+    assert_eq!(sanitize_signature("\u{200B}\u{200B}"), "");
+}
+
+#[test]
+fn meta_null_signature_deserializes_to_empty() {
+    let meta: ProfileMeta = serde_json::from_value(json!({
+        "name": "a", "created_at": 1, "updated_at": 2, "app_version": "0.5.0", "signature": null
+    }))
+    .unwrap();
+    assert_eq!(meta.signature, "");
+}

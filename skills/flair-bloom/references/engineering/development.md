@@ -4,7 +4,7 @@
 
 ```sh
 pnpm dev                        # 启动 Tauri 开发模式（热重载）
-pnpm build                      # 构建生产包（需 FLAIR_LICENSE_PUBKEYS，本地不需要激活时设为 []）
+pnpm build                      # 构建生产包（需 FLAIR_LICENSE_PUBKEYS 至少一把公钥；本地不需要兑换时设 FLAIR_LICENSE_ALLOW_NO_KEYS=1）
 pnpm lint / pnpm lint:fix       # oxlint 检查 / 自动修复前端代码（范围 apps/main/src）
 pnpm format / pnpm format:check # oxfmt 格式化 / 格式检查（CI 用）
 pnpm skills:check               # 教程 ↔ 说明书一一对应 + SKILL.md / CLAUDE.md / README.md 相对链接存在

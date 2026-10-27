@@ -112,7 +112,7 @@ AltGr 布局（德语 / 法语 / 波兰语等）把右 Alt 当 AltGr，键盘驱
 | 配置文件（`.qzh`） | `{app_data_dir}/profiles/`                                             | 导入 / 导出经文件对话框，不暴露内部路径                    |
 | 自选提示音         | `{app_data_dir}/sounds/`                                               | 导入时复制进来，settings.json 只存文件名                   |
 | 应用设置           | `{app_data_dir}/settings.json`                                         | `tauri-plugin-store`；复用 `packages/migrate` 迁移基础设施 |
-| 兑换码许可证       | `{app_data_dir}/license.jws`                                           | billing 签发的原文；启动读入，每次查询按当前时间重新验签   |
+| 兑换码许可证       | `{app_data_dir}/licenses/<码哈希>.jws`                                 | 一张码一份 billing 签发的原文，可叠加；每次查询重新验签    |
 | 待安装更新包       | `{app_local_data_dir}/pending_update/`                                 | 静默下载完成后暂存                                         |
 | 日志               | `{app_log_dir}/`（Windows `%LOCALAPPDATA%\fun.xwink.flairbloom\logs`） | 按天滚动，保留 7 天，`cleanup_old_logs` 清理               |
 | 崩溃日志           | `{app_log_dir}/crash-{unix_ts}.log`                                    | panic hook 写入                                            |

@@ -65,6 +65,7 @@ import { useTourProgress } from './tour/useTourProgress';
 import { useKeyRelay } from './useKeyRelay';
 import { useRuleStates } from './useRuleStates';
 import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
+import LicenseDialog from './dialogs/LicenseDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
 import ImportDialog from './dialogs/ImportDialog';
 import RepairDialog from './dialogs/RepairDialog';
@@ -89,7 +90,7 @@ import UpdateNoticeDialog, {
   type UpdateNoticeMode,
 } from './dialogs/UpdateNoticeDialog';
 import { changelogSection } from './changelog';
-import { grantsSignature, type LicenseStatus, watermarkSignature } from './signature';
+import { grantsSignature, type LicenseSummary, watermarkSignature } from './license';
 import './PanelApp.css';
 
 /** 后端 `take_profile_notice` 的返回形态，与 `qzh_profile::SanitizeReport` 同源。 */
@@ -109,6 +110,8 @@ const settingsStore = new LazyStore('settings.json');
 const CLOSE_BEHAVIOR_KEY = 'closeBehavior';
 /** D10：某组变成长按与切换混排时的插队提示，勾选「不再提示」后写 true。 */
 const HOLD_IN_GROUP_HINT_KEY = 'holdInGroupHintDismissed';
+/** 上次兑换时同意过的会员服务协议版本，再兑换时版本没变就默认勾选。 */
+const MEMBERSHIP_AGREED_KEY = 'membershipAgreedVersion';
 const SOUND_KEY = 'sound';
 const THEME_KEY = 'theme';
 const LAYOUT_KEY = 'layout';
@@ -400,6 +403,7 @@ export default function PanelApp() {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('general');
   const [showAbout, setShowAbout] = useState(false);
+  const [showLicense, setShowLicense] = useState(false);
   const [showTourCatalog, setShowTourCatalog] = useState(false);
   const [activeTour, setActiveTour] = useState<TourDef | undefined>(undefined);
   // 首启判定只准跑一次：版本位要等教程走完（或退出）才落盘，期间 effect 会因其它依赖重跑，
@@ -594,10 +598,15 @@ export default function PanelApp() {
   useKeyRelay();
   const isDefaultProfile = profileName === DEFAULT_PROFILE_NAME;
 
-  const [license, setLicense] = useState<LicenseStatus | undefined>(undefined);
+  const [license, setLicense] = useState<LicenseSummary | undefined>(undefined);
+  const [agreedVersion, setAgreedVersion] = useState<string | undefined>(undefined);
   useEffect(() => {
-    invoke<LicenseStatus | null>('get_license_status')
-      .then((status) => setLicense(status ?? undefined))
+    invoke<LicenseSummary>('get_license_status')
+      .then(setLicense)
+      .catch(() => {});
+    settingsStore
+      .get<string>(MEMBERSHIP_AGREED_KEY)
+      .then((v) => setAgreedVersion(v ?? undefined))
       .catch(() => {});
   }, []);
   const activeSignature = watermarkSignature(license, profileList, profileName);
@@ -2111,8 +2120,9 @@ export default function PanelApp() {
 
   async function handleSignatureChange(signature: string) {
     try {
-      // 默认配置是出厂预设，和改规则一样先另存为新配置再写
+      // 默认配置是出厂预设，和改规则一样先另存为新配置再写；另存失败（已提示）就不写，免得改坏预设
       await ensureWritableProfile();
+      if (profileNameRef.current === DEFAULT_PROFILE_NAME) return;
       await invoke<string>('set_profile_signature', {
         name: profileNameRef.current,
         signature,
@@ -3127,6 +3137,17 @@ export default function PanelApp() {
               openSupport();
             },
           },
+          {
+            label: '兑换码',
+            onClick: () => {
+              setMenuOpen(false);
+              setShowLicense(true);
+              // 打开时重取：有期限的许可证可能在运行中到期
+              invoke<LicenseSummary>('get_license_status')
+                .then(setLicense)
+                .catch(() => {});
+            },
+          },
           { label: '关于', onClick: handleShowAbout },
         ]}
       />
@@ -3244,6 +3265,28 @@ export default function PanelApp() {
           onExit={handleTourExit}
         />
       )}
+
+      <Overlay open={showLicense} onClose={() => setShowLicense(false)}>
+        <LicenseDialog
+          summary={license}
+          agreedVersion={agreedVersion}
+          onActivated={(summary, version) => {
+            setLicense(summary);
+            if (version) {
+              setAgreedVersion(version);
+              settingsStore
+                .set(MEMBERSHIP_AGREED_KEY, version)
+                .then(() => settingsStore.save())
+                .catch(() => {});
+            }
+          }}
+          onOpenTarget={(target) => {
+            setShowLicense(false);
+            if (target === 'settings-profiles') handleShowSettings('profiles');
+          }}
+          onClose={() => setShowLicense(false)}
+        />
+      </Overlay>
 
       <Overlay open={showAbout} onClose={() => setShowAbout(false)}>
         <AboutDialog

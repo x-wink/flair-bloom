@@ -33,6 +33,11 @@ win-sysinfo = { path = "../../../packages/win-sysinfo" }
 win-input = { path = "../../../packages/win-input" }
 burst-engine = { path = "../../../packages/burst-engine" }
 win-driver = { path = "../../../packages/win-driver" }
+# 兑换码激活的 HTTP：与 tauri-plugin-updater 同版本同 feature，不多编一份；
+# rustls 加密提供者同 updater 一样在首次请求前懒装 ring
+reqwest = { version = "0.13", default-features = false, features = ["json", "rustls-no-provider"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = [

@@ -36,7 +36,7 @@ Goal: 亲友在应用内输入兑换码、联网一次，换回 billing 签发�
   - 理由：要把 flair 并进 xwink 体系；只用自己的离线码、或匿名激活但不能认领，这批用户会永远游离在体系外；让亲友先注册登录，成本又不划算。
 - **D8：公钥构建时注入，按 kid 维护列表** — 作者定（2026-10-09）：
   - 注入：公钥放 GitHub Secrets，`crypto` 的 build script 读环境变量生成列表。公钥不需要保密，放 Secrets 只是让公开仓里不出现它。
-  - 发版构建缺公钥直接失败，不回落占位 — 理由：漏配 Secrets 时悄悄发出一个全零公钥的版本，所有激活都会失败且要等下一版才能修。
+  - 发版构建没有公钥直接失败（缺失、空串、`[]` 都算），不回落占位；本地打不需要兑换的发版包用 `FLAIR_LICENSE_ALLOW_NO_KEYS=1` 显式豁免 — 理由：漏配时悄悄发出一个兑换码入口还在、所有激活都失败的版本，要等下一版才能修。
   - 测试公钥只在 `cfg(debug_assertions)` 下进列表，发版构建不认 — 理由：开发期要用 billing 测试端点签的许可证验证，但测试私钥的保管级别低，不能在用户手里生效。
   - 密钥隔离：每个应用一把许可证密钥，和权益凭证的密钥分开，不进 JWKS（billing D21 的例外）。flair 只认类型标记与 `aud=flair` 都对的签名，这把私钥泄露不外溢到其他服务。
   - 轮换与止血：新版本加新钥，旧钥只验不签。止血时新版本移除旧钥，代价是该钥签出的许可证全部失效，要重新激活（同码在重下发上限内可自助恢复）。
@@ -59,6 +59,11 @@ Goal: 亲友在应用内输入兑换码、联网一次，换回 billing 签发�
 - **D16：测试码只在本地，生产不建** — 作者定（2026-10-27）：开发与联调全在本地 billing；生产验收用第一张发给亲友的真码，作者在发版候选构建上先激活，亲友自己激活时算一次重下发（上限 3 内）。
 - **D17：AES 主密钥不轮换，现有常量即正式密钥** — 作者定（2026-10-27）：`aes.rs` 的 `MASTER_KEY` 只作混淆、不保密，T1 删掉它的 TODO，`profile-format.md` 改写为现状 — 理由：它从首个版本起加密所有用户的 `.qzh`，换掉就让老配置与跨版本分享全部解不开；仓库公开，旧密钥已永久公开，按 D9 的逻辑新密钥也能从二进制取出，换了没有收益。将来真要轮换，用文件头 `flags` 记密钥编号并回退旧钥解密。
 - **D18：激活入口放 ☰ 菜单** — 作者定（2026-10-27）：菜单加一项「兑换码」，打开激活对话框；激活后同一项打开许可证状态。
+- **D19：许可证可叠加** — 作者定（2026-10-27，billing 侧 c1 确认无需改动）：一张码是一份许可证，`ent` 是一组权益（billing 每批最多 16 项）；每兑换一张码多一份许可证，可用权益取全部有效许可证按权益键的并集，同一个键取最晚到期的那份、有永久的即永久。本机 `{app_data_dir}/licenses/` 下一份许可证一个文件。理由：以后出新权益时再发新码继续往上加，已激活的不受影响，同 Steam DLC 激活码、JetBrains 按产品授权的做法。
+- **D20：再兑换时协议版本没变就默认勾选** — 作者定（2026-10-27）：激活成功后把同意的会员服务协议版本记在 settings.json 的 `membershipAgreedVersion`；再兑换时 uc 现行版本与它相同就直接提交，变了才停下来要用户重新勾选。
+- **D21：重复兑换先问是否覆盖，在发请求之前** — 作者定（2026-10-27）：同一张码再兑换时提示「已经激活过，覆盖会占用一次重新激活次数」，确认才提交。请求前只有码、没有许可证 id，所以许可证文件按归一化后兑换码的 SHA-256 前 16 位十六进制命名，同码同文件天然去重；覆盖即重新激活并替换该文件。理由：每次重下发都占 billing 的次数上限，发出去再问就晚了。
+- **D22：兑换后用权益点说明提示怎么用** — 作者定（2026-10-27）：每项权益在前端有一段说明（是什么、在哪用）和一个「前往」入口（署名：「去填写」直达 设置 → 配置文件）；激活成功页与状态页都按权益列出。前端不认识的权益键显示键名并提示更新应用，不静默忽略。
+- **D23：更新公告只写入口与联网，不提具体权益** — 作者定（2026-10-27）：CHANGELOG 写「☰ 菜单新增兑换码入口、权益可叠加」与「激活兑换码时联网一次」，不提水印署名。理由：入口人人可见、联网承诺变了必须告知；具体权益是亲友定制，按 D10 不对外宣传。
 
 ## 3. 问题清单 / Findings
 
@@ -86,24 +91,24 @@ Goal: 亲友在应用内输入兑换码、联网一次，换回 billing 签发�
 - **Test:** `cargo test -p crypto`，用例在测试里现签（`ed25519-dalek` 的 `SigningKey`），不入库私钥；L1 落地后补一条本地 billing 真实签出的许可证作夹具，钉住两边编码一致。
 - **Rollback:** 应用里还没有调用方，回退即还原文件。
 - **Depends on:** D11 与 c1 对齐。
-- **Done:** `cargo test -p crypto` 27 条全过，`license.rs` / `kid.rs` 行与函数覆盖 100%；去掉 `typ`、`aud` 校验的变异让 3 条用例变红。夹具改用 xwink-console 的 jose 加 `computeKeyId` 在 Node 里签（跨实现核对，比本地 billing 样本更早到位）；`iat` 允许领先本机 24 小时（见 D9）。发版构建实测：未设置 / 空串失败，`[]` 通过，`kid` 错一位失败，正确 JWK 编入。GitHub Secret `FLAIR_LICENSE_PUBKEYS` 已建（2026-10-27），billing 生产密钥出来前值为 `[]`，T4 前换成生产公钥 JWK。
+- **Done:** `cargo test -p crypto` 27 条全过，`license.rs` / `kid.rs` 行与函数覆盖 100%；去掉 `typ`、`aud` 校验的变异让 3 条用例变红。夹具改用 xwink-console 的 jose 加 `computeKeyId` 在 Node 里签（跨实现核对，比本地 billing 样本更早到位）；`iat` 允许领先本机 24 小时（见 D9）。发版构建实测：未设置 / 空串 / `[]` 失败，`FLAIR_LICENSE_ALLOW_NO_KEYS=1` 豁免通过，`kid` 错一位失败，正确 JWK 编入。GitHub Secret `FLAIR_LICENSE_PUBKEYS` 已建（2026-10-27），billing 生产公钥到位前值为 `[]`——这期间任何发版构建都会失败，T4 前换成生产公钥 JWK。
 
 ### T2 — 署名字段与水印渲染 · 进度: 已完成（2026-10-27）
 
 - **Fixes:** I5
 - **Change:**
   - `ProfileMeta` 加 `signature`（按 D10 反序列化即净化）；`save_profile` 经 `carry_over_meta` 沿用旧署名；新命令 `set_profile_signature` 校验权益后写入。
-  - `commands/license.rs`：启动读 `{app_data_dir}/license.jws`，内存只存原文、每次查询按当前时间重新验签（运行中到期自动失效）；`get_license_status` 暴露给前端。
+  - `commands/license.rs`：启动读许可证（T3 起为 `{app_data_dir}/licenses/` 目录，D19），内存只存原文、每次查询按当前时间重新验签（运行中到期自动失效）；`get_license_status` 暴露给前端。
   - 前端 `panel/signature.ts` 判定水印取值，面板根节点有权益且署名非空时写 `data-signature`，CSS `content: attr(data-signature)` 覆盖；设置 → 配置文件在有权益时多一栏「水印署名」，失焦或回车写盘，改默认配置先另存。
-  - 开发公钥两把：本地 billing 的开发密钥与 flair 样例密钥；样例许可证 `packages/crypto/license-dev-sample.jws` 拷成 `license.jws` 即可在开发构建里试署名。
-  - 说明书 `manual/profiles.md` 补署名一段，教程不动；`architecture.md` 存储路径表加 `license.jws`，`profile-format.md` 写字段与读写规则。
+  - 开发公钥两把：本地 billing 的开发密钥与 flair 样例密钥；样例许可证 `packages/crypto/license-dev-sample.jws` 拷进 `{app_data_dir}/licenses/`（任意 `.jws` 文件名）即可在开发构建里试署名。
+  - 说明书 `manual/profiles.md` 补署名一段，教程不动；`architecture.md` 存储路径表加许可证一行，`profile-format.md` 写字段与读写规则。
 - **Acceptance:** 有权益时改署名水印立刻变、切配置跟着换；无权益时界面无任何署名入口、水印是默认值、`.qzh` 里已有的署名原样保留；导出再导入署名不丢；超长与控制字符被净化。
 - **Test:** `qzh-profile` 单测覆盖净化与缺字段反序列化；前端 `pnpm test:ui` 覆盖有 / 无权益两种渲染；Windows 真机看一次横竖版水印。
 - **Rollback:** 字段带 `serde(default)`、不升 schema，回退版本时旧版忽略该字段，配置不受损。
 - **Depends on:** T1。
 - **Done:** 单测：`qzh-profile` 净化 / 缺字段 / 反序列化截断 / 往返 4 条，主应用 `carry_over_meta` 4 条与许可证状态 4 条，crypto 补样例许可证 1 条，`pnpm test:ui` 4 条；clippy、tsc、oxlint、oxfmt 全过。**真机未验**：mac 上没有 WebView2 调试通道，横竖版水印与设置栏的实跑并入 T3 联调一起过。
 
-### T3 — 激活链路与状态面板 · 进度: 未开始
+### T3 — 激活链路与状态面板 · 进度: 已完成（2026-10-27）
 
 - **Fixes:** I6、I7
 - **Change:**
@@ -111,12 +116,17 @@ Goal: 亲友在应用内输入兑换码、联网一次，换回 billing 签发�
   - 不带 `licenseId`：本地有许可证文件时再激活只会是换码，带上反而撞 `LICENSE_MISMATCH`；重装时文件已不在，同码不带它也按重下发处理。
   - 错误按响应体 `error.details.code` 映射（`error.code` 只是 `CONFLICT` 这类通用码）：`REDEMPTION_CODE_NOT_FOUND`、`LICENSE_CODE_TYPE_MISMATCH` → 码无效；`REDEMPTION_CODE_VOID` → 已作废（首次与重下发都挡）；`REDEMPTION_CODE_EXPIRED` → 已过期（只挡首次激活）；`LICENSE_REISSUE_LIMIT` → 重下发次数用完；`AGREEMENT_VERSION_REQUIRED` / `AGREEMENT_VERSION_OUTDATED` → 按 `details.currentVersion` 刷新协议请用户再勾一次；`LICENSE_APP_UNAVAILABLE` / `AGREEMENT_UNAVAILABLE`（503）→ 服务暂不可用；429 → 按 `Retry-After` 提示稍后再试；其余与 `LICENSE_MISMATCH` → 通用失败并记 `traceId` 到日志；连接失败 → 网络不通。billing 限流是每 IP 每分钟 5 次、每天 20 次，界面不做自动重试。
   - 激活对话框（React）：兑换码输入、会员服务协议勾选与版本显示（正文用系统浏览器打开）、「激活需要联网一次」提示、错误分类文案；状态区显示许可证 id、激活时间、到期（永久或剩余天数）、已授权的「自定义署名」；入口按 D18。
-  - 激活成功后更新 `LicenseState` 并通知前端刷新许可证状态（署名栏与水印即时出现）。
-  - 产品承诺两处改为「除检查更新与激活兑换码外不联网」；说明书 `manual/settings.md` 补激活一段。
+  - 许可证可叠加（D19）：`LicenseState` 存全部原文，`summarize` 按权益键合并有效期；`get_license_status` 返回 `{ entitlements, licenses }`。激活写 `licenses/<码哈希>.jws` 后重读目录，命令返回 `{ granted, summary }`，前端据此即时显示署名栏与水印，并按 D22 列出这张码带来的权益与「前往」入口。
+  - 重复兑换（D21）：同码文件已存在且未带 `overwrite` 时直接返回 `already_activated`（附现有许可证），不发请求；用户确认覆盖后带 `overwrite: true` 重发。
+  - 协议（D20）：激活成功后前端把同意的版本写进 settings.json，再兑换时版本没变就默认勾选。
+  - 协议版本到点「激活」时才问 uc：有已发布协议时先停下让用户勾选，没有就直接激活——不点激活的人一个请求都不发。`open_link` 加 `membership` 目标打开正文页（开发构建 `http://localhost:3700/auth/terms/membership`）。
+  - HTTP 用与 `tauri-plugin-updater` 同版本同 feature 的 `reqwest`（`rustls-no-provider`）与 `rustls`（`default-features = false` 只开 `ring`），加密提供者同样在首次请求前懒装；`Cargo.lock` 不新增包——rustls 默认 feature 会带进要 cmake / NASM 的 aws-lc-rs。
+  - 产品承诺两处改为「除检查更新与激活兑换码外不联网」；说明书写进 `manual/profiles.md` 的「兑换码与水印署名」一节（兑换码目前只服务署名，设置篇讲的是热键声音外观）。
 - **Acceptance:** debug 构建对本地 billing 用测试码激活成功、重启后仍有权益、断网启动仍有权益；同码重下发拿到同一许可证 id，第五次请求显示次数用完；作废码、类型不符、协议过期、限流、断网各显示对应文案；激活后不重启即出现署名栏，T2 的横竖版水印与设置栏一并实跑；uc 协议接口返回空数组时不显示勾选也能激活；不点激活的用户全程零网络请求（抓包或日志核）。
 - **Test:** 错误码映射与落盘读回写单测（HTTP 层用本地假服务）；真机按说明书走一遍激活。
 - **Rollback:** 激活入口可整体隐藏；已落盘的许可证不影响核心功能，回退版本时文件被忽略。
 - **Depends on:** T1、T2、billing L1 能在本地起（生产验收要 L1 上生产）。
+- **Done:** 单测：错误码映射、协议解析、许可证汇总与叠加、按码命名、重复兑换判断、目录读写共 20 条，`pnpm test:ui` 补权益说明与错误文案。真实契约：`live_activation_against_local_billing`（默认忽略，`FLAIR_TEST_LICENSE_CODE` 给码）打本地 uc / billing，验过取协议、码无效、缺协议版本带回现行版本、激活验签、同码重下发同一许可证 id。界面由作者在 mac 开发版实跑：未激活无署名栏、首次兑换停下勾协议、成功后署名栏与横竖版水印、切配置水印跟着换、错码提示、两张码叠加且第二次不再拦协议、「去填写」直达配置文件页签。重复兑换的确认框只由单测覆盖、未实跑。「不点激活零网络请求」靠代码路径保证（只有 `get_membership_agreement` / `activate_license` 两个命令联网，都在点击激活之后调用）。Windows 真机并入 T4。发版前 `/code-review`（2026-10-27，范围 `v0.5.0..`）报 10 条全部修复：验签失败的许可证先落盘再报错（时钟偏差单独提示，免得重试白占重新激活次数）、发版构建拒绝空公钥列表、默认配置另存失败时不写署名、前端按到期时间判权益且打开兑换码时重取状态、署名 `null` 容错并滤掉双向控制与零宽字符、协议接口 429 按限流处理且返回体不认识时报不可用、署名按字符截断、补 `membershipAgreedVersion` 到已知设置键。
 
 ### T4 — 生产验收与发版 · 进度: 未开始
 
@@ -144,7 +154,7 @@ billing L1 上生产 + 批次 ─────┘
 | -------- | --------- | ---- | -------- |
 | T1       | 0.8 会话  | ✅   |          |
 | T2       | 1 会话    | ✅   |          |
-| T3       | 1.5 会话  |      |          |
+| T3       | 1.5 会话  | ✅   | 中途按作者要求改为可叠加并加权益说明、协议免重复勾选、重复兑换确认（D19–D22） |
 | T4       | 0.5 会话  |      |          |
 | **合计** | **3.8 会话** |   |          |
 
@@ -156,6 +166,7 @@ billing L1 上生产 + 批次 ─────┘
 - **R2：两边编码细节不一致**（base64url 填充、`ent` 形状、`exp` 缺省）— 单测只能证明自洽，L1 落地后用本地 billing 真实签出的许可证补夹具钉住。
 - **R3：公钥轮换止血让旧许可证全部失效**（D8）— 亲友在重下发上限内可自助恢复。
 - **R4：漏配 Secrets** — D8 让发版构建直接失败，不会发出坏版本。
+- **R5：生产公钥到位前要发别的版本** — Secret 现在是 `[]`，发版构建会被 D8 挡下，不会带着兑换全失败的入口出去。T4 之前确要发别的改动，只能等生产公钥换进 Secret，或另开分支不含兑换码改动。
 
 ## 8. 范围外 / Out of scope · follow-ups
 
