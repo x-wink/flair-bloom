@@ -1,6 +1,6 @@
 # 兑换码激活与水印署名 — 改造路线图 / Change Roadmap
 
-Status: active（2026-10-27 收敛为单一权益并开工；flair 侧不再有前置，外部依赖只剩 billing L1）
+Status: active（2026-10-28 随 v0.6.0 发版，T4 的生产真码验收待补）
 Goal: 亲友在应用内输入兑换码、联网一次，换回 billing 签发的离线许可证，面板水印改显示自己配置里写的署名；之后离线校验，到期（如有）自动回落默认署名、不锁死；将来接入 xwink 登录后可把许可证认领到账号名下。
 
 ---
@@ -128,7 +128,7 @@ Goal: 亲友在应用内输入兑换码、联网一次，换回 billing 签发�
 - **Depends on:** T1、T2、billing L1 能在本地起（生产验收要 L1 上生产）。
 - **Done:** 单测：错误码映射、协议解析、许可证汇总与叠加、按码命名、重复兑换判断、目录读写共 20 条，`pnpm test:ui` 补权益说明与错误文案。真实契约：`live_activation_against_local_billing`（默认忽略，`FLAIR_TEST_LICENSE_CODE` 给码）打本地 uc / billing，验过取协议、码无效、缺协议版本带回现行版本、激活验签、同码重下发同一许可证 id。界面由作者在 mac 开发版实跑：未激活无署名栏、首次兑换停下勾协议、成功后署名栏与横竖版水印、切配置水印跟着换、错码提示、两张码叠加且第二次不再拦协议、「去填写」直达配置文件页签。重复兑换的确认框只由单测覆盖、未实跑。「不点激活零网络请求」靠代码路径保证（只有 `get_membership_agreement` / `activate_license` 两个命令联网，都在点击激活之后调用）。Windows 真机并入 T4。发版前 `/code-review`（2026-10-27，范围 `v0.5.0..`）报 10 条全部修复：验签失败的许可证先落盘再报错（时钟偏差单独提示，免得重试白占重新激活次数）、发版构建拒绝空公钥列表、默认配置另存失败时不写署名、前端按到期时间判权益且打开兑换码时重取状态、署名 `null` 容错并滤掉双向控制与零宽字符、协议接口 429 按限流处理且返回体不认识时报不可用、署名按字符截断、补 `membershipAgreedVersion` 到已知设置键。
 
-### T4 — 生产验收与发版 · 进度: 未开始
+### T4 — 生产验收与发版 · 进度: 发版完成，生产验收待补
 
 - **Change:** billing 在生产登记 flair 应用与 `flair.signature`、建永久批次（重下发上限 3，由 c1 用脚本建，每次生产写入经作者点头）后，按 D16 用第一张真码在 Windows 发版候选构建上激活、改署名、重启；CHANGELOG `[Unreleased]` 写净变化；按 [release](../../skills/flair-bloom/references/engineering/release.md) 发版，推 tag 前取得作者授权。
 - **Acceptance:** 生产真码全链路通过；发版构建的公钥列表与 billing 生产 `kid` 一致。
@@ -166,7 +166,7 @@ billing L1 上生产 + 批次 ─────┘
 - **R2：两边编码细节不一致**（base64url 填充、`ent` 形状、`exp` 缺省）— 单测只能证明自洽，L1 落地后用本地 billing 真实签出的许可证补夹具钉住。
 - **R3：公钥轮换止血让旧许可证全部失效**（D8）— 亲友在重下发上限内可自助恢复。
 - **R4：漏配 Secrets** — D8 让发版构建直接失败，不会发出坏版本。
-- **R5：T4 验收前发版** — 生产公钥已在 Secret，发版构建不再被挡；但生产码未建、Windows 未验收，作者定等 T4 后再发（2026-10-27）。
+- **R5：T4 验收前发版** — 作者定不等 Windows 真机复测直接发 v0.6.0（2026-10-28）：生产码还没建，没人拿得到码，兑换失败只影响兑换码入口本身，不碰核心功能；发出第一张真码前在 Windows 正式版上补验。
 
 ## 8. 范围外 / Out of scope · follow-ups
 
@@ -178,4 +178,5 @@ billing L1 上生产 + 批次 ─────┘
 
 - **进度（2026-10-27）：** T1–T3 完成并推送；`/code-review`（范围 `v0.5.0..`）10 条已修；GitHub Secret 已填 billing 0.6.0 的生产公钥；CHANGELOG `[Unreleased]` 已按 D23 写好。产品页 `@xwink/ui` 升到 beta.16（beta.11 被私有源的旧版本自动清理挤掉，作者已关掉该清理），Site 工作流恢复绿。
 - **遗留：** 重复兑换的确认框只有单测、未实跑；Windows 上的署名水印与激活未实跑（WebView2、系统证书校验）。
-- **下一步入口 = T4：** 作者定生产的 flair 码等能在 Windows 上验收时再建（向 xwink-console 会话要，`flair.signature`、永久、重下发 3 次，生产写入逐次经作者点头）→ Windows 发版候选构建用第一张真码激活、填署名、重启、再兑换一次看覆盖确认 → 按 release 发版，推 tag 前取得作者授权。本地联调起法见 D13（xwink-console `pnpm db:up && pnpm service:all`），真实契约测试 `FLAIR_TEST_LICENSE_CODE=<本地码> cargo test -p flair-bloom live_activation -- --ignored`。
+- **发版（2026-10-28）：** 作者定跳过 Windows 真机复测，按 release 发 v0.6.0。
+- **下一步入口 = T4 生产验收：** 作者定生产的 flair 码等能在 Windows 上验收时再建（向 xwink-console 会话要，`flair.signature`、永久、重下发 3 次，生产写入逐次经作者点头）→ Windows 上的 v0.6.0 正式版用第一张真码激活、填署名、重启、再兑换一次看覆盖确认；有问题按 release 向前滚修复。本地联调起法见 D13（xwink-console `pnpm db:up && pnpm service:all`），真实契约测试 `FLAIR_TEST_LICENSE_CODE=<本地码> cargo test -p flair-bloom live_activation -- --ignored`。
