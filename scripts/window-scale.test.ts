@@ -6,6 +6,7 @@ import {
   LAYOUT_BASE,
   maximizedRect,
   maxScale,
+  reachedMaximum,
   restoreUnderCursor,
   sanitizeScales,
   scaledSize,
@@ -54,4 +55,12 @@ test('sanitizeScales 把缺失、非数、小于 1 的值当 1', () => {
   assert.deepEqual(sanitizeScales(undefined), { vertical: 1, horizontal: 1 });
   assert.deepEqual(sanitizeScales({ vertical: 1.5, horizontal: 0.5 }), { vertical: 1.5, horizontal: 1 });
   assert.deepEqual(sanitizeScales({ vertical: 'x', horizontal: Number.NaN }), { vertical: 1, horizontal: 1 });
+});
+
+test('reachedMaximum 拉到最大尺寸才算，工作区装不下更大的窗口时永远不算', () => {
+  const target = { width: 607, height: 1080 };
+  assert.equal(reachedMaximum({ width: 608, height: 1081 }, target, V), true);
+  assert.equal(reachedMaximum({ width: 500, height: 889 }, target, V), false);
+  // 小屏：最大化尺寸就是设计尺寸，拖到最小也等于「到顶」
+  assert.equal(reachedMaximum(V, V, V), false);
 });

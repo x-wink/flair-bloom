@@ -69,6 +69,15 @@ export function maximizedRect(workArea: Rect, base: Size): Rect {
 }
 
 /**
+ * 拖边松手时是否算拉到了最大。工作区装不下比设计尺寸更大的窗口时，最大化尺寸就是最小尺寸，
+ * 随便拖一下都「到顶」，不能算。后端锁的上限按像素取整、前端按两位小数的比例取整，
+ * 拉到顶时窗口只会比 target 大一点，所以用 >=。单位与传入的参数一致。
+ */
+export function reachedMaximum(current: Size, target: Size, base: Size): boolean {
+  return target.width > base.width + 1 && current.width >= target.width;
+}
+
+/**
  * 最大化状态下拖标题栏时还原出的矩形：鼠标在窗口里的相对位置不变，像系统窗口那样
  * 「捏」着同一处标题栏缩回去。坐标单位与传入的参数一致。
  */

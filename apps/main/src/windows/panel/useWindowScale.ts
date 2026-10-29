@@ -14,6 +14,7 @@ import {
   PANEL_SCALE_EVENT,
   PANEL_SCALE_KEY,
   type PanelLayout,
+  reachedMaximum,
   type Rect,
   RESIZE_ENDED_EVENT,
   restoreUnderCursor,
@@ -86,6 +87,7 @@ export function useWindowScale(store: LazyStore) {
   const layoutRef = useRef<PanelLayout>('vertical');
   const maximizedRef = useRef(false);
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const resizeSeqRef = useRef(0);
   const loadedRef = useRef<Promise<void> | undefined>(undefined);
 
   const ensureLoaded = useCallback(() => {
@@ -150,6 +152,8 @@ export function useWindowScale(store: LazyStore) {
   );
 
   const maximize = useCallback(async () => {
+    // 拖边最后几帧排下的保存还没到点；最大化不改记住的比例，不能让它晚到写进去
+    clearTimeout(persistTimerRef.current);
     setMaximizedFlag(true);
     await maximizeWindow(LAYOUT_BASE[layoutRef.current]);
   }, [setMaximizedFlag]);
@@ -215,12 +219,17 @@ export function useWindowScale(store: LazyStore) {
   useEffect(() => {
     const win = getCurrentWindow();
     const unlisten = win.onResized(async ({ payload }) => {
-      const size = payload.toLogical(await win.scaleFactor());
+      // 拖边每帧一个事件，中间要等两次 IPC，先发的可能后到；只认最新一帧
+      const seq = ++resizeSeqRef.current;
+      const factor = await win.scaleFactor();
+      const size = payload.toLogical(factor);
       const layout = layoutRef.current;
       const base = LAYOUT_BASE[layout];
       // 最小化时 Windows 报 0×0；有最小尺寸兜着，低于设计尺寸的都不是用户拖出来的
       if (size.width < base.width - 1 || size.height < base.height - 1) return;
-      const next = fitScale(size, base, await workAreaMax(base));
+      const max = await workAreaMax(base);
+      if (seq !== resizeSeqRef.current) return;
+      const next = fitScale(size, base, max);
       getCurrentWebview()
         .setZoom(next)
         .catch(() => {});
@@ -241,12 +250,15 @@ export function useWindowScale(store: LazyStore) {
     const unlisten = listen(RESIZE_ENDED_EVENT, async () => {
       if (maximizedRef.current) return;
       try {
-        const [target, current] = await Promise.all([
-          maximizedTarget(LAYOUT_BASE[layoutRef.current]),
-          getCurrentWindow().outerSize(),
+        const win = getCurrentWindow();
+        const base = LAYOUT_BASE[layoutRef.current];
+        const [target, current, factor] = await Promise.all([
+          maximizedTarget(base),
+          win.outerSize(),
+          win.scaleFactor(),
         ]);
-        // 后端锁的上限按像素取整、这里按两位小数的比例取整，拉到顶时窗口只会比 target 大一点
-        if (target && current.width >= target.width) await maximize();
+        const physicalBase = { width: base.width * factor, height: base.height * factor };
+        if (target && reachedMaximum(current, target, physicalBase)) await maximize();
       } catch {
         /* 同上 */
       }

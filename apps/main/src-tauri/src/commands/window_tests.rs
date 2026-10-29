@@ -194,3 +194,58 @@ fn wmsz_values_map_to_edges() {
     assert_eq!(Edge::from_wmsz(0), None);
     assert_eq!(Edge::from_wmsz(9), None);
 }
+
+#[test]
+fn snapped_half_screen_fits_largest_aspect_rect_centered() {
+    // 竖版贴到 1920×1040 屏幕的左半边：高度顶满，宽按比例收窄并在左半边居中
+    let snapped = Rect {
+        left: 0,
+        top: 0,
+        right: 960,
+        bottom: 1040,
+    };
+    let fitted = fit_within(snapped, vertical()).expect("比例不对，应当改写");
+    let (w, h) = size(fitted);
+    assert_eq!(h, 1040);
+    assert!((f64::from(w) / f64::from(h) - 405.0 / 720.0).abs() < 0.002);
+    assert_centered(fitted, snapped);
+}
+
+#[test]
+fn aspect_correct_sizes_and_minimized_pass_through() {
+    // 面板自己 setSize 的等比尺寸差一两像素舍入，不改
+    assert_eq!(fit_within(BASE, vertical()), None);
+    let rounded = Rect {
+        bottom: BASE.bottom + 1,
+        ..BASE
+    };
+    assert_eq!(fit_within(rounded, vertical()), None);
+    // 最小化时系统给的矩形比设计尺寸小，不碰
+    let minimized = Rect {
+        left: -32000,
+        top: -32000,
+        right: -31840,
+        bottom: -31972,
+    };
+    assert_eq!(fit_within(minimized, vertical()), None);
+}
+
+#[test]
+fn snapped_rect_respects_max_width_and_frame() {
+    let limits = AspectLimits {
+        frame: (16, 39),
+        max_width: 500,
+        ..vertical()
+    };
+    let snapped = Rect {
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 2000,
+    };
+    let fitted = fit_within(snapped, limits).expect("比例不对，应当改写");
+    let (w, h) = size(fitted);
+    assert_eq!(w, 500 + 16);
+    assert_eq!(h, (500.0_f64 / (405.0 / 720.0)).round() as i32 + 39);
+    assert_centered(fitted, snapped);
+}

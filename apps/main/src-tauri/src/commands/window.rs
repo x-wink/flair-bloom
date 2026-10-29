@@ -157,6 +157,39 @@ pub fn resize_centered(rect: Rect, edge: Edge, anchor: DragAnchor, limits: Aspec
     }
 }
 
+/// 系统直接摆的尺寸（贴靠分屏、Win+←/→）不经 `WM_SIZING`，到 `WM_WINDOWPOSCHANGING` 才看得到：
+/// 在系统给的矩形里放下最大的等比窗口并居中。客户区比例在舍入误差内、或比设计尺寸还小（最小化）
+/// 时返回 `None` 原样放行——面板自己 `setSize` 的尺寸本来就是等比的。
+pub fn fit_within(rect: Rect, limits: AspectLimits) -> Option<Rect> {
+    let AspectLimits {
+        ratio,
+        frame: (frame_w, frame_h),
+        min_width,
+        max_width,
+    } = limits;
+    let client_w = rect.right - rect.left - frame_w;
+    let client_h = rect.bottom - rect.top - frame_h;
+    let min_height = (f64::from(min_width) / ratio).round() as i32;
+    if client_w < min_width - 2 || client_h < min_height - 2 {
+        return None;
+    }
+    if (f64::from(client_w) / ratio - f64::from(client_h)).abs() <= 2.0 {
+        return None;
+    }
+    let width = (f64::from(client_w).min(f64::from(client_h) * ratio).floor() as i32)
+        .clamp(min_width, max_width.max(min_width));
+    let outer_w = width + frame_w;
+    let outer_h = (f64::from(width) / ratio).round() as i32 + frame_h;
+    let left = rect.left + (rect.right - rect.left - outer_w) / 2;
+    let top = rect.top + (rect.bottom - rect.top - outer_h) / 2;
+    Some(Rect {
+        left,
+        top,
+        right: left + outer_w,
+        bottom: top + outer_h,
+    })
+}
+
 /// 设定面板的设计尺寸并开始锁比例；切换布局时再调一次换成新比例。
 /// Windows 拦 `WM_SIZING`，macOS 设 NSWindow 的内容宽高比，其它平台只记下尺寸。
 #[tauri::command]
@@ -211,13 +244,15 @@ mod win {
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
     use windows_sys::Win32::UI::WindowsAndMessaging::{
-        GetClientRect, GetWindowRect, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_SIZING,
+        GetClientRect, GetWindowRect, IsIconic, SWP_NOMOVE, SWP_NOSIZE, WINDOWPOS,
+        WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_SIZING, WM_WINDOWPOSCHANGING,
     };
 
     use tauri::Emitter;
 
     use super::{
-        resize_centered, AspectLimits, DragAnchor, Edge, Rect, PANEL_BASE, RESIZE_ENDED_EVENT,
+        fit_within, resize_centered, AspectLimits, DragAnchor, Edge, Rect, PANEL_BASE,
+        RESIZE_ENDED_EVENT,
     };
 
     const SUBCLASS_ID: usize = 0x00F1_A1B0;
@@ -235,7 +270,15 @@ mod win {
             return Ok(());
         }
         let _ = WINDOW.set(window.clone());
-        let hwnd = window.hwnd().map_err(|e| format!("取窗口句柄失败：{e}"))?.0 as isize;
+        // 没挂上就把标志放回去，下次切布局再调时还能重试
+        let fail = |message: String| {
+            INSTALLED.store(false, Ordering::SeqCst);
+            message
+        };
+        let hwnd = window
+            .hwnd()
+            .map_err(|e| fail(format!("取窗口句柄失败：{e}")))?
+            .0 as isize;
         window
             .run_on_main_thread(move || {
                 // SAFETY: hwnd 来自仍然存活的面板窗口，回调在其所属线程执行
@@ -245,7 +288,7 @@ mod win {
                     tracing::warn!("面板窗口挂 subclass 失败，拖边不锁比例");
                 }
             })
-            .map_err(|e| format!("派发到主线程失败：{e}"))
+            .map_err(|e| fail(format!("派发到主线程失败：{e}")))
     }
 
     unsafe extern "system" fn proc(
@@ -289,7 +332,48 @@ mod win {
                 return 1;
             }
         }
+        if msg == WM_WINDOWPOSCHANGING && lparam != 0 && IsIconic(hwnd) == 0 {
+            // SAFETY: WM_WINDOWPOSCHANGING 的 lParam 是系统给的可写 WINDOWPOS 指针，非空已判断
+            let pos = &mut *(lparam as *mut WINDOWPOS);
+            if pos.flags & SWP_NOSIZE == 0 {
+                fit_system_size(hwnd, pos);
+            }
+        }
         DefSubclassProc(hwnd, msg, wparam, lparam)
+    }
+
+    /// 贴靠分屏等系统摆的尺寸按比例收进系统给的矩形；拖边的那一帧已经在 WM_SIZING 里锁过，这里放行。
+    unsafe fn fit_system_size(hwnd: HWND, pos: &mut WINDOWPOS) {
+        let Some(anchor) = anchor_now(hwnd) else {
+            return;
+        };
+        let Some(limits) = limits(hwnd, anchor) else {
+            return;
+        };
+        let keep_position = pos.flags & SWP_NOMOVE != 0;
+        let (left, top) = if keep_position {
+            let mut current: RECT = std::mem::zeroed();
+            if GetWindowRect(hwnd, &mut current) == 0 {
+                return;
+            }
+            (current.left, current.top)
+        } else {
+            (pos.x, pos.y)
+        };
+        let proposed = Rect {
+            left,
+            top,
+            right: left + pos.cx,
+            bottom: top + pos.cy,
+        };
+        if let Some(fitted) = fit_within(proposed, limits) {
+            pos.cx = fitted.right - fitted.left;
+            pos.cy = fitted.bottom - fitted.top;
+            if !keep_position {
+                pos.x = fitted.left;
+                pos.y = fitted.top;
+            }
+        }
     }
 
     fn set_anchor(anchor: Option<DragAnchor>) {
