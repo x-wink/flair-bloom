@@ -1,8 +1,8 @@
-//! 面板窗口拖边时锁定宽高比。
+//! 面板窗口拖边时锁定宽高比，并以拖动开始时的窗口中心为准缩放。
 //!
 //! Windows 在拖边的每一帧发 `WM_SIZING`，`lParam` 指向系统拟定的新窗口矩形，窗口过程可以当场改写它。
 //! 在这里按设计比例改写，窗口拖动中就一直是正确比例，不用等松手再吸附。Tauri 没有封装宽高比，
-//! 所以给面板窗口挂一个 subclass 处理这条消息；矩形换算是纯函数 [`lock_aspect`]，平台无关、可单测。
+//! 所以给面板窗口挂一个 subclass 处理这条消息；矩形换算是纯函数 [`resize_centered`]，平台无关、可单测。
 
 // 矩形换算只有 Windows 的 subclass 用，其它平台留着给单测跑（macOS 走系统自带的比例约束）
 #![cfg_attr(not(windows), allow(dead_code))]
@@ -49,12 +49,41 @@ impl Edge {
         })
     }
 
-    fn drags_left(self) -> bool {
-        matches!(self, Self::Left | Self::TopLeft | Self::BottomLeft)
+    /// 被拖的竖边在拟定矩形里的横坐标；只拖上下边时为 `None`。
+    fn dragged_x(self, rect: Rect) -> Option<i32> {
+        match self {
+            Self::Left | Self::TopLeft | Self::BottomLeft => Some(rect.left),
+            Self::Right | Self::TopRight | Self::BottomRight => Some(rect.right),
+            Self::Top | Self::Bottom => None,
+        }
     }
 
-    fn drags_top(self) -> bool {
-        matches!(self, Self::Top | Self::TopLeft | Self::TopRight)
+    /// 被拖的横边在拟定矩形里的纵坐标；只拖左右边时为 `None`。
+    fn dragged_y(self, rect: Rect) -> Option<i32> {
+        match self {
+            Self::Top | Self::TopLeft | Self::TopRight => Some(rect.top),
+            Self::Bottom | Self::BottomLeft | Self::BottomRight => Some(rect.bottom),
+            Self::Left | Self::Right => None,
+        }
+    }
+}
+
+/// 拖动开始时记下的锚点：窗口中心与当时所在屏幕的工作区，物理像素。
+#[derive(Clone, Copy, Debug)]
+pub struct DragAnchor {
+    pub center: (f64, f64),
+    pub work_area: Rect,
+}
+
+impl DragAnchor {
+    pub fn new(window: Rect, work_area: Rect) -> Self {
+        Self {
+            center: (
+                f64::from(window.left + window.right) / 2.0,
+                f64::from(window.top + window.bottom) / 2.0,
+            ),
+            work_area,
+        }
     }
 }
 
@@ -71,43 +100,57 @@ pub struct AspectLimits {
     pub max_width: i32,
 }
 
-/// 按比例改写拟定矩形：拖左右边以宽为准，拖上下边以高为准，拖角取两者里较大的那个，
-/// 都按比例补齐另一边。被拖的那条边移动，对边保持不动；只拖左右边时高度变化落在下边，
-/// 只拖上下边时宽度变化落在右边。
-pub fn lock_aspect(rect: Rect, edge: Edge, limits: AspectLimits) -> Rect {
+/// 按比例改写拟定矩形，以锚点中心为准向四周缩放：被拖的边到中心的距离是半个窗口，拖左右边
+/// 以宽为准，拖上下边以高为准，拖角取两者里较大的那个，都按比例补齐另一边。摆好后若越出
+/// 锚点屏幕的工作区就整体推回——中心让位于不出屏，否则放在角落的窗口几乎放不大。
+pub fn resize_centered(rect: Rect, edge: Edge, anchor: DragAnchor, limits: AspectLimits) -> Rect {
     let AspectLimits {
         ratio,
         frame: (frame_w, frame_h),
         min_width,
         max_width,
     } = limits;
-    let client_w = f64::from(rect.right - rect.left - frame_w);
-    let client_h = f64::from(rect.bottom - rect.top - frame_h);
-    let wanted = match edge {
-        Edge::Left | Edge::Right => client_w,
-        Edge::Top | Edge::Bottom => client_h * ratio,
-        _ => client_w.max(client_h * ratio),
+    let (cx, cy) = anchor.center;
+    let from_x = edge
+        .dragged_x(rect)
+        .map(|x| 2.0 * (f64::from(x) - cx).abs() - f64::from(frame_w));
+    let from_y = edge
+        .dragged_y(rect)
+        .map(|y| (2.0 * (f64::from(y) - cy).abs() - f64::from(frame_h)) * ratio);
+    let wanted = match (from_x, from_y) {
+        (Some(w), Some(h)) => w.max(h),
+        (Some(w), None) => w,
+        (None, Some(h)) => h,
+        (None, None) => f64::from(rect.right - rect.left - frame_w),
     };
     let width = (wanted.round() as i32).clamp(min_width, max_width.max(min_width));
     let height = (f64::from(width) / ratio).round() as i32;
     let outer_w = width + frame_w;
     let outer_h = height + frame_h;
 
-    let (left, right) = if edge.drags_left() {
-        (rect.right - outer_w, rect.right)
-    } else {
-        (rect.left, rect.left + outer_w)
+    let work = anchor.work_area;
+    let fit = |start: f64, len: i32, lo: i32, hi: i32| -> i32 {
+        let start = start.round() as i32;
+        // 先贴远端再贴近端：窗口比工作区还大（最小尺寸大过小屏）时宁可露出左上角的标题栏
+        start.min(hi - len).max(lo)
     };
-    let (top, bottom) = if edge.drags_top() {
-        (rect.bottom - outer_h, rect.bottom)
-    } else {
-        (rect.top, rect.top + outer_h)
-    };
+    let left = fit(
+        cx - f64::from(outer_w) / 2.0,
+        outer_w,
+        work.left,
+        work.right,
+    );
+    let top = fit(
+        cy - f64::from(outer_h) / 2.0,
+        outer_h,
+        work.top,
+        work.bottom,
+    );
     Rect {
         left,
         top,
-        right,
-        bottom,
+        right: left + outer_w,
+        bottom: top + outer_h,
     }
 }
 
@@ -164,12 +207,16 @@ mod win {
     };
     use windows_sys::Win32::UI::HiDpi::GetDpiForWindow;
     use windows_sys::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
-    use windows_sys::Win32::UI::WindowsAndMessaging::{GetClientRect, GetWindowRect, WM_SIZING};
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        GetClientRect, GetWindowRect, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_SIZING,
+    };
 
-    use super::{lock_aspect, AspectLimits, Edge, Rect, PANEL_BASE};
+    use super::{resize_centered, AspectLimits, DragAnchor, Edge, Rect, PANEL_BASE};
 
     const SUBCLASS_ID: usize = 0x00F1_A1B0;
     static INSTALLED: AtomicBool = AtomicBool::new(false);
+    /// 本次拖动的锚点。消息都在窗口线程上串行到达，锁只为满足 `static` 的 `Sync`。
+    static ANCHOR: std::sync::Mutex<Option<DragAnchor>> = std::sync::Mutex::new(None);
 
     /// subclass 必须在窗口所属线程（主线程）上挂，否则 `SetWindowSubclass` 直接失败。
     pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
@@ -197,20 +244,24 @@ mod win {
         _id: usize,
         _data: usize,
     ) -> LRESULT {
+        match msg {
+            // 移动窗口也会进出这对消息；锚点只在 WM_SIZING 里用，记下无妨
+            WM_ENTERSIZEMOVE => set_anchor(anchor_now(hwnd)),
+            WM_EXITSIZEMOVE => set_anchor(None),
+            _ => {}
+        }
         if msg == WM_SIZING && lparam != 0 {
-            if let (Some(edge), Some(limits)) = (Edge::from_wmsz(wparam as u32), limits(hwnd)) {
+            let anchor = ANCHOR
+                .lock()
+                .ok()
+                .and_then(|a| *a)
+                .or_else(|| anchor_now(hwnd));
+            let edge = Edge::from_wmsz(wparam as u32);
+            let limits = anchor.and_then(|a| limits(hwnd, a));
+            if let (Some(edge), Some(anchor), Some(limits)) = (edge, anchor, limits) {
                 // SAFETY: WM_SIZING 的 lParam 是系统给的可写 RECT 指针，非空已判断
                 let r = &mut *(lparam as *mut RECT);
-                let locked = lock_aspect(
-                    Rect {
-                        left: r.left,
-                        top: r.top,
-                        right: r.right,
-                        bottom: r.bottom,
-                    },
-                    edge,
-                    limits,
-                );
+                let locked = resize_centered(to_rect(r), edge, anchor, limits);
                 r.left = locked.left;
                 r.top = locked.top;
                 r.right = locked.right;
@@ -221,8 +272,38 @@ mod win {
         DefSubclassProc(hwnd, msg, wparam, lparam)
     }
 
-    /// 每帧现算：拖到另一块 DPI 不同的屏幕上时，最小尺寸与工作区都要跟着换。
-    unsafe fn limits(hwnd: HWND) -> Option<AspectLimits> {
+    fn set_anchor(anchor: Option<DragAnchor>) {
+        if let Ok(mut slot) = ANCHOR.lock() {
+            *slot = anchor;
+        }
+    }
+
+    fn to_rect(r: &RECT) -> Rect {
+        Rect {
+            left: r.left,
+            top: r.top,
+            right: r.right,
+            bottom: r.bottom,
+        }
+    }
+
+    /// 以窗口当前的矩形和所在屏幕的工作区作锚点；拖动中窗口始终留在这块屏幕上。
+    unsafe fn anchor_now(hwnd: HWND) -> Option<DragAnchor> {
+        let mut window: RECT = std::mem::zeroed();
+        if GetWindowRect(hwnd, &mut window) == 0 {
+            return None;
+        }
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if GetMonitorInfoW(monitor, &mut info) == 0 {
+            return None;
+        }
+        Some(DragAnchor::new(to_rect(&window), to_rect(&info.rcWork)))
+    }
+
+    /// 每帧现算 DPI：拖动开始前窗口可能刚从另一块 DPI 不同的屏幕上挪过来。
+    unsafe fn limits(hwnd: HWND, anchor: DragAnchor) -> Option<AspectLimits> {
         let (base_w, base_h) = (*PANEL_BASE.lock().ok()?)?;
         let scale = f64::from(GetDpiForWindow(hwnd).max(96)) / 96.0;
         let ratio = base_w / base_h;
@@ -235,16 +316,10 @@ mod win {
         let frame_w = (window.right - window.left) - (client.right - client.left);
         let frame_h = (window.bottom - window.top) - (client.bottom - client.top);
 
-        let mut info: MONITORINFO = std::mem::zeroed();
-        info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
-        let monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
-        let max_width = if GetMonitorInfoW(monitor, &mut info) != 0 {
-            let work_w = f64::from(info.rcWork.right - info.rcWork.left - frame_w);
-            let work_h = f64::from(info.rcWork.bottom - info.rcWork.top - frame_h);
-            work_w.min(work_h * ratio).floor() as i32
-        } else {
-            i32::MAX
-        };
+        let work = anchor.work_area;
+        let work_w = f64::from(work.right - work.left - frame_w);
+        let work_h = f64::from(work.bottom - work.top - frame_h);
+        let max_width = work_w.min(work_h * ratio).floor() as i32;
         Some(AspectLimits {
             ratio,
             frame: (frame_w, frame_h),

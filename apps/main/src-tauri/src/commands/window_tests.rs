@@ -10,68 +10,100 @@ fn vertical() -> AspectLimits {
     }
 }
 
-const BASE: Rect = Rect {
-    left: 100,
-    top: 50,
-    right: 505,
-    bottom: 770,
+const WORK: Rect = Rect {
+    left: 0,
+    top: 0,
+    right: 1920,
+    bottom: 2000,
 };
+
+/// 中心在 (960, 1000) 的设计尺寸窗口，离工作区四边都远。
+const BASE: Rect = Rect {
+    left: 758,
+    top: 640,
+    right: 1163,
+    bottom: 1360,
+};
+
+fn anchor(window: Rect) -> DragAnchor {
+    DragAnchor::new(window, WORK)
+}
 
 fn size(r: Rect) -> (i32, i32) {
     (r.right - r.left, r.bottom - r.top)
 }
 
-#[test]
-fn dragging_right_edge_follows_width_and_grows_downward() {
-    let proposed = Rect { right: 708, ..BASE };
-    let r = lock_aspect(proposed, Edge::Right, vertical());
-    assert_eq!(size(r), (608, 1081));
-    assert_eq!((r.left, r.top), (BASE.left, BASE.top));
+/// 中心不动：左右边之和、上下边之和与锚点窗口相差不超过 1（奇数宽高的中心落在半像素上）。
+fn assert_centered(r: Rect, around: Rect) {
+    let dx = (r.left + r.right) - (around.left + around.right);
+    let dy = (r.top + r.bottom) - (around.top + around.bottom);
+    assert!(
+        dx.abs() <= 1 && dy.abs() <= 1,
+        "{r:?} 偏离 {around:?} 的中心"
+    );
 }
 
 #[test]
-fn dragging_bottom_edge_follows_height_and_grows_rightward() {
+fn dragging_right_edge_grows_both_sides_around_center() {
+    // BASE 中心横坐标 960.5，右边拉到 1264：半宽 303.5
     let proposed = Rect {
-        bottom: 50 + 1080,
+        right: 1264,
         ..BASE
     };
-    let r = lock_aspect(proposed, Edge::Bottom, vertical());
+    let r = resize_centered(proposed, Edge::Right, anchor(BASE), vertical());
+    assert_eq!(size(r), (607, 1079));
+    assert!(r.left < BASE.left);
+    assert_centered(r, BASE);
+}
+
+#[test]
+fn dragging_top_edge_follows_height_around_center() {
+    // 上边拉到中心上方 540：高 1080，按比例宽 607.5 取整 608
+    let proposed = Rect { top: 460, ..BASE };
+    let r = resize_centered(proposed, Edge::Top, anchor(BASE), vertical());
     assert_eq!(size(r), (608, 1081));
-    assert_eq!((r.left, r.top), (BASE.left, BASE.top));
+    assert!(r.bottom > BASE.bottom);
+    assert_centered(r, BASE);
 }
 
 #[test]
-fn dragging_left_or_top_keeps_opposite_edge_anchored() {
-    let proposed = Rect { left: 0, ..BASE };
-    let r = lock_aspect(proposed, Edge::Left, vertical());
-    assert_eq!(r.right, BASE.right);
-    assert_eq!(r.top, BASE.top);
-    assert_eq!(size(r), (505, 898));
-
-    let proposed = Rect { top: -310, ..BASE };
-    let r = lock_aspect(proposed, Edge::Top, vertical());
-    assert_eq!(r.bottom, BASE.bottom);
-    assert_eq!(r.left, BASE.left);
+fn left_and_right_are_symmetric() {
+    let a = anchor(BASE);
+    let right = resize_centered(
+        Rect {
+            right: 1300,
+            ..BASE
+        },
+        Edge::Right,
+        a,
+        vertical(),
+    );
+    let left = resize_centered(Rect { left: 621, ..BASE }, Edge::Left, a, vertical());
+    assert_eq!(right, left);
 }
 
 #[test]
-fn corner_takes_the_larger_of_both_and_anchors_opposite_corner() {
-    // 宽只拉了 50，高拉了 360：以高为准
+fn corner_takes_the_larger_of_both() {
+    // 横向只拉了 50（宽 505），纵向拉了 360（高 1440 → 宽 810）：以高为准
     let proposed = Rect {
-        left: 50,
-        top: -310,
+        right: BASE.right + 50,
+        bottom: BASE.bottom + 360,
         ..BASE
     };
-    let r = lock_aspect(proposed, Edge::TopLeft, vertical());
-    assert_eq!((r.right, r.bottom), (BASE.right, BASE.bottom));
-    assert_eq!(size(r), (608, 1081));
+    let r = resize_centered(proposed, Edge::BottomRight, anchor(BASE), vertical());
+    assert_eq!(size(r), (810, 1440));
+    assert_centered(r, BASE);
 }
 
 #[test]
-fn clamps_to_design_size_and_work_area() {
-    let shrink = Rect { right: 300, ..BASE };
+fn clamps_to_design_size_and_max_size() {
+    let a = anchor(BASE);
+    let shrink = Rect {
+        right: 1000,
+        ..BASE
+    };
     assert_eq!(
-        size(lock_aspect(shrink, Edge::Right, vertical())),
+        size(resize_centered(shrink, Edge::Right, a, vertical())),
         (405, 720)
     );
 
@@ -80,9 +112,58 @@ fn clamps_to_design_size_and_work_area() {
         ..BASE
     };
     assert_eq!(
-        size(lock_aspect(huge, Edge::Right, vertical())),
+        size(resize_centered(huge, Edge::Right, a, vertical())),
         (1080, 1920)
     );
+}
+
+#[test]
+fn pushed_back_inside_work_area_near_edges() {
+    // 贴左上角的窗口向右下放大：中心让位，左上贴住工作区
+    let corner = Rect {
+        left: 0,
+        top: 0,
+        right: 405,
+        bottom: 720,
+    };
+    let proposed = Rect {
+        right: 810,
+        bottom: 1440,
+        ..corner
+    };
+    let r = resize_centered(proposed, Edge::BottomRight, anchor(corner), vertical());
+    assert_eq!((r.left, r.top), (0, 0));
+    assert!(r.right - r.left > 405);
+
+    // 贴右下角的窗口放到最大：仍完整留在工作区里
+    let corner = Rect {
+        left: 1515,
+        top: 1280,
+        right: 1920,
+        bottom: 2000,
+    };
+    let proposed = Rect {
+        left: -5000,
+        ..corner
+    };
+    let r = resize_centered(proposed, Edge::Left, anchor(corner), vertical());
+    assert_eq!(size(r), (1080, 1920));
+    assert!(r.left >= WORK.left && r.top >= WORK.top);
+    assert!(r.right <= WORK.right && r.bottom <= WORK.bottom);
+}
+
+#[test]
+fn oversized_window_keeps_top_left_visible() {
+    // 最小尺寸都放不进的小工作区：露出左上角的标题栏
+    let small = Rect {
+        left: 100,
+        top: 100,
+        right: 400,
+        bottom: 500,
+    };
+    let a = DragAnchor::new(BASE, small);
+    let r = resize_centered(BASE, Edge::Right, a, vertical());
+    assert_eq!((r.left, r.top), (small.left, small.top));
 }
 
 #[test]
@@ -91,13 +172,18 @@ fn frame_is_added_outside_the_locked_client_area() {
         frame: (16, 39),
         ..vertical()
     };
-    let proposed = Rect {
-        left: 0,
-        top: 0,
-        right: 810 + 16,
-        bottom: 10,
+    // 中心横坐标 750；右边拉到中心右侧 413，外框宽 826，减去边框客户区宽 810
+    let window = Rect {
+        left: 500,
+        top: 200,
+        right: 1000,
+        bottom: 1000,
     };
-    let r = lock_aspect(proposed, Edge::Right, limits);
+    let proposed = Rect {
+        right: 750 + 413,
+        ..window
+    };
+    let r = resize_centered(proposed, Edge::Right, anchor(window), limits);
     assert_eq!(size(r), (810 + 16, 1440 + 39));
 }
 
