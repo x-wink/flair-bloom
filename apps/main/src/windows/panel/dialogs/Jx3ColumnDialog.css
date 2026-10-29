@@ -1,0 +1,456 @@
+.jx3-card {
+  width: min(520px, calc(100vw - 32px));
+  max-width: min(520px, calc(100vw - 32px));
+  height: min(620px, calc(100vh - 48px));
+}
+
+.jx3-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--fb-space-4);
+}
+
+/* ---------- 门派与心法 ---------- */
+
+.jx3-pickers {
+  --jx3-control-h: 32px;
+  --jx3-control-r: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--fb-space-4);
+  padding: var(--fb-space-4) var(--fb-space-6);
+}
+
+/*
+ * 门派下拉与心法分段并排，按 @xwink/ui 的控件规范对齐：同一个控件高与圆角、同一种描边与底色。
+ * 分段器照它的工具组配方（tool-group.ts）：容器内边距 2px 等于项间隔，外框圆角 = 项圆角 + 2px，
+ * 内外同心；选中与悬停是当前文字色的灰底，不用主色——主色留给主按钮。
+ */
+.jx3-school {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+  box-sizing: border-box;
+  height: var(--jx3-control-h);
+  padding: 0 10px;
+  border: 1px solid var(--fb-border-soft);
+  border-radius: var(--jx3-control-r);
+  background: var(--fb-surface-soft);
+  color: var(--fb-text-strong);
+  font: inherit;
+  font-size: var(--fb-fs-sm);
+  cursor: pointer;
+  transition: border-color var(--fb-duration-base) ease;
+}
+
+.jx3-segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  box-sizing: border-box;
+  height: var(--jx3-control-h);
+  padding: 2px;
+  border: 1px solid var(--fb-border-soft);
+  border-radius: calc(var(--jx3-control-r) + 2px);
+  background: var(--fb-surface-soft);
+}
+
+.jx3-segmented__item {
+  height: 100%;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--jx3-control-r);
+  background: transparent;
+  color: var(--fb-text-weak);
+  font: inherit;
+  font-size: var(--fb-fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background var(--fb-duration-base) ease,
+    color var(--fb-duration-base) ease;
+}
+
+.jx3-segmented__item:hover {
+  color: var(--fb-text-strong);
+  background: color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.jx3-segmented__item[aria-pressed='true'] {
+  color: var(--fb-text-strong);
+  background: color-mix(in srgb, currentColor 15%, transparent);
+}
+
+.jx3-segmented__item[aria-pressed='true']:hover {
+  background: color-mix(in srgb, currentColor 20%, transparent);
+}
+
+.jx3-segmented__item:focus-visible {
+  outline: 2px solid var(--fb-color-primary);
+  outline-offset: -2px;
+}
+
+.jx3-school:hover,
+.jx3-school[aria-expanded='true'] {
+  border-color: var(--fb-color-primary);
+}
+
+.jx3-school__caret {
+  color: var(--fb-text-faint);
+  font-size: var(--fb-fs-xs);
+}
+
+.jx3-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+}
+
+.jx3-dot--hollow {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--fb-text-faint);
+}
+
+.jx3-spec {
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-text-regular);
+}
+
+.jx3-grid-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--fb-space-6);
+}
+
+.jx3-grid-label {
+  margin: 0 0 var(--fb-space-3);
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+}
+
+.jx3-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: var(--fb-space-3);
+}
+
+.jx3-chip {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+  padding: var(--fb-space-3) var(--fb-space-4);
+  border: 1px solid var(--fb-border-soft);
+  border-radius: var(--fb-radius-md);
+  background: transparent;
+  color: var(--fb-text-regular);
+  font: inherit;
+  font-size: var(--fb-fs-sm);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--fb-duration-base) ease,
+    background var(--fb-duration-base) ease;
+}
+
+.jx3-chip:hover {
+  border-color: var(--fb-color-primary);
+}
+
+.jx3-chip--active {
+  border-color: var(--fb-color-primary);
+  background: var(--fb-surface-soft);
+  color: var(--fb-text-strong);
+}
+
+/* ---------- 白皮书 / 宏 两段 ---------- */
+
+.jx3-section + .jx3-section {
+  margin-top: var(--fb-space-8);
+}
+
+.jx3-section__title {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+  margin: 0 0 var(--fb-space-3);
+  font-size: var(--fb-fs-md);
+  font-weight: var(--fb-fw-semibold);
+  color: var(--fb-text-strong);
+}
+
+.jx3-section__count {
+  min-width: 18px;
+  padding: 0 var(--fb-space-2);
+  border-radius: 9px;
+  background: var(--fb-surface-soft);
+  font-size: var(--fb-fs-xs);
+  font-weight: normal;
+  color: var(--fb-text-weak);
+  text-align: center;
+}
+
+.jx3-empty {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--fb-space-4);
+  padding: var(--fb-space-4) var(--fb-space-5);
+  border: 1px dashed var(--fb-border-soft);
+  border-radius: var(--fb-radius-md);
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-text-weak);
+  line-height: var(--fb-lh-relaxed);
+}
+
+.jx3-empty .fb-btn {
+  flex: none;
+}
+
+.jx3-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--fb-space-2);
+}
+
+.jx3-item {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-4);
+  padding: var(--fb-space-3) var(--fb-space-4);
+  border-radius: var(--fb-radius-md);
+  background: var(--fb-surface-soft);
+}
+
+.jx3-item__main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--fb-space-1);
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.jx3-item__title {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+  font-size: var(--fb-fs-md);
+  color: var(--fb-text-strong);
+  overflow-wrap: anywhere;
+}
+
+.jx3-item__main:hover .jx3-item__title {
+  color: var(--fb-color-primary-text);
+}
+
+.jx3-item__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--fb-space-3);
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+}
+
+.jx3-item__go {
+  flex: none;
+  color: var(--fb-text-faint);
+}
+
+/* 宏帖子：上面是帖子本身（点开原帖），下面一排是帖子里各个宏的复制按钮 */
+.jx3-item--post {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--fb-space-3);
+}
+
+.jx3-item__row {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-4);
+}
+
+.jx3-macros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fb-space-2);
+}
+
+.jx3-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fb-space-1);
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--fb-border-soft);
+  border-radius: 6px;
+  background: var(--fb-surface);
+  color: var(--fb-text-regular);
+  font: inherit;
+  font-size: var(--fb-fs-xs);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color var(--fb-duration-base) ease,
+    color var(--fb-duration-base) ease;
+}
+
+.jx3-copy:hover {
+  border-color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
+}
+
+.jx3-copy__icon {
+  color: var(--fb-text-faint);
+}
+
+.jx3-copy:hover .jx3-copy__icon {
+  color: inherit;
+}
+
+/* 授权条目带的宏正文：名称与复制在上，正文等宽原样换行 */
+.jx3-code {
+  border: 1px solid var(--fb-border-soft);
+  border-radius: var(--fb-radius-md);
+  background: var(--fb-surface);
+  overflow: hidden;
+}
+
+.jx3-code__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fb-space-3);
+  padding: var(--fb-space-2) var(--fb-space-2) var(--fb-space-2) var(--fb-space-4);
+  border-bottom: 1px solid var(--fb-border-soft);
+}
+
+.jx3-code__name {
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-text-strong);
+}
+
+.jx3-code__body {
+  margin: 0;
+  padding: var(--fb-space-3) var(--fb-space-4);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: var(--fb-fs-xs);
+  line-height: var(--fb-lh-relaxed);
+  color: var(--fb-text-regular);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.jx3-badge {
+  color: var(--fb-color-success-text);
+}
+
+.jx3-origin {
+  color: var(--fb-text-faint);
+}
+
+/* 公开收录的热门：没有授权记录，默认折叠，展开后写明来源与下架方式 */
+.jx3-others {
+  margin-top: var(--fb-space-3);
+}
+
+.jx3-others__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+  padding: var(--fb-space-1) 0;
+  border: none;
+  background: none;
+  font: inherit;
+  font-size: var(--fb-fs-sm);
+  color: var(--fb-text-weak);
+  cursor: pointer;
+}
+
+.jx3-others__toggle:hover {
+  color: var(--fb-color-primary-text);
+}
+
+.jx3-others__caret {
+  width: 1em;
+  font-size: var(--fb-fs-xs);
+}
+
+.jx3-others__note {
+  margin: var(--fb-space-2) 0 var(--fb-space-3);
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+  line-height: var(--fb-lh-relaxed);
+}
+
+.jx3-others .jx3-item {
+  background: transparent;
+  border: 1px solid var(--fb-border-soft);
+}
+
+.jx3-inline-link {
+  padding: 0;
+  border: none;
+  background: none;
+  font: inherit;
+  color: var(--fb-color-primary-text);
+  cursor: pointer;
+}
+
+.jx3-inline-link:hover {
+  text-decoration: underline;
+}
+
+.jx3-tag {
+  flex: none;
+  padding: 0 var(--fb-space-2);
+  border: 1px solid var(--fb-border-soft);
+  border-radius: var(--fb-radius-sm);
+  font-size: var(--fb-fs-xs);
+  font-weight: normal;
+  color: var(--fb-text-weak);
+}
+
+/* ---------- 底部 ---------- */
+
+.jx3-source {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+  min-width: 0;
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+}
+
+.jx3-refresh {
+  flex: none;
+  padding: 0 var(--fb-space-1);
+  border: none;
+  background: none;
+  color: var(--fb-text-weak);
+  font-size: var(--fb-fs-md);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.jx3-refresh:hover {
+  color: var(--fb-color-primary-text);
+}
+
+.jx3-refresh:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}

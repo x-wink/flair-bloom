@@ -71,6 +71,7 @@ import LicenseDialog from './dialogs/LicenseDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
 import ImportDialog from './dialogs/ImportDialog';
 import RepairDialog from './dialogs/RepairDialog';
+import Jx3ColumnDialog from './dialogs/Jx3ColumnDialog';
 import TourCatalogDialog from './dialogs/TourCatalogDialog';
 import SettingsDialog, {
   type SettingsTab,
@@ -401,6 +402,7 @@ export default function PanelApp() {
   const [showAbout, setShowAbout] = useState(false);
   const [showLicense, setShowLicense] = useState(false);
   const [showTourCatalog, setShowTourCatalog] = useState(false);
+  const [showJx3, setShowJx3] = useState(false);
   const [activeTour, setActiveTour] = useState<TourDef | undefined>(undefined);
   // 首启判定只准跑一次：版本位要等教程走完（或退出）才落盘，期间 effect 会因其它依赖重跑，
   // 没有这道闸就会二次触发。
@@ -2348,6 +2350,11 @@ export default function PanelApp() {
       setLayout: switchLayout,
       openSettings: handleShowSettings,
       closeSettings: () => setShowSettings(false),
+      openJx3: () => {
+        closeMenus();
+        setShowJx3(true);
+      },
+      closeJx3: () => setShowJx3(false),
       closeMenus,
       createSampleGroup,
       deleteSampleGroup,
@@ -3146,6 +3153,13 @@ export default function PanelApp() {
               })),
             ],
           },
+          {
+            label: '剑网三专栏',
+            onClick: () => {
+              setMenuOpen(false);
+              setShowJx3(true);
+            },
+          },
           { type: 'divider' },
           {
             label: '新手教程',
@@ -3290,6 +3304,10 @@ export default function PanelApp() {
             onClose={() => setUpdateNotice(null)}
           />
         )}
+      </Overlay>
+
+      <Overlay open={showJx3} onClose={() => setShowJx3(false)}>
+        <Jx3ColumnDialog themeColor={theme.color} onClose={() => setShowJx3(false)} />
       </Overlay>
 
       <Overlay open={showTourCatalog} onClose={() => setShowTourCatalog(false)}>

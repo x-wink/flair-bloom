@@ -32,6 +32,7 @@ description: 气质花（FlairBloom）按键助手的项目文档单一来源：
 | `layouts`         | [横版键鼠图与浮窗](references/manual/layouts.md)  | 横版点键三态、图例、统一间隔、收进浮窗           |
 | `profiles`        | [多套配置](references/manual/profiles.md)         | 新建 / 切换、导入导出 `.qzh`、托盘切换           |
 | `settings`        | [热键、声音与外观](references/manual/settings.md) | 全局热键、语音播报、主题、关闭行为与自启         |
+| `jx3`             | [剑网三专栏](references/manual/jx3.md)            | 按门派心法查白皮书、复制云端宏名与宏正文         |
 
 每篇的「步骤大纲」表是教程文件的规格：锚点、讲什么、实操判定。写步骤时守一条：文案里让用户做的动作（点、勾、按）必须是实操步（有 `done`），讲解步会铺一层遮挡、高亮的目标也点不动，让用户去点等于卡死。`pnpm skills:check` 校验教程 id 与篇名一一对应、三个入口文件的相对链接存在，pre-commit 在改 `.md`、`skills/`、`tour/` 时自动跑。
 

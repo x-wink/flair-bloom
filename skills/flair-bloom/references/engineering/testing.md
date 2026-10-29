@@ -17,7 +17,7 @@
 
 `.github/workflows/ci.yml`（push:main / PR 触发，windows-latest）：`cargo fmt --check` + `cargo clippy -D warnings` + `cargo test`（排除 Tauri app `flair-bloom`，其构建依赖前端 dist；逻辑都在各 crate）。L1/L1.5/引擎/边界用例每次推送自动跑。L2 冒烟为 `#[ignore]` 不在 CI 跑（需交互式会话）。共享 crate 覆盖率另由 `coverage.yml` 把守 ≥85%。
 
-前端没有测试框架，界面里可抽成纯函数的几何 / 判定逻辑放 `scripts/*.test.ts`，用 Node 内置 test runner 加类型剥离直接跑：`pnpm test:ui`（Node ≥ 22.18，更早的 22.x 类型剥离要加 `--experimental-strip-types` 才生效）。目前覆盖横版走线（`panel/hkbWires.ts`：边集合、参与键、扇出偏移、出线侧选择与嵌套不交叉、切角、端点缺失）、Markdown 内联切分（`components/markdown-parse.ts`）与主题对比度（`scripts/theme-contrast.test.ts`：20 预设 × 亮暗下文字四档、语义色文字、主色文字、实底前景三态都过 4.5:1，淡染 token 不超上限，`MODE_SURFACES` 与 `theme.css` 一致）。不进 `ci.yml`——那里只装 Rust 工具链；pre-commit 在暂存了 TS 文件时跑，`release.yml` 已装 Node，发版前再跑一遍兜底。Markdown 那条「不得用后行断言」是 macOS 12 面板白屏的护栏，不能只靠人记得本地跑。
+前端没有测试框架，界面里可抽成纯函数的几何 / 判定逻辑放 `scripts/*.test.ts`，用 Node 内置 test runner 加类型剥离直接跑：`pnpm test:ui`（Node ≥ 22.18，更早的 22.x 类型剥离要加 `--experimental-strip-types` 才生效）。目前覆盖横版走线（`panel/hkbWires.ts`：边集合、参与键、扇出偏移、出线侧选择与嵌套不交叉、切角、端点缺失）、Markdown 内联切分（`components/markdown-parse.ts`）与主题对比度（`scripts/theme-contrast.test.ts`：全部预设 × 亮暗下文字四档、语义色文字、主色文字、实底前景三态都过 4.5:1，淡染 token 不超上限，`MODE_SURFACES` 与 `theme.css` 一致）。不进 `ci.yml`——那里只装 Rust 工具链；pre-commit 在暂存了 TS 文件时跑，`release.yml` 已装 Node，发版前再跑一遍兜底。Markdown 那条「不得用后行断言」是 macOS 12 面板白屏的护栏，不能只靠人记得本地跑。
 
 ## L1 已落地：调度器模拟 harness
 

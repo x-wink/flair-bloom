@@ -37,6 +37,7 @@ use commands::{
         set_input_mode, set_rules, EngineState,
     },
     import_profile::{import_external_config, preview_import, scan_import_configs},
+    jx3::{get_jx3_column, open_jx3_link, Jx3State},
     license::{activate_license, get_license_status, get_membership_agreement, LicenseState},
     log::{log_from_frontend, open_app_dir},
     profile::{
@@ -160,6 +161,7 @@ pub fn run() {
         })
         .manage(EngineState(burst_engine.clone()))
         .manage(ProfileNotice::default())
+        .manage(Jx3State::default())
         .manage(UpdateLock(AtomicBool::new(false)))
         .invoke_handler(tauri::generate_handler![
             set_global_enabled,
@@ -201,6 +203,8 @@ pub fn run() {
             agree_license,
             should_auto_enable_on_start,
             open_link,
+            get_jx3_column,
+            open_jx3_link,
             check_update,
             apply_pending_update,
             exit_app,
@@ -295,6 +299,7 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 check_for_updates(handle).await;
             });
+            commands::jx3::prefetch(app.handle());
 
             info!("{} started", APP_NAME);
             Ok(())

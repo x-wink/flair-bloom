@@ -1,4 +1,4 @@
-// 主题对比度：20 个门派预设 × 亮 / 暗，文字四档、主色文字、实底前景都要过 WCAG AA 4.5:1。
+// 主题对比度：21 个门派与流派预设 × 亮 / 暗，文字四档、主色文字、实底前景都要过 WCAG AA 4.5:1。
 // 调色时把灰字再调淡一点、把面板淡染再调浓一点都不会有任何可见报错，所以钉在这里。
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';

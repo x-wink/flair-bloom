@@ -2,6 +2,7 @@ import type { TourDef } from '../types';
 import { gameMode } from './game-mode';
 import { gettingStarted } from './getting-started';
 import { groups } from './groups';
+import { jx3 } from './jx3';
 import { layouts } from './layouts';
 import { profiles } from './profiles';
 import { rules } from './rules';
@@ -16,6 +17,7 @@ export const TOURS: TourDef[] = [
   layouts,
   profiles,
   settings,
+  jx3,
 ];
 
 export function findTour(id: string): TourDef | undefined {

@@ -57,6 +57,8 @@ export interface TourHost {
   setLayout: (layout: TourSnapshot['layout']) => Promise<void>;
   openSettings: (tab: TourSnapshot['settingsTab']) => void;
   closeSettings: () => void;
+  openJx3: () => void;
+  closeJx3: () => void;
   closeMenus: () => void;
   /**
    * 建互斥组教程的示例组（全部停用）；已存在就什么也不做。键位从候选里挑没被占用的，

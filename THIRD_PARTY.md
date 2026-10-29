@@ -40,3 +40,15 @@ DDHID 模式因稳定性风险（可能导致蓝屏）已永久移除，安装�
 - 许可证：MPL-2.0
 - 用途：「外设模式」经 USB 串口与外设驱动通信、按需枚举串口
 - 集成方式：`serialport` crate（v4）原样作为依赖静态链接，未修改其源码；源码见上方仓库或 crates.io
+
+## JX3Box 公开数据包
+
+- 项目：[@jx3box/jx3box-data](https://www.npmjs.com/package/@jx3box/jx3box-data)（v3.9.9）
+- 作者：JX3Box
+- 许可证：MIT
+- 用途：剑网三专栏的心法表（心法编号、名称、定位，取自 `xf.json` 与 `mount_group.json`）与无相楼主题色（`colors.json`）
+- 集成方式：按其中的数据手工整理进 `apps/site/public/jx3/column.json` 与 `theme.ts`，不依赖、不打包这个包
+
+### 说明
+
+专栏里的白皮书与宏只收标题、作者与原文链接（作者授权时另收宏正文），版权归原作者，内容以原站为准。

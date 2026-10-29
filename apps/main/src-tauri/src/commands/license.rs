@@ -400,14 +400,19 @@ async fn request_license(
 }
 
 fn http_client() -> Result<reqwest::Client, ActivationError> {
+    build_http_client(REQUEST_TIMEOUT).map_err(failed)
+}
+
+/// 应用自己发请求（激活、剑网三专栏）共用的客户端：rustls 加应用版本号 UA。
+pub(crate) fn build_http_client(timeout: Duration) -> Result<reqwest::Client, String> {
     if rustls::crypto::CryptoProvider::get_default().is_none() {
         let _ = rustls::crypto::ring::default_provider().install_default();
     }
     reqwest::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
+        .timeout(timeout)
         .user_agent(concat!("FlairBloom/", env!("CARGO_PKG_VERSION")))
         .build()
-        .map_err(|e| failed(format!("初始化网络客户端失败：{e}")))
+        .map_err(|e| format!("初始化网络客户端失败：{e}"))
 }
 
 fn network_error(e: reqwest::Error) -> ActivationError {

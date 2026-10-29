@@ -26,14 +26,15 @@ export interface SectPreset {
 }
 
 /**
- * 主题色预设。配色取自剑网三无界全 20 门派心法代表色（社区约定，非官方 hex）。
+ * 主题色预设。配色取自剑网三无界全 20 门派心法代表色（社区约定，非官方 hex），
+ * 外加流派无相楼（取 JX3Box 的门派色）。
  * 实底上的文字按对比度取白或近黑（见 deriveThemeVariables），偏亮的绯粉、流金等用深字。
  *
  * `sect` 门派名仅作来源对照、不在 UI 显示——界面只展示色块与雅称（`name`），
  * 悬停显示 `name`。下表即门派 ↔ 配色对照：
  * 万花霞紫 / 七秀绯粉 / 少林缁黄 / 纯阳天青 / 天策赤焰 / 藏剑流金 / 五毒瘴紫 /
  * 唐门玄靛 / 明教圣火 / 丐帮醉褐 / 苍云铁衣 / 长歌空青 / 霸刀沧海 / 蓬莱缥碧 /
- * 凌雪阁墨血 / 衍天宗玄阴 / 北天药宗药绿 / 万灵山庄苍木 / 刀宗赤铜 / 段氏碧玉。
+ * 凌雪阁墨血 / 衍天宗玄阴 / 北天药宗药绿 / 万灵山庄苍木 / 刀宗赤铜 / 段氏碧玉 / 无相楼丁香。
  */
 export const SECT_PRESETS: SectPreset[] = [
   { id: 'wanhua', sect: '万花', name: '霞紫', color: '#6c4de6' },
@@ -56,6 +57,7 @@ export const SECT_PRESETS: SectPreset[] = [
   { id: 'wanling', sect: '万灵山庄', name: '苍木', color: '#6b8e3d' },
   { id: 'daozong', sect: '刀宗', name: '赤铜', color: '#b5563a' },
   { id: 'duanshi', sect: '段氏', name: '碧玉', color: '#0f9f86' },
+  { id: 'wuxiang', sect: '无相楼', name: '丁香', color: '#a18de3' },
 ];
 
 export const DEFAULT_THEME_COLOR = SECT_PRESETS[0].color;

@@ -3,6 +3,7 @@ pub mod ddhid_diagnostic;
 pub mod driver;
 pub mod engine;
 pub mod import_profile;
+pub mod jx3;
 pub mod license;
 pub mod log;
 pub mod profile;
