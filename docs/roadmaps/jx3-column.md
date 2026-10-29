@@ -91,7 +91,7 @@ Goal: ☰ 菜单打开「剑网三专栏」，按门派、心法找到白皮书�
 - **Change:** 新增说明书 `manual/jx3.md` 与新手教程 `tour/tours/jx3.ts`（三步：☰ 菜单打开专栏 → 选门派心法 → 复制宏名）；`engineering/architecture.md` 补数据来源、回落与外链放行；产品承诺两处已按 D13 改好；README 加一行功能介绍；`CHANGELOG.md` `[Unreleased]` 写「新功能」（含 D12 的作者邀请）（「行为变更」已按 D13 写好）。`pnpm skills:check` 通过。
 - **Depends on:** T3
 
-### T6 — 站点发布与真机冒烟 · 进度: 未开始
+### T6 — 站点发布与真机冒烟 · 进度: 进行中（site-v0.1.9 与 v0.7.0 已发布，2026-10-29；线上 column.json 已核对，真机冒烟待做）
 
 - **Fixes:** I3
 - **Change:** 推 `site-v*` tag 发布站点，让 `column.json` 先于应用上线（**推 tag 前取得作者授权**）。Windows 上 `pnpm dev`：联网打开专栏显示线上数据；断网后显示缓存；清掉缓存后显示快照；点白皮书和宏能用默认浏览器打开；复制宏名后粘贴到游戏插件里能同步。
