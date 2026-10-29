@@ -8,6 +8,8 @@ on:
       - 'apps/site/**'
       - 'apps/main/src/windows/panel/theme.ts'
       - 'apps/main/src/windows/panel/components/markdown-parse.ts'
+      - 'apps/main/src/windows/panel/jx3/**'
+      - 'scripts/jx3-column.test.ts'
       - '.github/workflows/site.yml'
   push:
     branches: [main]
@@ -15,6 +17,8 @@ on:
       - 'apps/site/**'
       - 'apps/main/src/windows/panel/theme.ts'
       - 'apps/main/src/windows/panel/components/markdown-parse.ts'
+      - 'apps/main/src/windows/panel/jx3/**'
+      - 'scripts/jx3-column.test.ts'
       - '.github/workflows/site.yml'
     tags:
       - 'site-v*'
@@ -43,6 +47,9 @@ jobs:
         env:
           XWINK_NPM_TOKEN: ${{ secrets.XWINK_NPM_TOKEN }}
       - run: pnpm install --frozen-lockfile
+      # 剑网三专栏数据随站点发布、应用启动时拉取；字段写错发出去，已装的应用只能提示数据有误
+      - name: 剑网三专栏数据校验
+        run: node --test ../../scripts/jx3-column.test.ts
       - run: pnpm typecheck
       - run: pnpm build
       - name: 产物断言
@@ -98,8 +105,10 @@ jobs:
         run: |
           set -eu
           ASSET="$(cd .output/public && find _nuxt -type f | head -1)"
+          # 剑网三专栏数据由应用启动时拉取，丢了应用只能回落内置快照，一起验
           for URL in "https://app.xwink.fun/flair-bloom/" \
-                     "https://app.xwink.fun/flair-bloom/${ASSET}"; do
+                     "https://app.xwink.fun/flair-bloom/${ASSET}" \
+                     "https://app.xwink.fun/flair-bloom/jx3/column.json"; do
             CODE="$(curl -s -o /dev/null -w '%{http_code}' "${URL}" || true)"
             [ "${CODE}" = "200" ] || { echo "${URL} → ${CODE}" >&2; exit 1; }
             echo "${URL} → 200"
