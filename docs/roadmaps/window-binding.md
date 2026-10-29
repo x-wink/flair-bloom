@@ -163,3 +163,8 @@ T1 ─> T3 ─┼─> T5 ─> T6 ─> T7
 - UWP / Game Pass 游戏：前台窗口属于 `ApplicationFrameHost.exe`，需要再找它的子窗口才能认出游戏，先在说明书的常见坑里注明不支持。
 - 一份配置绑定多个窗口：等有人提出需求再说，`WindowBinding` 届时改成列表要升 schema。
 - 绑定列表里显示窗口图标。
+
+## 9. 交接 / Handoff
+
+- **进度（2026-10-29）：** 设计已定，T1～T8 都未开工；v0.7.0 不含窗口绑定。
+- **下一步入口：** T1（`qzh-profile` 里的 `WindowBinding` 与匹配逻辑）与 T4（引擎前台闸门、挂起与恢复）互不依赖，可以并行起步；T3 新建 `win-foreground` crate 时记得 `[lints] workspace = true`，并加入 `coverage.yml` 与 `package.json` 的 `coverage` 脚本。T8 真机冒烟要作者在游戏里做。
