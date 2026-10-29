@@ -8,6 +8,8 @@
 
 **填写原则**：`[Unreleased]` 记录相较上一个发布版本的**最终净变化**，不是每次提交的流水；同一功能多次迭代只写最终结果，已被撤销的改动不出现。
 
+**权益功能**照常写进公告，但统一放在版本节最前面的 `### 亲友专属` 一节，节首用一句话说明需要兑换码，不和人人可用的改动混在一起。这样没有兑换码的用户读公告时，不会去找一个自己界面上根本没有的入口。
+
 ## 应用名称入口
 
 改名时同步：前端 `apps/main/src/constants.ts` 的 `APP_NAME`（中文）/ `APP_NAME_EN`；Rust `apps/main/src-tauri/src/lib.rs` 的 `APP_NAME` / `APP_NAME_CN`；配置 `tauri.conf.json` 的 `productName` / `title`；`apps/main/src-tauri/Cargo.toml` 的 `name`（标识符，轻易不改）。
