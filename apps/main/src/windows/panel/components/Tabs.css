@@ -90,10 +90,10 @@
 }
 
 .fb-tab-bar--underline .fb-tab:hover {
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 .fb-tab-bar--underline .fb-tab--active {
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   border-bottom-color: var(--fb-color-primary);
   font-weight: var(--fb-fw-semibold);
 }
@@ -116,7 +116,7 @@
 .fb-tab-bar--pill .fb-tab--active {
   background: var(--fb-surface);
   border-color: var(--fb-border-soft);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 
 /* ── Badge ────────────────────────────────────────────────── */
@@ -125,6 +125,6 @@
   padding: 1px var(--fb-space-4);
   border-radius: var(--fb-radius-pill);
   background: rgba(var(--fb-color-primary-rgb), 0.12);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   font-weight: var(--fb-fw-medium);
 }

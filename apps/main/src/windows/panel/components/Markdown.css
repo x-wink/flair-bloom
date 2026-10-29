@@ -85,7 +85,7 @@
 
 /* 链接不可点（WebView 会被导航走），只作视觉区分并在 title 里给出完整地址 */
 .md-link {
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   text-decoration: underline;
   text-decoration-style: dotted;
   text-underline-offset: 2px;

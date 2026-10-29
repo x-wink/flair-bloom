@@ -21,7 +21,7 @@
 }
 
 .group-timeline__beat.is-current {
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   font-weight: var(--fb-fw-semibold);
 }
 

@@ -23,12 +23,12 @@
 }
 
 .repair-summary--ok {
-  color: var(--fb-color-success-active);
+  color: var(--fb-color-success-text);
   font-weight: var(--fb-fw-semibold);
 }
 
 .repair-summary--warn {
-  color: var(--fb-color-warning-active, #a85d00);
+  color: var(--fb-color-warning-text);
   font-weight: var(--fb-fw-semibold);
 }
 
@@ -136,7 +136,7 @@
 
 .repair-flag--ok {
   background: var(--fb-color-success-soft);
-  color: var(--fb-color-success-active);
+  color: var(--fb-color-success-text);
 }
 
 .repair-flag--off {
@@ -234,22 +234,22 @@
 
 .repair-flag--info {
   background: var(--fb-color-success-soft);
-  color: var(--fb-color-success-active);
+  color: var(--fb-color-success-text);
 }
 
 .repair-flag--warn {
   background: var(--fb-color-warning-soft, #fff4d6);
-  color: var(--fb-color-warning-active, #a85d00);
+  color: var(--fb-color-warning-text);
 }
 
 .repair-flag--error {
   background: var(--fb-color-danger-soft, #fde2e2);
-  color: var(--fb-color-danger-active, #b3261e);
+  color: var(--fb-color-danger-text);
 }
 
 .repair-flag--step-ok {
   background: var(--fb-color-success-soft);
-  color: var(--fb-color-success-active);
+  color: var(--fb-color-success-text);
 }
 
 .repair-flag--step-skipped {
@@ -259,12 +259,12 @@
 
 .repair-flag--step-failed {
   background: var(--fb-color-danger-soft, #fde2e2);
-  color: var(--fb-color-danger-active, #b3261e);
+  color: var(--fb-color-danger-text);
 }
 
 .repair-flag--step-pending_reboot {
   background: var(--fb-color-warning-soft, #fff4d6);
-  color: var(--fb-color-warning-active, #a85d00);
+  color: var(--fb-color-warning-text);
 }
 
 .repair-log {
@@ -282,11 +282,11 @@
 }
 
 .repair-log-summary--ok {
-  color: var(--fb-color-success-active);
+  color: var(--fb-color-success-text);
 }
 
 .repair-log-summary--fail {
-  color: var(--fb-color-danger-active, #b3261e);
+  color: var(--fb-color-danger-text);
 }
 
 .repair-log-steps {

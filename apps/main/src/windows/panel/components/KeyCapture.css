@@ -37,9 +37,9 @@
 
 .key-capture.key-capture-error {
   border-color: var(--fb-color-danger);
-  color: var(--fb-color-danger);
+  color: var(--fb-color-danger-text);
 }
 .key-capture.key-capture-warn {
   border-color: var(--fb-color-warning);
-  color: var(--fb-color-warning);
+  color: var(--fb-color-warning-text);
 }

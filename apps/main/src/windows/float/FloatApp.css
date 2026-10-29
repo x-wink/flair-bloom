@@ -44,8 +44,8 @@ body {
   background:
     radial-gradient(
       circle at 100% 100%,
-      rgba(var(--fb-color-primary-rgb), 0.6) 0%,
-      rgba(var(--fb-color-primary-rgb), 0.3) 38%,
+      rgba(var(--fb-color-primary-rgb), var(--fb-app-tint-on-1)) 0%,
+      rgba(var(--fb-color-primary-rgb), var(--fb-app-tint-on-2)) 38%,
       transparent 100%
     ),
     var(--fb-surface);
@@ -204,7 +204,7 @@ body {
 .fb-float-global:hover,
 .fb-float-expand:hover {
   background: var(--fb-app-control-hover);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 .fb-float-global:active,
 .fb-float-expand:active {
@@ -212,7 +212,7 @@ body {
 }
 /* 运行中：停止图标用主色，醒目提示正在连发 */
 .fb-float-global.is-on {
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 .fb-float-global:disabled {
   opacity: 0.5;

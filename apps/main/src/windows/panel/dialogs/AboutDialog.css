@@ -98,7 +98,7 @@
 
 .about-flag--on {
   background: var(--fb-color-success-soft);
-  color: var(--fb-color-success-active);
+  color: var(--fb-color-success-text);
 }
 
 .about-flag--off {
@@ -108,14 +108,14 @@
 
 .about-flag--warn {
   background: var(--fb-color-warning-soft, #fff4d6);
-  color: var(--fb-color-warning-active, #a85d00);
+  color: var(--fb-color-warning-text);
 }
 
 .about-warn-banner {
   margin: var(--fb-space-3) 0 0;
   padding: var(--fb-space-3) var(--fb-space-4);
   background: var(--fb-color-warning-soft, #fff4d6);
-  color: var(--fb-color-warning-active, #a85d00);
+  color: var(--fb-color-warning-text);
   border-radius: var(--fb-radius-md);
   font-size: var(--fb-fs-sm);
   line-height: var(--fb-lh-snug);
@@ -123,7 +123,7 @@
 
 .about-flag--primary {
   background: var(--fb-color-primary-soft, #ede8ff);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 
 /* 邮箱可选中复制，不被 about-value 的省略截断 */

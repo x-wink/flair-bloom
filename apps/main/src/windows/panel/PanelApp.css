@@ -116,13 +116,14 @@ body {
   background: var(--fb-app-bg);
 }
 
-/* 全局开启：右下角为圆心的主色径向渐变（深色），向左上渐隐到透明；缩放做呼吸 */
+/* 全局开启：右下角为圆心的主色径向渐变，向左上渐隐到透明；缩放做呼吸。
+   呼吸时光晕会扫过整个列表区，浓度同样受 --fb-app-tint-* 上限约束（见 theme.css）。 */
 .panel.on {
   background:
     radial-gradient(
       circle at 100% 100%,
-      rgba(var(--fb-color-primary-rgb), 0.6) 0%,
-      rgba(var(--fb-color-primary-rgb), 0.3) 38%,
+      rgba(var(--fb-color-primary-rgb), var(--fb-app-tint-on-1)) 0%,
+      rgba(var(--fb-color-primary-rgb), var(--fb-app-tint-on-2)) 38%,
       transparent 100%
     ),
     var(--fb-surface);
@@ -213,7 +214,7 @@ body {
 /* 有可用更新时才出现，用主题色 + 右上角小圆点把它和常规窗口按钮区分开 */
 .win-btn--update {
   position: relative;
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 
 .win-btn__dot {
@@ -563,7 +564,7 @@ select {
   cursor: pointer;
   border: 1px solid var(--fb-color-primary);
   background: transparent;
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 
 .rule-mode-tag.is-hold {
@@ -585,7 +586,7 @@ select {
 }
 
 .rule-menu-btn:hover {
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   background: rgba(var(--fb-color-primary-rgb), 0.08);
 }
 
@@ -609,7 +610,7 @@ select {
 }
 
 .expand-btn:hover {
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 
 .expand-btn .chevron {
@@ -691,7 +692,7 @@ select {
 
 .group-chevron {
   flex-shrink: 0;
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   transition: transform 0.2s;
   transform: rotate(180deg);
 }
@@ -748,7 +749,7 @@ select {
 
 .group-edit-btn:hover {
   background: rgba(var(--fb-color-primary-rgb), 0.1);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 
 .disband-btn {
@@ -768,7 +769,7 @@ select {
 
 .disband-btn:hover {
   background: var(--fb-color-danger-soft);
-  color: var(--fb-color-danger);
+  color: var(--fb-color-danger-text);
 }
 
 /* 组头语义句：组的规则就是这一句话 */
@@ -792,7 +793,7 @@ select {
 }
 
 .group-status-item.is-running {
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 
 .group-status-item.is-paused {
@@ -831,7 +832,7 @@ select {
 .group-drop-zone.drag-active {
   border-color: var(--fb-color-primary);
   background: rgba(var(--fb-color-primary-rgb), 0.06);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 
 /* 移出分组的逃脱区域 */
@@ -851,7 +852,7 @@ select {
 .ungrouped-escape-zone.drag-active {
   border-color: var(--fb-color-primary);
   background: rgba(var(--fb-color-primary-rgb), 0.06);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 
 /* 拖拽中的规则卡片 */

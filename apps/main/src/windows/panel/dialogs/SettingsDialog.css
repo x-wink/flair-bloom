@@ -156,7 +156,7 @@
 }
 
 .settings-mode-tag-recommend {
-  color: var(--fb-color-success-active);
+  color: var(--fb-color-success-text);
   background: var(--fb-color-success-soft);
 }
 
@@ -166,7 +166,7 @@
 }
 
 .settings-note-warn {
-  color: var(--fb-color-warning-active);
+  color: var(--fb-color-warning-text);
 }
 
 .settings-mode-meta {
@@ -435,7 +435,7 @@
 }
 
 .settings-input-icon-btn:hover:not(:disabled) {
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 
 .settings-input-icon-btn:disabled {

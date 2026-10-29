@@ -97,7 +97,7 @@
 .hkb-cap--key.is-toggle {
   background: var(--fb-color-primary-soft);
   border-color: var(--fb-color-primary);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   font-weight: var(--fb-fw-semibold);
 }
 /* 长按连发：主题色实心 */
@@ -113,7 +113,7 @@
   background: transparent;
   border-style: dashed;
   border-color: var(--fb-color-primary);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
 }
 
 /* 连发中：保持模式形状（实心 / 描边），只加外圈呼吸光晕——形状表模式、光晕表状态，两件事不串味 */
@@ -198,7 +198,7 @@
 /* 组号角标按模式：长按实心、切换描边（D5，与键帽同一套形状语言） */
 .hkb-group-badge.is-toggle {
   background: var(--fb-surface);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   box-shadow: inset 0 0 0 1.5px var(--fb-color-primary);
 }
 /* ⚠️ emoji 角标：右上角、不裁剪（cap 已去掉 overflow:hidden） */
@@ -318,7 +318,7 @@
 }
 .sw-group.is-toggle {
   background: transparent;
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   box-shadow: inset 0 0 0 1.5px var(--fb-color-primary);
 }
 /* 走线图例：色块本身就是颜色，文字只写方向 */

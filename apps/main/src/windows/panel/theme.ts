@@ -1,6 +1,9 @@
 // 主题：剑网三门派心法预设主色 + 亮/暗/跟随系统模式。
-// 衍生色（hover/active/前景）在 JS 侧从主色推导后注入 CSS 变量——WebView2 不支持 color-mix，
+// 衍生色（hover/active/前景/主色文字）在 JS 侧从主色推导后注入 CSS 变量——WebView2 不支持 color-mix，
 // 透明色调统一走 --fb-color-primary-rgb 通道（见 theme.css），故只需注入少数几个变量即可全局生效。
+// 对比度规范同 @xwink/ui：文字在所有会落到的底色上过 WCAG AA 4.5:1，由 scripts/theme-contrast.test.ts 钉住。
+
+import { composite, ensureContrast, parseHex, pickForeground, shiftLightness } from './contrast.ts';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
@@ -24,7 +27,7 @@ export interface SectPreset {
 
 /**
  * 主题色预设。配色取自剑网三无界全 20 门派心法代表色（社区约定，非官方 hex）。
- * 彩色实底上的文字统一白字，故偏亮的金/褐色块上白字对比度一般，选色时已尽量避开过亮值。
+ * 实底上的文字按对比度取白或近黑（见 deriveThemeVariables），偏亮的绯粉、流金等用深字。
  *
  * `sect` 门派名仅作来源对照、不在 UI 显示——界面只展示色块与雅称（`name`），
  * 悬停显示 `name`。下表即门派 ↔ 配色对照：
@@ -58,52 +61,86 @@ export const SECT_PRESETS: SectPreset[] = [
 export const DEFAULT_THEME_COLOR = SECT_PRESETS[0].color;
 export const DEFAULT_THEME_MODE: ThemeMode = 'light';
 
-interface Rgb {
-  r: number;
-  g: number;
-  b: number;
+/**
+ * 面板背景主色淡染（theme.css 的 --fb-app-tint-*）允许的最大 alpha。文字四档与主色文字都按
+ * 「叠到这个浓度的底色」验 4.5:1，最弱的 faint 档在 0.16 左右到顶，留一点余量。
+ */
+export const APP_TINT_MAX = 0.15;
+
+/** 与 theme.css 的 --fb-surface / -soft / -muted 同值，scripts/theme-contrast.test.ts 核对两边一致 */
+export const MODE_SURFACES: Record<'light' | 'dark', readonly string[]> = {
+  light: ['#ffffff', '#fafafa', '#f4f4f6'],
+  dark: ['#202126', '#26272c', '#2c2d33'],
+};
+
+/** 暗色卡片的 --fb-surface-translucent（白 0.06）叠在淡染底上，会把底色再提亮一点 */
+const DARK_CARD_OVERLAY = 0.06;
+
+/** 主色淡底 hover（--fb-color-primary-soft-hover）的 alpha，主色文字常落在上面 */
+const PRIMARY_SOFT_MAX = 0.18;
+
+/** 实底前景候选：白与近黑（同 @xwink/ui brandVariables 的缺省候选） */
+export const ON_PRIMARY_CANDIDATES = ['#ffffff', '#111827'] as const;
+
+/** hover / active 沿 OKLCH 明度离开前景色方向各走一档 */
+const SHADE_STEP = 0.06;
+
+/** 文字会落在的所有底色：纯表面、叠满淡染的面板底，暗色再加卡片半透明层 */
+export function textBackgrounds(primary: string, mode: 'light' | 'dark'): string[] {
+  const surfaces = MODE_SURFACES[mode];
+  const tinted = composite(primary, surfaces[0], APP_TINT_MAX);
+  const bgs = [...surfaces, tinted];
+  if (mode === 'dark') bgs.push(composite('#ffffff', tinted, DARK_CARD_OVERLAY));
+  return bgs;
 }
 
-function hexToRgb(hex: string): Rgb {
-  const h = hex.replace('#', '');
-  const full =
-    h.length === 3
-      ? h
-          .split('')
-          .map((c) => c + c)
-          .join('')
-      : h;
+/**
+ * 从主色与生效明暗推导注入的变量：
+ * - 实底前景按对比度在白与近黑里取高的；两者都不到 4.5（自定义的中间调）时把实底沿离开前景的方向调到过线，
+ *   预设色都不会走到这一步，由测试钉住。
+ * - hover / active 往离开前景的方向走：白字的加深、深字的提亮，对比度只增不减。
+ * - 主色当文字用（链接、选中页签、描边按钮）时取 --fb-color-primary-text：亮色档加深、暗色档提亮，
+ *   直到在面板底、卡片、主色淡底上都过 4.5。
+ */
+export function deriveThemeVariables(
+  color: string,
+  mode: 'light' | 'dark',
+): Record<string, string> {
+  const onPrimary = pickForeground([color], ON_PRIMARY_CANDIDATES);
+  const away = onPrimary === '#ffffff' ? -1 : 1;
+  const solid = ensureContrast(color, [onPrimary], away);
+  const rgb = parseHex(solid);
+
+  const backgrounds = textBackgrounds(solid, mode);
+  backgrounds.push(composite(solid, backgrounds[backgrounds.length - 1], PRIMARY_SOFT_MAX));
+  const primaryText = ensureContrast(solid, backgrounds, mode === 'light' ? -1 : 1);
+
   return {
-    r: parseInt(full.slice(0, 2), 16),
-    g: parseInt(full.slice(2, 4), 16),
-    b: parseInt(full.slice(4, 6), 16),
+    '--fb-color-primary': solid,
+    '--fb-color-primary-rgb': `${rgb.r}, ${rgb.g}, ${rgb.b}`,
+    '--fb-color-primary-hover': shiftLightness(solid, away * SHADE_STEP),
+    '--fb-color-primary-active': shiftLightness(solid, away * SHADE_STEP * 2),
+    '--fb-color-primary-text': primaryText,
+    '--fb-on-primary': onPrimary,
   };
 }
 
-function clamp255(n: number): number {
-  return Math.max(0, Math.min(255, Math.round(n)));
+let currentColor = DEFAULT_THEME_COLOR;
+let currentMode: ThemeMode = DEFAULT_THEME_MODE;
+
+function applyTheme(): void {
+  const resolved = resolveMode(currentMode);
+  const root = document.documentElement;
+  root.dataset.theme = resolved;
+  for (const [name, value] of Object.entries(deriveThemeVariables(currentColor, resolved))) {
+    root.style.setProperty(name, value);
+  }
 }
 
-function rgbToHex({ r, g, b }: Rgb): string {
-  const hex = (n: number) => clamp255(n).toString(16).padStart(2, '0');
-  return `#${hex(r)}${hex(g)}${hex(b)}`;
-}
-
-/** 按比例加深（factor 0~1，越大越暗），用于 hover/active。 */
-function darken(rgb: Rgb, factor: number): Rgb {
-  return { r: rgb.r * (1 - factor), g: rgb.g * (1 - factor), b: rgb.b * (1 - factor) };
-}
-
-/** 注入主色及其衍生到根元素。soft/soft-hover 透明色调通过 -rgb 通道自动跟随。
- *  彩色实底上的前景统一用白字——显式写死，覆盖历史版本可能残留的内联深色值。 */
+/** 换主色。主色文字随明暗不同，所以与 applyThemeMode 共用一次完整推导。 */
 export function applyThemeColor(hex: string): void {
-  const rgb = hexToRgb(hex);
-  const root = document.documentElement.style;
-  root.setProperty('--fb-color-primary', hex);
-  root.setProperty('--fb-color-primary-rgb', `${rgb.r}, ${rgb.g}, ${rgb.b}`);
-  root.setProperty('--fb-color-primary-hover', rgbToHex(darken(rgb, 0.12)));
-  root.setProperty('--fb-color-primary-active', rgbToHex(darken(rgb, 0.22)));
-  root.setProperty('--fb-text-on-accent', '#fff');
+  currentColor = hex;
+  applyTheme();
 }
 
 /** 解析 system → 实际亮暗。 */
@@ -116,5 +153,6 @@ function resolveMode(mode: ThemeMode): 'light' | 'dark' {
 
 /** 设置 data-theme（light/dark），由 theme.css 的 :root[data-theme="dark"] 接管暗色 token。 */
 export function applyThemeMode(mode: ThemeMode): void {
-  document.documentElement.dataset.theme = resolveMode(mode);
+  currentMode = mode;
+  applyTheme();
 }

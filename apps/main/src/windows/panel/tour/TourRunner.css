@@ -155,7 +155,7 @@
 .tour-bubble__note {
   margin-top: var(--fb-space-3);
   font-size: var(--fb-fs-sm);
-  color: var(--fb-color-warning);
+  color: var(--fb-color-warning-text);
 }
 
 .tour-bubble__hint {
@@ -163,7 +163,7 @@
   padding: var(--fb-space-2) var(--fb-space-4);
   border-radius: var(--fb-radius-pill);
   background: var(--fb-color-primary-soft);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   font-size: var(--fb-fs-sm);
   font-weight: var(--fb-fw-medium);
   width: fit-content;
@@ -171,7 +171,7 @@
 
 .tour-bubble__hint--done {
   background: var(--fb-color-success-soft);
-  color: var(--fb-color-success);
+  color: var(--fb-color-success-text);
 }
 
 .tour-bubble__footer {

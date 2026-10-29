@@ -33,7 +33,7 @@
 }
 
 .tour-catalog-mark.done {
-  color: var(--fb-color-success-active);
+  color: var(--fb-color-success-text);
 }
 
 .tour-catalog-main {
@@ -57,7 +57,7 @@
 }
 
 .tour-catalog-desc.reason {
-  color: var(--fb-color-warning-active);
+  color: var(--fb-color-warning-text);
 }
 
 .tour-catalog-steps {

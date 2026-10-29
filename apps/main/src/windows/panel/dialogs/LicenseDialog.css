@@ -39,7 +39,7 @@
   padding: 0;
   border: none;
   background: none;
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   font: inherit;
   cursor: pointer;
 }
@@ -51,7 +51,7 @@
 .license-error {
   margin: 0;
   font-size: var(--fb-fs-sm);
-  color: var(--fb-color-danger);
+  color: var(--fb-color-danger-text);
 }
 
 .license-note {

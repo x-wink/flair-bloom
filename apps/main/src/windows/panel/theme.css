@@ -41,16 +41,27 @@
   --fb-color-warning-soft: rgba(245, 166, 35, 0.1);
   --fb-color-warning-soft-hover: rgba(245, 166, 35, 0.18);
 
+  /* 语义色当文字用（状态提示、校验错误）：基色偏亮只适合做实底与图标，文字按与灰字同一规则
+     在所有预设的面板底上过 4.5:1，暗色块另给提亮值 */
+  --fb-color-success-text: #297200;
+  --fb-color-danger-text: #b6353a;
+  --fb-color-warning-text: #8c5b00;
+
   /* ── 前景色（背景↔前景配对）──────────────────────────────
-     on-surface 系列 = 任意 surface 上的文字色；on-primary = 主色实底上的文字。
-     这是唯一事实来源，暗色模式只需在 :root[data-theme=dark] 翻转这一组，全局生效。
-     旧 --fb-text-* / --fb-text-on-accent 保留为别名，指向 on-* 自动跟随。 */
-  --fb-on-surface: #2d2d2d;
-  --fb-on-surface-variant: #555;
-  --fb-on-surface-muted: #888;
-  --fb-on-surface-faint: #aaa;
+     on-surface 系列 = 任意 surface 上的文字色；on-primary = 主色实底上的文字（theme.ts 按对比度
+     在白与近黑里选后内联注入，这里是霞紫的值）。暗色模式只需在 :root[data-theme=dark] 翻转这一组。
+     --fb-text-* / --fb-text-on-accent 是别名，指向 on-* 自动跟随。
+     文字四档（不含 disabled）按 @xwink/ui 规范：在三种 surface 与叠满 --fb-app-tint-* 的面板底上都过
+     WCAG AA 4.5:1，且由重到轻严格单调，由 scripts/theme-contrast.test.ts 钉住。faint 是最弱一档，
+     它决定了淡染浓度的上限（theme.ts APP_TINT_MAX）。 */
+  --fb-on-surface: #1f2937;
+  --fb-on-surface-variant: #374151;
+  --fb-on-surface-muted: #4b5563;
+  --fb-on-surface-faint: #5b6371;
   --fb-on-surface-disabled: #b8b8c0;
   --fb-on-primary: #fff;
+  /* 主色当文字用时的色值，theme.ts 按明暗加深 / 提亮到过线后注入，这里是霞紫亮色档的值 */
+  --fb-color-primary-text: #6c4de6;
 
   --fb-text-strong: var(--fb-on-surface);
   --fb-text-regular: var(--fb-on-surface-variant);
@@ -77,23 +88,22 @@
   --fb-scrollbar-thumb-hover: rgba(0, 0, 0, 0.38);
 
   /* ── 应用主背景（标题/面板渐变，随全局开关 off/on 切换）──
-     均从主题色派生、叠在 var(--fb-surface) 上（亮暗自动适配）：off 极浅淡染，
-     on（全局激活）只加深一档仍保持浅色，文字维持深色可读；激活强信号交由底部
-     「全局已启用」实色按钮与规则卡绿色脉冲承担，不靠满铺浓色（会与外壳主色文字撞色）。 */
+     均从主题色派生、叠在 var(--fb-surface) 上（亮暗自动适配）。文字直接落在这层底上，
+     所以主色淡染的 alpha 一律不超过 theme.ts 的 APP_TINT_MAX（测试逐个核对 --fb-app-tint-*）：
+     再浓一点 faint 档灰字就掉出 4.5:1，亮主色（流金、缥碧）最先出问题。激活强信号交由底部
+     「全局已启用」实色按钮、规则卡绿色脉冲与开启态的呼吸动画承担，不靠满铺浓色。 */
+  --fb-app-tint-1: 0.05;
+  --fb-app-tint-2: 0.09;
+  --fb-app-tint-3: 0.15;
+  /* 开启态右下角径向光晕的圆心与中段 */
+  --fb-app-tint-on-1: 0.15;
+  --fb-app-tint-on-2: 0.08;
   --fb-app-bg:
     linear-gradient(
       160deg,
-      rgba(var(--fb-color-primary-rgb), 0.1) 0%,
-      rgba(var(--fb-color-primary-rgb), 0.18) 60%,
-      rgba(var(--fb-color-primary-rgb), 0.3) 100%
-    ),
-    var(--fb-surface);
-  --fb-app-bg-active:
-    linear-gradient(
-      160deg,
-      rgba(var(--fb-color-primary-rgb), 0.22) 0%,
-      rgba(var(--fb-color-primary-rgb), 0.36) 60%,
-      rgba(var(--fb-color-primary-rgb), 0.52) 100%
+      rgba(var(--fb-color-primary-rgb), var(--fb-app-tint-1)) 0%,
+      rgba(var(--fb-color-primary-rgb), var(--fb-app-tint-2)) 60%,
+      rgba(var(--fb-color-primary-rgb), var(--fb-app-tint-3)) 100%
     ),
     var(--fb-surface);
   --fb-app-header-text: #2e2650;
@@ -178,11 +188,15 @@
    及随面板背景翻转的派生色。soft/soft-hover 走 -rgb 通道自动适配。 */
 :root[data-theme='dark'] {
   /* 前景色统一翻转（text-* 别名指向这组，自动跟随；on-primary 保持白） */
-  --fb-on-surface: #ececf0;
-  --fb-on-surface-variant: #c4c4cc;
-  --fb-on-surface-muted: #9a9aa4;
-  --fb-on-surface-faint: #76767e;
+  --fb-on-surface: #f4f4f5;
+  --fb-on-surface-variant: #dcdce2;
+  --fb-on-surface-muted: #c4c4cc;
+  --fb-on-surface-faint: #adadb6;
   --fb-on-surface-disabled: #5c5c64;
+
+  --fb-color-success-text: #52c41a;
+  --fb-color-danger-text: #ff8c88;
+  --fb-color-warning-text: #f5a623;
   --fb-on-primary: #fff;
 
   --fb-border: #3a3b42;
@@ -199,9 +213,9 @@
   --fb-scrollbar-thumb: rgba(255, 255, 255, 0.2);
   --fb-scrollbar-thumb-hover: rgba(255, 255, 255, 0.4);
 
-  /* 面板背景 --fb-app-bg / --fb-app-bg-active 不在此覆盖：off 用主色淡染叠 var(--fb-surface)
-     （暗色下 surface 已是深色，自动适配），on 仍点亮成主色浓色，明暗一致。 */
-  --fb-app-header-text: #ececf0;
+  /* 面板背景 --fb-app-bg 与 --fb-app-tint-* 不在此覆盖：主色淡染叠 var(--fb-surface)
+     （暗色下 surface 已是深色，自动适配），浓度上限明暗共用。 */
+  --fb-app-header-text: #f4f4f5;
   --fb-app-watermark: rgba(255, 255, 255, 0.12);
 
   /* 规则激活态走 --fb-color-primary-rgb 通道，明暗共用，无需在此覆盖 */

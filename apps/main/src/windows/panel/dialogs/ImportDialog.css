@@ -26,7 +26,7 @@
   background: none;
   border: none;
   font-size: var(--fb-fs-xs);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   cursor: pointer;
   padding: 0 var(--fb-space-1);
   opacity: 0.85;
@@ -83,7 +83,7 @@
 
 .found-app {
   font-size: var(--fb-fs-xs);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   font-weight: var(--fb-fw-semibold);
 }
 .found-name {
@@ -133,7 +133,7 @@
 
 .import-preview-error {
   font-size: var(--fb-fs-sm);
-  color: var(--fb-color-danger);
+  color: var(--fb-color-danger-text);
   margin: 0;
 }
 
@@ -155,7 +155,7 @@
 }
 .preview-warn {
   font-size: var(--fb-fs-xs);
-  color: var(--fb-color-warning);
+  color: var(--fb-color-warning-text);
   margin-left: var(--fb-space-2);
 }
 
@@ -189,7 +189,7 @@
 /* 导入错误 */
 .import-error {
   font-size: var(--fb-fs-sm);
-  color: var(--fb-color-danger);
+  color: var(--fb-color-danger-text);
   margin: 0 0 var(--fb-space-4);
 }
 

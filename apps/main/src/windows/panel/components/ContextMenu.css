@@ -138,7 +138,7 @@
 
 .ctx-menu-item:hover .ctx-menu-subtitle,
 .ctx-menu-item:focus-visible .ctx-menu-subtitle {
-  color: rgba(var(--fb-color-primary-rgb), 0.6);
+  color: var(--fb-color-primary-text);
 }
 
 .ctx-menu-item--danger:hover .ctx-menu-subtitle,

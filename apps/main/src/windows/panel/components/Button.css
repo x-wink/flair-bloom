@@ -6,6 +6,10 @@
   --fb-btn-soft-bg: var(--fb-color-primary-soft);
   --fb-btn-soft-bg-hover: var(--fb-color-primary-soft-hover);
   --fb-btn-fg-on-solid: var(--fb-text-on-accent);
+  /* 描边 / 幽灵 / 链接外观的文字色；主色档换成过线的 primary-text（见 .fb-btn--primary） */
+  --fb-btn-text: var(--fb-btn-color);
+  --fb-btn-text-hover: var(--fb-btn-color-hover);
+  --fb-btn-text-active: var(--fb-btn-color-active);
 
   position: relative;
   display: inline-flex;
@@ -73,6 +77,10 @@
   --fb-btn-color-active: var(--fb-color-primary-active);
   --fb-btn-soft-bg: var(--fb-color-primary-soft);
   --fb-btn-soft-bg-hover: var(--fb-color-primary-soft-hover);
+  /* 亮主色（深字档）的 hover 是提亮，拿来当文字色会更淡，所以三态都用同一个过线的文字色 */
+  --fb-btn-text: var(--fb-color-primary-text);
+  --fb-btn-text-hover: var(--fb-color-primary-text);
+  --fb-btn-text-active: var(--fb-color-primary-text);
 }
 
 .fb-btn--neutral {
@@ -81,6 +89,10 @@
   --fb-btn-color-active: var(--fb-color-neutral-active);
   --fb-btn-soft-bg: var(--fb-color-neutral-soft);
   --fb-btn-soft-bg-hover: var(--fb-color-neutral-soft-hover);
+  /* 中性灰明暗共用一个值，暗底上当文字只有约 3:1，文字改走随明暗翻转的文字档 */
+  --fb-btn-text: var(--fb-text-regular);
+  --fb-btn-text-hover: var(--fb-text-strong);
+  --fb-btn-text-active: var(--fb-text-strong);
 }
 
 .fb-btn--danger {
@@ -126,40 +138,40 @@
 
 .fb-btn--outline {
   background: transparent;
-  color: var(--fb-btn-color);
+  color: var(--fb-btn-text);
   border-color: var(--fb-btn-color);
 }
 
 .fb-btn--outline:hover:not(:disabled) {
   background: var(--fb-btn-soft-bg);
-  color: var(--fb-btn-color-hover);
+  color: var(--fb-btn-text-hover);
   border-color: var(--fb-btn-color-hover);
 }
 
 .fb-btn--outline:active:not(:disabled) {
   background: var(--fb-btn-soft-bg-hover);
-  color: var(--fb-btn-color-active);
+  color: var(--fb-btn-text-active);
   border-color: var(--fb-btn-color-active);
 }
 
 .fb-btn--ghost {
   background: transparent;
-  color: var(--fb-btn-color);
+  color: var(--fb-btn-text);
 }
 
 .fb-btn--ghost:hover:not(:disabled) {
   background: var(--fb-btn-soft-bg);
-  color: var(--fb-btn-color-hover);
+  color: var(--fb-btn-text-hover);
 }
 
 .fb-btn--ghost:active:not(:disabled) {
   background: var(--fb-btn-soft-bg-hover);
-  color: var(--fb-btn-color-active);
+  color: var(--fb-btn-text-active);
 }
 
 .fb-btn--dashed {
   background: transparent;
-  color: var(--fb-btn-color);
+  color: var(--fb-btn-text);
   border-color: var(--fb-btn-color);
   border-style: dashed;
 }
@@ -180,17 +192,17 @@
   padding-left: 0;
   padding-right: 0;
   background: transparent;
-  color: var(--fb-btn-color);
+  color: var(--fb-btn-text);
   border-color: transparent;
 }
 
 .fb-btn--link:hover:not(:disabled) {
-  color: var(--fb-btn-color-hover);
+  color: var(--fb-btn-text-hover);
   text-decoration: underline;
 }
 
 .fb-btn--link:active:not(:disabled) {
-  color: var(--fb-btn-color-active);
+  color: var(--fb-btn-text-active);
   text-decoration: underline;
 }
 
@@ -202,12 +214,12 @@
 
 .fb-btn--text:hover:not(:disabled) {
   background: var(--fb-btn-soft-bg);
-  color: var(--fb-btn-color);
+  color: var(--fb-btn-text);
 }
 
 .fb-btn--text:active:not(:disabled) {
   background: var(--fb-btn-soft-bg-hover);
-  color: var(--fb-btn-color-active);
+  color: var(--fb-btn-text-active);
 }
 
 /* Sizes */

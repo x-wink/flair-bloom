@@ -18,7 +18,7 @@
 .update-badge {
   display: inline-block;
   background: var(--fb-color-primary-soft);
-  color: var(--fb-color-primary);
+  color: var(--fb-color-primary-text);
   font-size: var(--fb-fs-xs);
   font-weight: var(--fb-fw-semibold);
   padding: var(--fb-space-1) var(--fb-space-4);
