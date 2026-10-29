@@ -4,7 +4,9 @@ import { test } from 'node:test';
 import {
   fitScale,
   LAYOUT_BASE,
+  maximizedRect,
   maxScale,
+  restoreUnderCursor,
   sanitizeScales,
   scaledSize,
 } from '../apps/main/src/windows/panel/windowScale.ts';
@@ -30,6 +32,22 @@ test('maxScale 按工作区装得下的最大等比尺寸，向下取两位，�
 
 test('scaledSize 取整', () => {
   assert.deepEqual(scaledSize(V, 1.25), { width: 506, height: 900 });
+});
+
+test('maximizedRect 取工作区装得下的最大等比尺寸并居中', () => {
+  // 1920×1040 工作区（任务栏在下）装竖版：比例 1.44，高 1037 被顶住，左右留白一样多
+  const r = maximizedRect({ x: 0, y: 0, width: 1920, height: 1040 }, V);
+  assert.deepEqual(r, { x: 669, y: 2, width: 583, height: 1037 });
+  // 副屏工作区从负坐标起
+  const s = maximizedRect({ x: -1920, y: 0, width: 1920, height: 1040 }, V);
+  assert.equal(s.x, 669 - 1920);
+});
+
+test('restoreUnderCursor 让鼠标停在窗口里同一相对位置', () => {
+  const maximized = { x: 0, y: 0, width: 810, height: 1440 };
+  // 鼠标在标题栏横向 3/4、纵向 20 px 处
+  const r = restoreUnderCursor({ x: 607.5, y: 20 }, maximized, V);
+  assert.deepEqual(r, { x: 304, y: 10, width: 405, height: 720 });
 });
 
 test('sanitizeScales 把缺失、非数、小于 1 的值当 1', () => {

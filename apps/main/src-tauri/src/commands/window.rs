@@ -12,6 +12,9 @@ use std::sync::Mutex;
 /// 设计尺寸（逻辑像素），`None` 表示还没设置、不锁比例。
 static PANEL_BASE: Mutex<Option<(f64, f64)>> = Mutex::new(None);
 
+/// 拖边松手时发给面板：前端据此判断是否拉到了最大、要不要转成最大化。
+pub const RESIZE_ENDED_EVENT: &str = "panel-resize-ended";
+
 /// 屏幕坐标下的窗口矩形（物理像素），与 Win32 `RECT` 同义。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Rect {
@@ -211,18 +214,27 @@ mod win {
         GetClientRect, GetWindowRect, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_SIZING,
     };
 
-    use super::{resize_centered, AspectLimits, DragAnchor, Edge, Rect, PANEL_BASE};
+    use tauri::Emitter;
+
+    use super::{
+        resize_centered, AspectLimits, DragAnchor, Edge, Rect, PANEL_BASE, RESIZE_ENDED_EVENT,
+    };
 
     const SUBCLASS_ID: usize = 0x00F1_A1B0;
     static INSTALLED: AtomicBool = AtomicBool::new(false);
     /// 本次拖动的锚点。消息都在窗口线程上串行到达，锁只为满足 `static` 的 `Sync`。
     static ANCHOR: std::sync::Mutex<Option<DragAnchor>> = std::sync::Mutex::new(None);
+    /// 本次 move/size 循环里是否拖过边；只移动窗口时松手不发通知。
+    static SIZED: AtomicBool = AtomicBool::new(false);
+    /// 拖边松手时用来给面板发事件。
+    static WINDOW: std::sync::OnceLock<tauri::WebviewWindow> = std::sync::OnceLock::new();
 
     /// subclass 必须在窗口所属线程（主线程）上挂，否则 `SetWindowSubclass` 直接失败。
     pub fn install(window: &tauri::WebviewWindow) -> Result<(), String> {
         if INSTALLED.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
+        let _ = WINDOW.set(window.clone());
         let hwnd = window.hwnd().map_err(|e| format!("取窗口句柄失败：{e}"))?.0 as isize;
         window
             .run_on_main_thread(move || {
@@ -247,10 +259,18 @@ mod win {
         match msg {
             // 移动窗口也会进出这对消息；锚点只在 WM_SIZING 里用，记下无妨
             WM_ENTERSIZEMOVE => set_anchor(anchor_now(hwnd)),
-            WM_EXITSIZEMOVE => set_anchor(None),
+            WM_EXITSIZEMOVE => {
+                set_anchor(None);
+                if SIZED.swap(false, Ordering::Relaxed) {
+                    if let Some(window) = WINDOW.get() {
+                        let _ = window.emit_to(window.label(), RESIZE_ENDED_EVENT, ());
+                    }
+                }
+            }
             _ => {}
         }
         if msg == WM_SIZING && lparam != 0 {
+            SIZED.store(true, Ordering::Relaxed);
             let anchor = ANCHOR
                 .lock()
                 .ok()

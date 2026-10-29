@@ -11,6 +11,7 @@ import {
   useRef,
   useState,
   type DragEvent as ReactDragEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react';
 import iconUrl from '../../assets/icon-32.png';
@@ -520,7 +521,44 @@ export default function PanelApp() {
   const [filter, setFilter] = useState<RuleFilter>('all');
   // 面板布局：竖版规则列表 / 横版键鼠图，各有设计尺寸与记住的缩放比例，切换时定尺寸并居中。
   const [layout, setLayout] = useState<PanelLayout>('vertical');
-  const { scale: windowScale, applyLayout, resetScale } = useWindowScale(settingsStore);
+  const {
+    scale: windowScale,
+    maximized,
+    applyLayout,
+    resetScale,
+    toggleMaximize,
+    dragFromMaximized,
+  } = useWindowScale(settingsStore);
+
+  /**
+   * 标题栏自己处理按下，不用 data-tauri-drag-region：最大化是自己模拟的，内置拖动区的双击会走系统最大化、
+   * 拖动也不会先还原。双击切换；最大化时按住拖出几像素才还原，单击不动。
+   */
+  function handleHeaderMouseDown(e: ReactMouseEvent) {
+    if (e.button !== 0 || (e.target as Element).closest('button, a, input')) return;
+    if (e.detail === 2) {
+      void toggleMaximize();
+      return;
+    }
+    if (!maximized) {
+      getCurrentWindow()
+        .startDragging()
+        .catch(() => {});
+      return;
+    }
+    const { screenX: x0, screenY: y0 } = e;
+    const stop = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', stop);
+    };
+    const onMove = (ev: MouseEvent) => {
+      if (Math.abs(ev.screenX - x0) + Math.abs(ev.screenY - y0) < 4) return;
+      stop();
+      void dragFromMaximized();
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', stop);
+  }
   // 横版统一间隔的回退值（无规则时显示用；有规则时显示取自规则本身）
   const [unifiedInterval, setUnifiedInterval] = useState(DEFAULT_INTERVAL_MS);
   const [hotkeys, setHotkeys] = useState<{
@@ -2572,9 +2610,9 @@ export default function PanelApp() {
       data-signature={activeSignature}
       style={{ ['--panel-bg' as string]: `url(${bgUrl})` }}
     >
-      <header className="panel-header" data-tauri-drag-region>
-        <img className="header-icon" src={iconUrl} alt="" data-tauri-drag-region />
-        <h1 data-tauri-drag-region>
+      <header className="panel-header" onMouseDown={handleHeaderMouseDown}>
+        <img className="header-icon" src={iconUrl} alt="" draggable={false} />
+        <h1>
           {APP_NAME}
           {hotkeys.panel_toggle && <Kbd label="显隐">{keyLabel(hotkeys.panel_toggle)}</Kbd>}
         </h1>
@@ -2638,6 +2676,26 @@ export default function PanelApp() {
             aria-label="最小化到浮窗"
           >
             <MinimizeIcon size={14} />
+          </button>
+          <button
+            className="win-btn"
+            onClick={() => void toggleMaximize()}
+            aria-label={maximized ? '还原' : '最大化'}
+            title={maximized ? '还原' : '最大化'}
+          >
+            {maximized ? (
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="2.5" y="5.5" width="8" height="8" rx="1" stroke="currentColor" />
+                <path
+                  d="M5.5 5.5V3.5a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-2"
+                  stroke="currentColor"
+                />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <rect x="2.5" y="2.5" width="11" height="11" rx="1" stroke="currentColor" />
+              </svg>
+            )}
           </button>
           <button className="win-btn close" onClick={handleClose} aria-label="关闭">
             <CloseIcon size={14} />

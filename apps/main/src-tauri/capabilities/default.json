@@ -9,6 +9,7 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-set-size",
     "core:window:allow-set-min-size",
+    "core:window:allow-set-resizable",
     "core:webview:allow-set-webview-zoom",
     "core:window:allow-set-position",
     "core:window:allow-center",

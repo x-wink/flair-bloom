@@ -5,11 +5,22 @@ export interface Size {
   height: number;
 }
 
+export interface Point {
+  x: number;
+  y: number;
+}
+
+export interface Rect extends Point, Size {}
+
 export type PanelLayout = 'vertical' | 'horizontal';
 
 /** settings.json 里的布局与各布局缩放比例；浮窗也读这两个键算自己的初始比例 */
 export const PANEL_LAYOUT_KEY = 'layout';
 export const PANEL_SCALE_KEY = 'panelScale';
+/** 面板是否最大化；重开面板、重启应用都保持 */
+export const PANEL_MAXIMIZED_KEY = 'panelMaximized';
+/** 拖边松手时后端发给面板（`commands/window.rs` 的 `RESIZE_ENDED_EVENT`） */
+export const RESIZE_ENDED_EVENT = 'panel-resize-ended';
 /** 面板比例停稳后广播当前生效的比例，浮窗跟随 */
 export const PANEL_SCALE_EVENT = 'panel-scale-changed';
 
@@ -42,6 +53,33 @@ export function fitScale(size: Size, base: Size, max: number): number {
 
 export function scaledSize(base: Size, scale: number): Size {
   return { width: Math.round(base.width * scale), height: Math.round(base.height * scale) };
+}
+
+/**
+ * 最大化后的窗口矩形：工作区装得下的最大等比尺寸，在工作区里居中。比例锁着，铺满工作区会变形。
+ * 坐标单位与传入的工作区一致。
+ */
+export function maximizedRect(workArea: Rect, base: Size): Rect {
+  const size = scaledSize(base, maxScale(workArea, base));
+  return {
+    x: Math.round(workArea.x + (workArea.width - size.width) / 2),
+    y: Math.round(workArea.y + (workArea.height - size.height) / 2),
+    ...size,
+  };
+}
+
+/**
+ * 最大化状态下拖标题栏时还原出的矩形：鼠标在窗口里的相对位置不变，像系统窗口那样
+ * 「捏」着同一处标题栏缩回去。坐标单位与传入的参数一致。
+ */
+export function restoreUnderCursor(cursor: Point, maximized: Rect, restored: Size): Rect {
+  const fx = (cursor.x - maximized.x) / maximized.width;
+  const fy = (cursor.y - maximized.y) / maximized.height;
+  return {
+    x: Math.round(cursor.x - fx * restored.width),
+    y: Math.round(cursor.y - fy * restored.height),
+    ...restored,
+  };
 }
 
 /** settings 里存的比例：缺失、非数或小于 1 的一律当 1，防止旧数据或手改把窗口缩到设计尺寸以下 */
