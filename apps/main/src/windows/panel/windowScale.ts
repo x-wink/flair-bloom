@@ -1,0 +1,53 @@
+// 面板窗口等比缩放的纯计算：设计尺寸是最小尺寸，窗口按同一比例放大，内容用 webview 缩放跟上。
+
+export interface Size {
+  width: number;
+  height: number;
+}
+
+export type PanelLayout = 'vertical' | 'horizontal';
+
+/** settings.json 里的布局与各布局缩放比例；浮窗也读这两个键算自己的初始比例 */
+export const PANEL_LAYOUT_KEY = 'layout';
+export const PANEL_SCALE_KEY = 'panelScale';
+/** 面板比例停稳后广播当前生效的比例，浮窗跟随 */
+export const PANEL_SCALE_EVENT = 'panel-scale-changed';
+
+/**
+ * 两种布局的设计尺寸（逻辑像素），也是窗口最小尺寸。取常用比例：竖版 9:16、横版 16:9。
+ * 横版键鼠图一屏装下不滚动，排版至少要 1060×580，16:9 取不小于它的最近尺寸。
+ */
+export const LAYOUT_BASE: Record<PanelLayout, Size> = {
+  vertical: { width: 405, height: 720 },
+  horizontal: { width: 1072, height: 603 },
+};
+
+/** 缩放比例保留两位小数：存进 settings 与显示百分比都不带浮点尾巴 */
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** 窗口能放下的最大比例：工作区（去掉任务栏）装得下的最大等比尺寸，至少 1 */
+export function maxScale(workArea: Size, base: Size): number {
+  return Math.max(
+    1,
+    Math.floor(Math.min(workArea.width / base.width, workArea.height / base.height) * 100) / 100,
+  );
+}
+
+const clamp = (scale: number, max: number) => Math.min(max, Math.max(1, round2(scale)));
+
+/** 内容缩放：窗口比例由后端锁住，取宽高比例里较小的只是兜住舍入误差与非 Windows 平台 */
+export function fitScale(size: Size, base: Size, max: number): number {
+  return clamp(Math.min(size.width / base.width, size.height / base.height), max);
+}
+
+export function scaledSize(base: Size, scale: number): Size {
+  return { width: Math.round(base.width * scale), height: Math.round(base.height * scale) };
+}
+
+/** settings 里存的比例：缺失、非数或小于 1 的一律当 1，防止旧数据或手改把窗口缩到设计尺寸以下 */
+export function sanitizeScales(raw: unknown): Record<PanelLayout, number> {
+  const pick = (v: unknown) =>
+    typeof v === 'number' && Number.isFinite(v) && v >= 1 ? round2(v) : 1;
+  const obj = (raw ?? {}) as Partial<Record<PanelLayout, unknown>>;
+  return { vertical: pick(obj.vertical), horizontal: pick(obj.horizontal) };
+}

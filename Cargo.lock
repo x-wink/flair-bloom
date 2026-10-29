@@ -1255,6 +1255,8 @@ version = "0.6.0"
 dependencies = [
  "burst-engine",
  "crypto",
+ "objc2-app-kit",
+ "objc2-foundation",
  "qzh-format",
  "qzh-profile",
  "reqwest",

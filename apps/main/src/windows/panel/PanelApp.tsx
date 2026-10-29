@@ -1,6 +1,5 @@
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
-import { LogicalSize } from '@tauri-apps/api/dpi';
 import { emit, listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
@@ -64,6 +63,8 @@ import type { TourDef, TourExitResult, TourHost, TourSnapshot } from './tour/typ
 import { useTourProgress } from './tour/useTourProgress';
 import { useKeyRelay } from './useKeyRelay';
 import { useRuleStates } from './useRuleStates';
+import { useWindowScale } from './useWindowScale';
+import { PANEL_LAYOUT_KEY as LAYOUT_KEY, type PanelLayout } from './windowScale';
 import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
 import LicenseDialog from './dialogs/LicenseDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
@@ -114,7 +115,6 @@ const HOLD_IN_GROUP_HINT_KEY = 'holdInGroupHintDismissed';
 const MEMBERSHIP_AGREED_KEY = 'membershipAgreedVersion';
 const SOUND_KEY = 'sound';
 const THEME_KEY = 'theme';
-const LAYOUT_KEY = 'layout';
 // 与后端 bootstrap/update.rs 的 AUTO_UPDATE_KEY 同名，双方读同一份 settings.json
 const AUTO_UPDATE_KEY = 'autoUpdate';
 // 与后端 bootstrap/startup.rs 的 AUTO_ENABLE_ON_START_KEY 同名
@@ -139,11 +139,6 @@ function waitForVoices(timeoutMs: number): Promise<void> {
     synth.addEventListener('voiceschanged', done);
   });
 }
-
-// 面板布局：竖版规则列表 / 横版键鼠图。两者各自定尺寸，切换时 setSize + center。
-type PanelLayout = 'vertical' | 'horizontal';
-const VERTICAL_SIZE = { width: 405, height: 720 };
-const HORIZONTAL_SIZE = { width: 1060, height: 580 };
 
 const DEFAULT_THEME: ThemeSettings = {
   color: DEFAULT_THEME_COLOR,
@@ -523,7 +518,9 @@ export default function PanelApp() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   // 筛选只影响显示；不持久化，免得下次打开时规则被上次的筛选藏起来像是丢了。
   const [filter, setFilter] = useState<RuleFilter>('all');
+  // 面板布局：竖版规则列表 / 横版键鼠图，各有设计尺寸与记住的缩放比例，切换时定尺寸并居中。
   const [layout, setLayout] = useState<PanelLayout>('vertical');
+  const { scale: windowScale, applyLayout, resetScale } = useWindowScale(settingsStore);
   // 横版统一间隔的回退值（无规则时显示用；有规则时显示取自规则本身）
   const [unifiedInterval, setUnifiedInterval] = useState(DEFAULT_INTERVAL_MS);
   const [hotkeys, setHotkeys] = useState<{
@@ -857,12 +854,14 @@ export default function PanelApp() {
     settingsStore
       .get<PanelLayout>(LAYOUT_KEY)
       .then((v) => {
-        if (v === 'vertical' || v === 'horizontal') {
-          setLayout(v);
-          void applyWindowSize(v);
-        }
+        // 没存过布局也要走一遍：竖版可能存过放大比例
+        const initial = v === 'horizontal' ? 'horizontal' : 'vertical';
+        setLayout(initial);
+        void applyLayout(initial);
       })
-      .catch(() => {});
+      .catch(() => {
+        void applyLayout('vertical');
+      });
 
     invoke<boolean>('get_global_enabled')
       .then(setGlobalEnabled)
@@ -1691,17 +1690,6 @@ export default function PanelApp() {
   }
 
   // ── 横版布局 ────────────────────────────────────────────────────────────────
-  async function applyWindowSize(l: PanelLayout) {
-    const s = l === 'horizontal' ? HORIZONTAL_SIZE : VERTICAL_SIZE;
-    try {
-      const w = getCurrentWindow();
-      await w.setSize(new LogicalSize(s.width, s.height));
-      await w.center();
-    } catch {
-      /* 尺寸调整失败不阻断交互 */
-    }
-  }
-
   async function switchLayout(next: PanelLayout) {
     // 横版是单键模型，每个键位都是 trigger == target 的重合态。后端下发的
     // coincident_toggle 为 false 时（当前是 DD 系列）切换连发建不出来，故禁止切到横版。
@@ -1720,7 +1708,7 @@ export default function PanelApp() {
       }
     }
     setLayout(next);
-    void applyWindowSize(next);
+    void applyLayout(next);
     settingsStore
       .set(LAYOUT_KEY, next)
       .then(() => settingsStore.save())
@@ -3159,6 +3147,8 @@ export default function PanelApp() {
           appVersion={appVersion}
           inputMode={inputMode}
           layout={layout}
+          windowScale={windowScale}
+          onResetWindowScale={() => void resetScale()}
           switchingMode={switchingMode}
           globalEnabled={globalEnabled}
           togglingGlobal={togglingGlobal}

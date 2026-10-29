@@ -7,6 +7,7 @@ import {
   LogicalSize,
   PhysicalPosition,
 } from '@tauri-apps/api/window';
+import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { LazyStore } from '@tauri-apps/plugin-store';
 import iconUrl from '../../assets/icon-64.png';
 import { keyLabel, type KeyId } from '../panel/components/KeyCapture';
@@ -20,6 +21,12 @@ import {
   type ThemeMode,
   type ThemeSettings,
 } from '../panel/theme';
+import {
+  PANEL_LAYOUT_KEY,
+  PANEL_SCALE_EVENT,
+  PANEL_SCALE_KEY,
+  sanitizeScales,
+} from '../panel/windowScale';
 import '../panel/HorizontalLayout.css';
 import './FloatApp.css';
 
@@ -157,24 +164,47 @@ export default function FloatApp() {
     };
   }, []);
 
-  // ── 窗口宽高自适应内容：内容 hug，窗口随之收缩 ──
+  // ── 窗口宽高自适应内容：内容 hug，窗口随之收缩；比例跟随面板当前布局 ──
   useEffect(() => {
     const el = floatRef.current;
     if (!el) return;
+    let zoom = 1;
+    // 内容尺寸是 CSS 像素，webview 放大后窗口要按同一比例放大才装得下
     const apply = () => {
       const rect = el.getBoundingClientRect();
-      const w = Math.ceil(rect.width);
-      const h = Math.ceil(rect.height);
+      const w = Math.ceil(rect.width * zoom);
+      const h = Math.ceil(rect.height * zoom);
       if (w > 0 && h > 0) {
         getCurrentWindow()
           .setSize(new LogicalSize(w, h))
           .catch(() => {});
       }
     };
+    // 缩放不改内容的 CSS 尺寸，ResizeObserver 不会触发，这里手动重算一次
+    const applyZoom = (next: number) => {
+      zoom = next;
+      getCurrentWebview()
+        .setZoom(next)
+        .then(apply)
+        .catch(() => {});
+    };
     const ro = new ResizeObserver(apply);
     ro.observe(el);
     apply();
-    return () => ro.disconnect();
+
+    Promise.all([
+      settingsStore.get<string>(PANEL_LAYOUT_KEY),
+      settingsStore.get<unknown>(PANEL_SCALE_KEY),
+    ])
+      .then(([layout, scales]) => {
+        applyZoom(sanitizeScales(scales)[layout === 'horizontal' ? 'horizontal' : 'vertical']);
+      })
+      .catch(() => {});
+    const unlistenP = listen<number>(PANEL_SCALE_EVENT, (e) => applyZoom(e.payload));
+    return () => {
+      ro.disconnect();
+      unlistenP.then((fn) => fn()).catch(() => {});
+    };
   }, []);
 
   // ── 显隐：由 Rust 的 float-active 事件驱动，只在可见时轮询 ──

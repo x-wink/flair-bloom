@@ -50,6 +50,7 @@ use commands::{
     },
     sound::{delete_sound_file, import_sound_file, read_sound_file},
     status::get_app_status,
+    window::set_panel_aspect,
 };
 use engine::{start_listener, BurstEngine};
 
@@ -181,6 +182,7 @@ pub fn run() {
             uninstall_dd_hid_driver,
             is_elevated,
             relaunch_as_admin,
+            set_panel_aspect,
             save_profile,
             set_profile_signature,
             get_license_status,

@@ -65,6 +65,9 @@ interface Props {
   appVersion: string;
   inputMode: SettingsInputMode;
   layout: 'vertical' | 'horizontal';
+  /** 当前布局的窗口缩放比例，1 为设计尺寸 */
+  windowScale: number;
+  onResetWindowScale: () => void;
   switchingMode: boolean;
   globalEnabled: boolean;
   togglingGlobal: boolean;
@@ -508,6 +511,25 @@ export default function SettingsDialog(props: Props) {
                     />
                   ))}
                 </div>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-main">
+                  <span className="settings-row-title">
+                    界面缩放 {Math.round(props.windowScale * 100)}%
+                  </span>
+                  <span className="settings-row-desc">
+                    拖动面板边缘等比放大，竖版、横版分别记住
+                  </span>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  tone="neutral"
+                  disabled={props.windowScale === 1}
+                  onClick={props.onResetWindowScale}
+                >
+                  复位
+                </Button>
               </div>
             </SettingsSection>
 

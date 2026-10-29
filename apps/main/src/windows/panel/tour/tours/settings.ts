@@ -46,6 +46,7 @@ export const settings: TourDef = {
       body: p(
         '明亮 / 黑暗 / 跟随系统，再挑一个门派配色，一共 20 套。',
         '☰ 菜单 → 主题颜色也能快捷切换。',
+        '屏幕大嫌字小，拖面板边缘就能等比放大，这里可以一键复位。',
       ),
       prepare: (host) => host.openSettings('general'),
     },
