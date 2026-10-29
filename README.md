@@ -156,6 +156,7 @@
 
 想做、还没做的，按这里的顺序不一定：
 
+- 剑网三专栏：按门派、心法查白皮书和一键宏 / 多段宏，宏名一键复制，列表随赛季在线更新（路线图见 [jx3-column](docs/roadmaps/jx3-column.md)）
 - 窗口绑定：配置绑定指定窗口，只在该窗口处于前台时生效，切走自动暂停（路线图见 [window-binding](docs/roadmaps/window-binding.md)）
 - 外设模式支持切换连发的目标键与启动键相同、横版键鼠图：按设备区分按键来源（路线图见 [hid-stick](docs/roadmaps/hid-stick.md)）
 - 内置常用规则模板（FPS 快速连发、MOBA 技能连按），一键导入
