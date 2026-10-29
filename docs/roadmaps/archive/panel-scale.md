@@ -1,6 +1,6 @@
 # 面板等比缩放与主题对比度 — 改造路线图 / Change Roadmap
 
-Status: active（T1–T3 完成；T4、T5 进行中，完成后随下一版发布）
+Status: completed（2026-10-29 全部完成，作者 Windows 实测通过；随下一版发布）
 Goal: 大屏用户能把面板（及浮窗）等比放大，也能一键最大化；所有主题色在明暗两档下文字都过 WCAG AA 4.5:1。
 
 ---
@@ -27,7 +27,7 @@ Goal: 大屏用户能把面板（及浮窗）等比放大，也能一键最大�
 
 `theme.css` / `theme.ts` / `contrast.ts`，主色文字 `--fb-color-primary-text`、语义色文字 `--fb-color-*-text`，`scripts/theme-contrast.test.ts` 钉住 20 预设 × 明暗。浏览器 mock 截图核对过绯粉亮色、流金暗色、设置页。
 
-### T2 — 面板与浮窗等比缩放 · 进度: 代码完成，待 Windows 真机验收
+### T2 — 面板与浮窗等比缩放 · 进度: 已完成（2026-10-29）
 
 `windowScale.ts` / `useWindowScale.ts` / `commands/window.rs`（`lock_aspect` 单测）/ 浮窗跟随；设置 → 通用 → 外观显示缩放并可复位。Windows 侧 subclass 只在临时 crate 里对 Windows 目标做过类型检查与 clippy，完整交叉编译在 mac 上跑不了（ring 缺 MSVC 头文件）。
 
@@ -35,14 +35,14 @@ Goal: 大屏用户能把面板（及浮窗）等比放大，也能一键最大�
 
 拖四边四角锁比例、最小尺寸与工作区边缘、高 DPI 与跨屏、放大后走线与引导气泡、浮窗跟随、横版排版全部通过。
 
-### T4 — 拖边以中心为准缩放、不出屏 · 进度: 代码完成，待 Windows 真机验收
+### T4 — 拖边以中心为准缩放、不出屏 · 进度: 已完成（2026-10-29，作者实测）
 
 - **Change:** `commands/window.rs`：`WM_ENTERSIZEMOVE` 记下窗口中心与所在屏幕的工作区，`WM_EXITSIZEMOVE` 清掉；`WM_SIZING` 改为按被拖的边到中心的距离算尺寸（拖左右边看宽，拖上下边看高，拖角取较大的那个），以中心为准摆放，再整体推回工作区。换算仍是纯函数，替换 `lock_aspect`。
 - **Acceptance:** 拖任意边或角，窗口以中心为准向四周放大缩小，比例不变；靠近屏幕边缘放大时窗口被推回、不出屏，最大仍能放到工作区装得下的等比尺寸。
 - **Test:** `window_tests.rs` 覆盖四边、四角、最小与最大尺寸、贴左上和右下边推回；Windows 真机拖一遍。
 - **Rollback:** 回退提交即恢复「对边不动」。
 
-### T5 — 最大化 / 取消最大化 · 进度: 代码完成，待 Windows 真机验收
+### T5 — 最大化 / 取消最大化 · 进度: 已完成（2026-10-29，作者实测）
 
 - **Change:** 前端 `windowScale.ts` 加最大化矩形的纯计算，`useWindowScale.ts` 管最大化状态（存 settings）：最大化时 `setResizable(false)`，期间 resize 事件不写缩放比例、不广播给浮窗（D9）；还原一律回到 100%。后端在拖过边的 `WM_EXITSIZEMOVE` 时发 `panel-resize-ended`，前端据此判断是否拉到了最大，到了就转成最大化。标题栏在最小化与关闭按钮之间加最大化 / 还原按钮（同 Windows 的顺序）；标题栏改为自己处理按下：双击切换，最大化状态下按住拖动先还原（鼠标在标题栏上的横向比例不变）再 `startDragging`。切换布局时保持最大化；设置里点「复位缩放」先取消最大化。
 - **Acceptance:** 按钮、双击都能切换；拖边拉到最大、松手后按钮变成「还原」、不能再拖边；最大化后拖标题栏，窗口缩回 100% 并跟着鼠标走；关掉面板（或切到浮窗）再打开仍是最大化；还原回到 100% 并居中；浮窗大小不受影响。
@@ -51,7 +51,5 @@ Goal: 大屏用户能把面板（及浮窗）等比放大，也能一键最大�
 
 ## 4. 交接 / Handoff
 
-- **进度（2026-10-29）：** T1、T2 完成并推送，CHANGELOG `[Unreleased]` 已写「面板可放大」「文字更清楚」。
-- **进度（2026-10-29）：** T3 作者在 Windows 上实测全部通过；新增 T4、T5（D7–D9）。
-- **遗留：** mac 上的锁比例只在作者本机 `tauri dev` 里看过效果，mac 版仍不在发布范围；T4 的中心缩放在 mac 上不做（系统自带的比例约束不支持从中心缩放）。
-- **下一步入口 = T4 → T5：** 做完在 Windows 上 `pnpm dev`（真机冒烟起法见 [development](../../skills/flair-bloom/references/engineering/development.md)）按两张卡的 Acceptance 逐条过，再随下一版发布。
+- **结果（2026-10-29）：** T1–T5 全部完成，作者在 Windows 上实测通过；CHANGELOG `[Unreleased]` 已写「面板可放大」「面板可最大化」「文字更清楚」，随下一版发布。
+- **遗留：** mac 上的锁比例只在作者本机 `tauri dev` 里看过效果，mac 版仍不在发布范围；中心缩放与拉到最大即最大化只在 Windows 上做（mac 用系统自带的比例约束）。
