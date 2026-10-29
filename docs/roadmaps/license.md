@@ -179,4 +179,5 @@ billing L1 上生产 + 批次 ─────┘
 - **进度（2026-10-27）：** T1–T3 完成并推送；`/code-review`（范围 `v0.5.0..`）10 条已修；GitHub Secret 已填 billing 0.6.0 的生产公钥；CHANGELOG `[Unreleased]` 已按 D23 写好。产品页 `@xwink/ui` 升到 beta.16（beta.11 被私有源的旧版本自动清理挤掉，作者已关掉该清理），Site 工作流恢复绿。
 - **遗留：** 重复兑换的确认框只有单测、未实跑；Windows 上的署名水印与激活未实跑（WebView2、系统证书校验）。
 - **发版（2026-10-28）：** 作者定跳过 Windows 真机复测，按 release 发 v0.6.0。
+- **待排查（2026-10-29）：** 一位亲友在通用模式下兑换后切到游戏模式，billing 又记了一次激活。代码里没有自动重发的路径，第二次请求只能是手动点了「激活」或「覆盖」。两种可能：一是同一账户下误点「覆盖」；二是 Windows 标准账户提权时输入了另一个管理员的密码，`%APPDATA%` 换成那个账户的，许可证（以及规则、主题）看起来消失，于是再兑换了一次。已请她确认两点：UAC 是只点「是」还是输了密码；切换后规则和主题是否还在。必要时让她发 `%LOCALAPPDATA%\fun.xwink.flairbloom\logs\`（只保留 7 天）。若确认是第二种，要修的是「提权到另一个账户后数据目录跟着变」，影响的不只是许可证；另外日志可补记这次激活是否走了覆盖。
 - **下一步入口 = T4 生产验收：** 作者定生产的 flair 码等能在 Windows 上验收时再建（向 xwink-console 会话要，`flair.signature`、永久、重下发 3 次，生产写入逐次经作者点头）→ Windows 上的 v0.6.0 正式版用第一张真码激活、填署名、重启、再兑换一次看覆盖确认；有问题按 release 向前滚修复。本地联调起法见 D13（xwink-console `pnpm db:up && pnpm service:all`），真实契约测试 `FLAIR_TEST_LICENSE_CODE=<本地码> cargo test -p flair-bloom live_activation -- --ignored`。
