@@ -163,6 +163,7 @@
 - 内置常用规则模板（FPS 快速连发、MOBA 技能连按），一键导入
 - 配置文件被外部改动后自动重新加载
 - 产品页补实拍截图，站内反馈入口
+- 了解产品使用人群、分布与留存，反馈可关联手动诊断（xwink 体系接入草案见 [product-insights](docs/roadmaps/product-insights.md)）
 - 桌宠：桌面上一只随连发状态动的小东西，点击穿透、可拖、右键菜单（设计稿见 [pet-mode](docs/roadmaps/pet-mode.md)）
 - 界面迁到 Vue 与 xwink 组件库，新手教程沉淀进组件库复用（路线图见 [vue-migration](docs/roadmaps/vue-migration.md)）
 - 宏录制回放、随机抖动、按前台游戏自动切配置
