@@ -1,6 +1,7 @@
 // 横版走线几何的纯函数断言。前端没有测试框架，用 Node 内置 test runner + 类型剥离直接跑：
 // `pnpm test:ui`。
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
   buildWires,
@@ -219,6 +220,25 @@ test('跨行多条同向：跨度远的在内层，末段不切过别的横段',
   ]);
   assert.equal(crossings(placed), 0);
   for (const p of placed) assert.ok(p.points[0][1] === 85, '从下沿出');
+});
+
+test('走线层级低于键帽，跨行路径不会压在中间键帽表面', () => {
+  const css = readFileSync(
+    new URL('../apps/main/src/windows/panel/HorizontalLayout.css', import.meta.url),
+    'utf8',
+  );
+  const z = (selector: string) => {
+    const escaped = selector.replace('.', '\\.');
+    const body = css.match(new RegExp(`${escaped}\\s*\\{([\\s\\S]*?)\\}`))?.[1];
+    const value = body?.match(/z-index:\s*(-?\d+)/)?.[1];
+    return value === undefined ? undefined : Number(value);
+  };
+
+  const capZ = z('.hkb-cap');
+  const wireZ = z('.hkb-wires');
+  assert.notEqual(capZ, undefined);
+  assert.notEqual(wireZ, undefined);
+  assert.ok(capZ! > wireZ!, `键帽层级 ${capZ} 应高于走线层级 ${wireZ}`);
 });
 
 test('默认侧会交叉时改走另一侧', () => {
