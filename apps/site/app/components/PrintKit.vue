@@ -96,7 +96,7 @@ onBeforeUnmount(() => {
           <p class="mt-1 text-[11pt] opacity-90">
             PVE 打本按键小助手 · Windows 10 / 11（64 位）· 免费使用
           </p>
-          <p class="mt-2 text-[9pt] opacity-80">20 种门派色随心换，这张海报用的就是其中一种。</p>
+          <p class="mt-2 text-[9pt] opacity-80">{{ brandPresets.length }} 种门派色随心换，这张海报用的就是其中一种。</p>
         </div>
         <div class="size-[30mm] shrink-0 rounded-[4mm] bg-white p-[2mm]">
           <img src="/icon.png" alt="" class="size-full" />

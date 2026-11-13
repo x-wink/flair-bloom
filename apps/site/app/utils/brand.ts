@@ -3,6 +3,7 @@ import { DEFAULT_THEME_COLOR, SECT_PRESETS } from '../../../main/src/windows/pan
 
 // 色板与默认色直接取应用的 theme.ts：网站与应用的门派配色必须同一份色值
 export const brandPresets = SECT_PRESETS;
+export { themePresetLabel } from '../../../main/src/windows/panel/theme.ts';
 export const defaultBrandColor = DEFAULT_THEME_COLOR;
 export const BRAND_STORAGE_KEY = 'flair-bloom:theme-color';
 

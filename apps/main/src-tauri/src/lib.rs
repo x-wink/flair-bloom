@@ -325,6 +325,7 @@ pub fn run() {
             tray::setup_tray(app.handle(), engine_for_tray)?;
 
             if let Some(panel) = app.get_webview_window("panel") {
+                panel.set_title(&format!("{} v{}", APP_NAME_CN, app.package_info().version))?;
                 panel.show()?;
                 if need_agreement {
                     let _ = panel.emit("show-agreement", AGREEMENT_VERSION);

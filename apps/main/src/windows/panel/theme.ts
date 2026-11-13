@@ -25,6 +25,10 @@ export interface SectPreset {
   color: string;
 }
 
+export function themePresetLabel(preset: Pick<SectPreset, 'sect' | 'name'>): string {
+  return `${preset.sect} · ${preset.name}`;
+}
+
 /**
  * 主题色预设。配色取自剑网三无界全 20 门派心法代表色（社区约定，非官方 hex），
  * 外加流派无相楼（取 JX3Box 的门派色）。

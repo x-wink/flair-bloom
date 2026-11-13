@@ -11,7 +11,7 @@ export const profiles: TourDef = {
       target: 'profile',
       title: '当前用的是哪套',
       body: p(
-        '左下角显示当前配置。一个角色一套连发键位，换角色直接换配置。',
+        '底部左侧配置下拉显示当前配置。一个角色一套连发键位，换角色直接换配置。',
         '改动「默认配置」时会自动另存成一套新的，默认配置本身不会被改坏。',
       ),
       prepare: async (host) => {

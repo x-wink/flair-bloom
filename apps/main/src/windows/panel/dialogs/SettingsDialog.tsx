@@ -18,7 +18,7 @@ import { clampSignature } from '../license';
 import { INPUT_MODE_HINTS, INPUT_MODE_ORDER } from '../inputModes';
 import DialogShell from './DialogShell';
 import ProfileCardList, { type SettingsProfileEntry } from './ProfileCardList';
-import { SECT_PRESETS, type ThemeMode, type ThemeSettings } from '../theme';
+import { SECT_PRESETS, themePresetLabel, type ThemeMode, type ThemeSettings } from '../theme';
 import './SettingsDialog.css';
 
 export type SettingsTab = 'general' | 'hotkeys' | 'sound' | 'profiles';
@@ -487,8 +487,8 @@ export default function SettingsDialog(props: Props) {
                           : ''
                       }`}
                       style={{ background: p.color }}
-                      title={p.name}
-                      aria-label={p.name}
+                      title={themePresetLabel(p)}
+                      aria-label={themePresetLabel(p)}
                       onClick={() => props.onThemeChange({ color: p.color })}
                     />
                   ))}
@@ -620,7 +620,7 @@ export default function SettingsDialog(props: Props) {
                       <span className="settings-mode-name">{INPUT_MODE_LABELS[mode]}</span>
                       <span className="settings-mode-meta">
                         {layoutBlocked
-                          ? '横版键鼠图下不可用，请先切回竖版'
+                          ? '横版·键鼠按键下不可用，请先切回竖版·规则卡片'
                           : `${INPUT_MODE_HINTS[mode]} · ${modeDetail(mode, props)}`}
                       </span>
                     </CardListButton>

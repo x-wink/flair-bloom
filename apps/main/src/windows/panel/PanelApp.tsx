@@ -96,6 +96,7 @@ import {
   DEFAULT_THEME_COLOR,
   DEFAULT_THEME_MODE,
   SECT_PRESETS,
+  themePresetLabel,
   type ThemeMode,
   type ThemeSettings,
 } from './theme';
@@ -237,6 +238,10 @@ const MAX_INTERVAL_MS = 10000;
 type BurstMode = 'hold' | 'toggle';
 type RuleFilter = 'all' | BurstMode;
 type InputMode = 'sendinput' | 'interception' | 'ddsimple' | 'hidstick';
+const LAYOUT_LABELS: Record<PanelLayout, string> = {
+  vertical: '竖版·规则卡片',
+  horizontal: '横版·键鼠按键',
+};
 type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
 
 interface AppStatus {
@@ -794,7 +799,10 @@ export default function PanelApp() {
 
   useEffect(() => {
     getVersion()
-      .then(setAppVersion)
+      .then((version) => {
+        setAppVersion(version);
+        document.title = `${APP_NAME} v${version}`;
+      })
       .catch(() => {});
   }, []);
 
@@ -1731,7 +1739,7 @@ export default function PanelApp() {
     if (!status?.hid_stick_present || status.input_mode === 'hidstick') return;
     if (switchingMode || showAgreement) return;
     if (layout === 'horizontal') {
-      toast.info('检测到外设驱动。横版键鼠图下用不了外设模式，切回竖版后可在输入模式里选它');
+      toast.info('检测到外设驱动。横版·键鼠按键下用不了外设模式，切回竖版后可在输入模式里选它');
       return;
     }
     if (confirmOpen) {
@@ -1758,7 +1766,7 @@ export default function PanelApp() {
   async function selectInputMode(target: InputMode) {
     if (blocksHorizontalLayout(target) && layout === 'horizontal') {
       setModePickerOpen(false);
-      toast.warning(`横版键鼠图不支持${INPUT_MODE_LABELS[target]}，请先切回竖版规则列表`);
+      toast.warning(`横版·键鼠按键不支持${INPUT_MODE_LABELS[target]}，请先切回竖版·规则卡片`);
       return;
     }
     if (switchingMode || target === inputMode) return;
@@ -1904,7 +1912,7 @@ export default function PanelApp() {
       setKeyPolicies(live);
       if (!live.coincident_toggle) {
         toast.warning(
-          `${INPUT_MODE_LABELS[inputMode]}不支持横版键鼠图，请先切换到游戏模式或轻量模式`,
+          `${INPUT_MODE_LABELS[inputMode]}不支持横版·键鼠按键，请先切换到网吧模式、游戏模式或轻量模式`,
         );
         return;
       }
@@ -2412,8 +2420,7 @@ export default function PanelApp() {
   }
 
   function handleShowSettings(tab: SettingsTab = 'general') {
-    setMenuOpen(false);
-    setProfileMenuOpen(false);
+    closeMenus();
     setSettingsTab(tab);
     setShowSettings(true);
   }
@@ -2736,6 +2743,18 @@ export default function PanelApp() {
       void applyStartupAutoEnable();
   }
 
+  const layoutMenuItems: ContextMenuItem[] = (['vertical', 'horizontal'] as const).map((value) => ({
+    label: LAYOUT_LABELS[value],
+    active: layout === value,
+    subtitle:
+      value === 'horizontal' && !keyPolicies.coincident_toggle
+        ? '当前输入模式不支持横版'
+        : undefined,
+    onClick: () => {
+      if (value !== layout) void switchLayout(value);
+    },
+  }));
+
   return (
     <div
       className={`panel ${layout === 'horizontal' ? 'panel--h' : 'panel--v'}${globalEnabled ? ' on' : ' off'}`}
@@ -2745,41 +2764,14 @@ export default function PanelApp() {
       {globalEnabled && <div className="global-active-frame" aria-hidden="true" />}
       <header className="panel-header" onMouseDown={handleHeaderMouseDown}>
         <img className="header-icon" src={iconUrl} alt="" draggable={false} />
-        <h1>
-          {APP_NAME}
+        <div className="header-heading">
           {hotkeys.panel_toggle && (
             <Kbd title="面板显隐快捷键">{keyLabel(hotkeys.panel_toggle)}</Kbd>
           )}
-        </h1>
+          <h1>{APP_NAME}</h1>
+          {appVersion && <span className="header-version">v{appVersion}</span>}
+        </div>
         <div className="window-controls">
-          <button
-            className="win-btn"
-            data-tour="layout-toggle"
-            onClick={() => void switchLayout(layout === 'vertical' ? 'horizontal' : 'vertical')}
-            // 用 aria-disabled 而非 disabled：disabled 的按钮不触发 onClick，
-            // switchLayout 里的原因提示就永远跑不到，点下去毫无反应。
-            aria-disabled={!keyPolicies.coincident_toggle && layout === 'vertical'}
-            aria-label="切换布局"
-            title={
-              !keyPolicies.coincident_toggle && layout === 'vertical'
-                ? `${INPUT_MODE_LABELS[inputMode]}不支持横版键鼠图`
-                : layout === 'vertical'
-                  ? '切换到横版键鼠图'
-                  : '切换到竖版规则列表'
-            }
-          >
-            {layout === 'vertical' ? (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <rect x="1.5" y="3" width="13" height="4" rx="1" stroke="currentColor" />
-                <rect x="1.5" y="9" width="13" height="4" rx="1" stroke="currentColor" />
-              </svg>
-            ) : (
-              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
-                <rect x="3" y="1.5" width="4" height="13" rx="1" stroke="currentColor" />
-                <rect x="9" y="1.5" width="4" height="13" rx="1" stroke="currentColor" />
-              </svg>
-            )}
-          </button>
           {(updateReady || updateAvailable) && (
             <button
               className="win-btn win-btn--update"
@@ -3045,53 +3037,92 @@ export default function PanelApp() {
       </section>
 
       <footer className="panel-footer">
-        <Button
-          ref={profileBtnRef}
-          variant="outline"
-          tone="neutral"
-          size="sm"
-          appendIcon={<ChevronIcon size={10} />}
-          data-tour="profile"
-          onClick={() => setProfileMenuOpen((v) => !v)}
-          title={isDefaultProfile ? '默认配置（修改后将自动新建）' : `当前配置：${profileName}`}
-        >
-          {isDefaultProfile ? '默认配置' : profileName}
-        </Button>
+        <div className="footer-selectors">
+          <Button
+            ref={profileBtnRef}
+            className="footer-profile"
+            variant="outline"
+            tone="neutral"
+            size="sm"
+            appendIcon={<ChevronIcon size={10} />}
+            data-tour="profile"
+            onClick={() => setProfileMenuOpen((v) => !v)}
+            title={isDefaultProfile ? '默认配置（修改后将自动新建）' : `当前配置：${profileName}`}
+          >
+            {isDefaultProfile ? '默认配置' : profileName}
+          </Button>
+          <Button
+            ref={modeBtnRef}
+            className="footer-mode"
+            variant="outline"
+            tone={inputMode !== 'sendinput' ? 'primary' : 'neutral'}
+            size="sm"
+            loading={switchingMode}
+            appendIcon={<ChevronIcon size={10} />}
+            data-tour="input-mode"
+            onClick={() => setModePickerOpen((v) => !v)}
+            title="点击选择输入模式"
+          >
+            {INPUT_MODE_LABELS[inputMode]}
+            {inputMode === 'interception' ? ' ★' : ''}
+          </Button>
+        </div>
         <div className="footer-controls">
-          <div className="footer-control">
-            <Button
-              ref={modeBtnRef}
-              variant="outline"
-              tone={inputMode !== 'sendinput' ? 'primary' : 'neutral'}
-              size="sm"
-              loading={switchingMode}
-              appendIcon={<ChevronIcon size={10} />}
-              data-tour="input-mode"
-              onClick={() => setModePickerOpen((v) => !v)}
-              title="点击选择输入模式"
-            >
-              {INPUT_MODE_LABELS[inputMode]}
-              {inputMode === 'interception' ? ' ★' : ''}
-            </Button>
-          </div>
-          <div className="footer-control">
-            <Button
-              variant="solid"
-              tone={globalEnabled ? 'primary' : 'neutral'}
-              size="sm"
-              loading={togglingGlobal}
-              kbd={(() => {
-                const k = globalEnabled
-                  ? (hotkeys.global_stop ?? hotkeys.global_toggle)
-                  : hotkeys.global_toggle;
-                return k ? keyLabel(k) : undefined;
-              })()}
-              data-tour="global"
-              onClick={toggleGlobal}
-            >
-              {globalEnabled ? '结束运行' : '开始运行'}
-            </Button>
-          </div>
+          <Button
+            className="footer-layout"
+            variant="outline"
+            tone="neutral"
+            size="sm"
+            data-tour="layout-toggle"
+            aria-disabled={!keyPolicies.coincident_toggle && layout === 'vertical'}
+            prependIcon={
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.2"
+                aria-hidden="true"
+              >
+                {layout === 'horizontal' ? (
+                  <>
+                    <rect x="1.5" y="3" width="13" height="4" rx="1" />
+                    <rect x="1.5" y="9" width="13" height="4" rx="1" />
+                  </>
+                ) : (
+                  <>
+                    <rect x="3" y="1.5" width="4" height="13" rx="1" />
+                    <rect x="9" y="1.5" width="4" height="13" rx="1" />
+                  </>
+                )}
+              </svg>
+            }
+            onClick={() => void switchLayout(layout === 'vertical' ? 'horizontal' : 'vertical')}
+            title={
+              !keyPolicies.coincident_toggle && layout === 'vertical'
+                ? '当前输入模式不支持横版·键鼠按键'
+                : `切换到${LAYOUT_LABELS[layout === 'vertical' ? 'horizontal' : 'vertical']}`
+            }
+          >
+            {layout === 'vertical' ? '竖版' : '横版'}
+          </Button>
+          <Button
+            variant="solid"
+            tone={globalEnabled ? 'primary' : 'neutral'}
+            size="sm"
+            loading={togglingGlobal}
+            kbd={(() => {
+              const k = globalEnabled
+                ? (hotkeys.global_stop ?? hotkeys.global_toggle)
+                : hotkeys.global_toggle;
+              return k ? keyLabel(k) : undefined;
+            })()}
+            data-tour="global"
+            onClick={toggleGlobal}
+          >
+            {globalEnabled ? '结束运行' : '开始运行'}
+          </Button>
         </div>
       </footer>
 
@@ -3132,8 +3163,10 @@ export default function PanelApp() {
         items={[
           { label: '设置', onClick: handleShowSettings },
           {
-            label: '主题颜色',
+            label: '外观布局',
             children: [
+              ...layoutMenuItems,
+              { type: 'divider' },
               {
                 label: '明亮',
                 active: theme.mode === 'light',
@@ -3151,7 +3184,7 @@ export default function PanelApp() {
               },
               { type: 'divider' },
               ...SECT_PRESETS.map((p) => ({
-                label: p.name,
+                label: themePresetLabel(p),
                 active: theme.color.toLowerCase() === p.color.toLowerCase(),
                 prependIcon: (
                   <span

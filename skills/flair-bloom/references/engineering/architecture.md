@@ -94,7 +94,7 @@ X1/X2 在 DD 模式 / 鼠标设备缺失时按 once 旗标 warn 一次后自动�
 
 **外设驱动与 Interception 设备槽**：Interception 的 `keyboard.sys` / `mouse.sys` 是键盘类 / 鼠标类的上层过滤驱动，每类 10 个设备槽，按设备出现先后往后分配，拔掉不还、重启才清零（实测鼠标槽 12、14–17 空着，新插的仍分到 18）。某类槽满后再插进来的设备分不到槽，输入被过滤驱动吞掉，设备管理器却显示正常——外设驱动对每条指令照回 `OK`，低级钩子一个键也收不到。装卸 DD-HID 每次都会留下一个虚拟键盘占槽。诊断修复的「外设驱动」两项（`repair.rs` 的 `diagnose_hidstick`）：串口扫描对每个非转串口芯片的 USB 串口握一次手（外设模式正用着的口不碰），设备槽检查用 `interception::device_hardware_ids`（只读、不要管理员）按 VID/PID 找外设驱动的键盘与鼠标各占几号槽，缺哪个报错并建议重启。**别用「移除全部键盘再重扫」去清槽**：实测 `keyboard.sys` 不会因此卸载，重新加回的键盘（包括用户的实体键盘）全都分不到槽而失灵，只能重启。
 
-**输入模式与布局互斥**：仅 HidStick 的单键规则约束无法用横版键鼠图表达（横版每个键位都是 `trigger == target` 的重合态，外设模式下重合态切换连发是空集，见 [key-policy](key-policy.md)），故外设模式与横版互斥——`selectInputMode`（横版下禁选外设模式）与 `switchLayout`（外设模式下禁切横版）两个入口拦截并提示。后者按后端下发的 `coincident_toggle` 能力位判断而非模式名，且用 `aria-disabled` 而非 `disabled`：禁用的按钮不触发 `onClick`，原因提示就永远跑不到。DDSimple 支持两种布局。
+**输入模式与布局互斥**：仅 HidStick 的单键规则约束无法用横版键鼠图表达（横版每个键位都是 `trigger == target` 的重合态，外设模式下重合态切换连发是空集，见 [key-policy](key-policy.md)），故外设模式与横版互斥——`selectInputMode`（横版下禁选外设模式）与 `switchLayout`（外设模式下禁切横版）两个入口拦截并提示。后者按后端下发的 `coincident_toggle` 能力位判断而非模式名。底栏左侧为配置与输入模式下拉，右侧为布局与运行按钮。布局按钮仅显示图标和当前「竖版」／「横版」，菜单使用完整名称「竖版·规则卡片」「横版·键鼠按键」；两者复用 `switchLayout`，受限时仍可点击查看原因，切换前重新读取后端能力，避免使用过期状态放行。DDSimple 支持两种布局。
 
 ## 连发引擎（`packages/burst-engine`）
 

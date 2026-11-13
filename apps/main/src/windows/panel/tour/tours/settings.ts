@@ -1,5 +1,6 @@
 import type { TourDef } from '../types';
 import { p } from './helpers';
+import { SECT_PRESETS } from '../../theme';
 
 export const settings: TourDef = {
   id: 'settings',
@@ -14,7 +15,7 @@ export const settings: TourDef = {
         '全局开关、停止键、面板显隐——打着游戏不用切出来就能操作。',
         '出厂配置默认用 F1 切换全局开关；升级会给未绑定且 F1 未被占用的配置补上 F1，保留自定义绑定，之后清除不会补回。',
         '点按键框开始捕获，按下要绑的键；框上右键可以清除。',
-        '标题栏会显示面板显隐快捷键，悬停可查看用途。',
+        '标题栏显示「气质花按键助手」，版本号以小字号同行显示；面板显隐快捷键位于标题左侧，悬停可查看用途。',
       ),
       prepare: (host) => {
         host.closeMenus();
@@ -46,10 +47,10 @@ export const settings: TourDef = {
     {
       id: 'theme',
       target: 'settings-general-theme',
-      title: '换个颜色',
+      title: '外观与布局',
       body: p(
-        '明亮 / 黑暗 / 跟随系统，再挑一个门派配色，一共 21 套。',
-        '☰ 菜单 → 主题颜色也能快捷切换。',
+        `明亮 / 黑暗 / 跟随系统，再挑一个门派配色，一共 ${SECT_PRESETS.length} 套。`,
+        '☰ 菜单 → 外观布局可快捷切换布局、明暗模式与配色；底部右侧的「竖版／横版」按钮也能切换布局。',
         '屏幕大嫌字小，拖面板边缘就能等比放大，这里可以一键复位。',
         '界面不受 Windows 文字大小影响；这里复位应用缩放，不会修改系统设置。',
       ),

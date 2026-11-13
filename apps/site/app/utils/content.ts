@@ -1,4 +1,5 @@
 // 产品页与打印排版（海报、说明书）共用的文案；只在一处改，两边不会说成两套话
+import { SECT_PRESETS } from '../../../main/src/windows/panel/theme.ts';
 
 export const REPOSITORY = 'https://github.com/x-wink/flair-bloom';
 export { PRODUCT_QQ_GROUP } from '../../../main/src/constants';
@@ -26,7 +27,7 @@ export const highlights: Highlight[] = [
   {
     icon: 'palette',
     title: '颜值能打，外观随心配',
-    points: ['追随光明，坠入黑暗', '20 种门派主题色任你挑'],
+    points: ['追随光明，坠入黑暗', `${SECT_PRESETS.length} 种门派主题色任你挑`],
   },
   {
     icon: 'gear',
@@ -36,7 +37,7 @@ export const highlights: Highlight[] = [
   {
     icon: 'float',
     title: '多形态布局',
-    points: ['竖版界面·最灵活', '横版界面·最直观', '悬浮窗口·超薄无感', '任务栏托盘·快捷入口'],
+    points: ['竖版·规则卡片', '横版·键鼠按键', '悬浮窗口·超薄无感', '任务栏托盘·快捷入口'],
   },
   {
     icon: 'modes',

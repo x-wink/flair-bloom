@@ -3,18 +3,19 @@ import { p } from './helpers';
 
 export const layouts: TourDef = {
   id: 'layouts',
-  title: '横版键鼠图与浮窗',
+  title: '布局与浮窗',
   summary: '在键鼠图上直接点键，最小化成浮窗',
   // 横版是单键模型（trigger == target），外设模式建不出切换连发，switchLayout 本来就会拦；
   // 教程不绕过这条互斥，在目录里就说明白。
-  available: (snapshot) => (snapshot.coincidentToggle ? undefined : '当前输入模式不支持横版键鼠图'),
+  available: (snapshot) =>
+    snapshot.coincidentToggle ? undefined : '当前输入模式不支持横版·键鼠按键',
   steps: [
     {
       id: 'toggle',
       target: 'layout-toggle',
       title: '两种布局',
       body: p(
-        '标题栏这个按钮在竖版规则列表和横版键鼠图之间切换。',
+        '底部右侧布局按钮显示图标和「竖版」或「横版」，点击在「竖版·规则卡片」与「横版·键鼠按键」之间切换；☰ → 外观布局也能选择。',
         '竖版适合精细编辑，横版一眼看清哪些键在用。',
         '界面跟随显示器缩放，不受 Windows 文字大小影响；需要放大时可以拖动面板边缘。',
         '网吧模式可用横版；外设模式暂不支持横版。',

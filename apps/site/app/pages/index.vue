@@ -55,7 +55,7 @@ const currentBrand = computed(() => brandPresets.find((preset) => preset.color =
 // 每张卡占几格，宽窄交替排出错落；顺序与 highlights 一一对应，教学轴另外用
 // col-start / row-span 钉在右侧那一列。三列下正好铺满四行，不留空格
 const HIGHLIGHT_SPANS = [
-  'sm:col-span-2', // 颜值能打：要够宽才能把 20 颗色球排成一行
+  'sm:col-span-2', // 色板需要横向空间，避免单列拉高卡片
   '', // 配置灵活
   '', // 多形态布局
   'sm:col-span-2', // 三模式覆盖
@@ -205,7 +205,7 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
           </XReveal>
           <p class="mt-2 text-sm text-(--ui-fg-muted)">王婆卖瓜，广告位招租</p>
           <!-- 错落 bento：三列网格里宽窄交替（2+1、1+1、2+1），教学轴竖起来占右侧一列三行。
-               色板卡横躺两列，20 颗色球一行排完，不必再被拉成一根空柱子 -->
+               色板卡横躺两列，让色球横向排列，避免拉成一根空柱子 -->
           <ul
             class="ui-glow-marquee mt-8 grid gap-4 sm:grid-cols-2 md:grid-cols-3"
             :style="{ '--ui-glow-cycle': glowCycle }"
@@ -285,7 +285,7 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
                         >。
                       </li>
                     </ul>
-                    <!-- 横躺两格，20 颗色球一行排得开，卡片不用往高里长 -->
+                    <!-- 横躺两格，色球横向排开，卡片不用往高里长 -->
                     <div
                       v-if="item.icon === 'palette'"
                       class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3"
@@ -321,7 +321,7 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
                               : 'border-transparent'
                           "
                           :style="{ background: preset.color }"
-                          :title="`${preset.sect} · ${preset.name}`"
+                          :title="themePresetLabel(preset)"
                           :aria-label="`换成${preset.sect}${preset.name}`"
                           :aria-pressed="preset.color === brandColor"
                           @click="selectBrand(preset.color)"
