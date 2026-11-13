@@ -6,7 +6,8 @@ export default function FrameFlowCanvas({ geometry }: { geometry: FrameGeometry 
   const ref = useRef<HTMLCanvasElement>(null);
   useLayoutEffect(() => {
     const canvas = ref.current;
-    const context = canvas?.getContext('2d', { alpha: true, desynchronized: true });
+    // 低延迟画布会绕过常规合成，Windows WebView2 可能把透明区域显示为黑底。
+    const context = canvas?.getContext('2d', { alpha: true, desynchronized: false });
     if (!canvas || !context) return;
     const width = geometry.width + geometry.inset * 2;
     const height = geometry.height + geometry.inset * 2;
