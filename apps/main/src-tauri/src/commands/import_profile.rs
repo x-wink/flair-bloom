@@ -19,6 +19,7 @@ use super::profile::{now_secs, profiles_dir, save_imported_profile};
 static IMPORT_SEQ: AtomicU64 = AtomicU64::new(0);
 
 mod celestial;
+mod dafeiyu;
 mod jijian;
 mod qzh;
 mod shortcuts;
@@ -71,6 +72,7 @@ pub struct ImportPreview {
 
 type ProfileVariants = fn(&str) -> Vec<(usize, String)>;
 type ProfileSelector = fn(&str, usize) -> Result<String, String>;
+type ImportPreparer = fn(&Path, &str) -> Result<String, String>;
 
 struct ParserDef {
     /// 该格式的配置文件名（大小写不敏感匹配）。
@@ -87,10 +89,30 @@ struct ParserDef {
     parse_hotkeys: fn(data: &str) -> Hotkeys,
     profiles: Option<ProfileVariants>,
     select_profile: Option<ProfileSelector>,
+    prepare: Option<ImportPreparer>,
+}
+
+impl ParserDef {
+    fn matches_filename(&self, filename: &str) -> bool {
+        self.config_filenames
+            .iter()
+            .any(|known| *known == filename || (*known == "*.json" && filename.ends_with(".json")))
+    }
 }
 
 /// 解析器注册表。新增格式支持：在此追加一个 `ParserDef`。
 static PARSERS: &[ParserDef] = &[
+    ParserDef {
+        config_filenames: &["*.json"],
+        source_app: dafeiyu::SOURCE,
+        detect: dafeiyu::detect,
+        parse_preview: dafeiyu::parse_preview,
+        parse_rules: dafeiyu::parse_rules,
+        parse_hotkeys: dafeiyu::parse_hotkeys,
+        profiles: None,
+        select_profile: None,
+        prepare: Some(dafeiyu::prepare),
+    },
     ParserDef {
         config_filenames: &["config.json"],
         source_app: "丐帮高手",
@@ -100,6 +122,7 @@ static PARSERS: &[ParserDef] = &[
         parse_hotkeys: gaibang_parse_hotkeys,
         profiles: None,
         select_profile: None,
+        prepare: None,
     },
     ParserDef {
         config_filenames: &["config.json"],
@@ -110,6 +133,7 @@ static PARSERS: &[ParserDef] = &[
         parse_hotkeys: celestial::parse_hotkeys,
         profiles: Some(celestial::profiles),
         select_profile: Some(celestial::select_profile),
+        prepare: None,
     },
     ParserDef {
         config_filenames: &["config.ini"],
@@ -120,6 +144,7 @@ static PARSERS: &[ParserDef] = &[
         parse_hotkeys: jijian::parse_hotkeys,
         profiles: None,
         select_profile: None,
+        prepare: None,
     },
     ParserDef {
         config_filenames: &["config.json"],
@@ -130,6 +155,7 @@ static PARSERS: &[ParserDef] = &[
         parse_hotkeys: xiaoji::parse_hotkeys,
         profiles: Some(xiaoji::profiles),
         select_profile: Some(xiaoji::select_profile),
+        prepare: None,
     },
 ];
 
@@ -283,12 +309,29 @@ fn read_import(
         .ok_or("文件名无效")?
         .to_string_lossy()
         .to_lowercase();
-    if !PARSERS
-        .iter()
-        .any(|p| p.config_filenames.contains(&filename.as_str()))
-    {
+    if !PARSERS.iter().any(|p| p.matches_filename(&filename)) {
         return Err("不是支持的配置文件名".into());
     }
+    let data = read_import_text(path)?;
+    let parser = PARSERS
+        .iter()
+        .find(|p| p.matches_filename(&filename) && (p.detect)(&data))
+        .ok_or(
+            "无法识别的配置格式，目前支持：丐帮高手、衍天高手、极简按键、小叽按键、大肥鱼按键",
+        )?;
+    let data = if let Some(index) = source_profile_index {
+        parser.select_profile.ok_or("该配置格式不支持方案档位")?(&data, index)?
+    } else {
+        data
+    };
+    let data = match parser.prepare {
+        Some(prepare) => prepare(path, &data)?,
+        None => data,
+    };
+    Ok((parser, data))
+}
+
+fn read_import_text(path: &Path) -> Result<String, String> {
     let size = path
         .metadata()
         .map_err(|e| format!("读取文件信息失败：{e}"))?
@@ -309,22 +352,15 @@ fn read_import(
             .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
             .collect();
         String::from_utf16(&wide).map_err(|e| format!("配置编码无效：{e}"))?
-    } else if filename.ends_with(".ini") {
+    } else if path
+        .extension()
+        .is_some_and(|ext| ext.to_string_lossy().eq_ignore_ascii_case("ini"))
+    {
         String::from_utf8_lossy(&bytes).into_owned()
     } else {
         String::from_utf8(bytes).map_err(|e| format!("配置不是 UTF-8：{e}"))?
     };
-    let data = raw.trim_start_matches('\u{feff}');
-    let parser = PARSERS
-        .iter()
-        .find(|p| p.config_filenames.contains(&filename.as_str()) && (p.detect)(data))
-        .ok_or("无法识别的配置格式，目前支持：丐帮高手、衍天高手、极简按键、小叽按键")?;
-    let data = if let Some(index) = source_profile_index {
-        parser.select_profile.ok_or("该配置格式不支持方案档位")?(data, index)?
-    } else {
-        data.to_string()
-    };
-    Ok((parser, data))
+    Ok(raw.trim_start_matches('\u{feff}').to_string())
 }
 
 /// 扫描目录及一级子目录中的已知配置文件。
@@ -397,13 +433,14 @@ fn to_found_configs(path: &Path) -> Vec<FoundConfig> {
                 .collect();
         }
     }
+    let preview = (parser.parse_preview)(&data, &dir_name);
     vec![FoundConfig {
         path: path.to_string_lossy().to_string(),
         source_app: parser.source_app.to_string(),
-        display_name: if dir_name.is_empty() {
+        display_name: if preview.suggested_name.is_empty() {
             path.to_string_lossy().to_string()
         } else {
-            dir_name.to_string()
+            preview.suggested_name
         },
         source_profile_index: None,
     }]
@@ -422,6 +459,7 @@ fn default_scan_dirs(app: &AppHandle) -> Vec<PathBuf> {
         let mut dirs = dirs;
         if let Ok(appdata) = app.path().config_dir() {
             dirs.push(appdata.join("TheCelestialDiviner"));
+            dirs.push(appdata.join("PenJiujiu"));
         }
         if let Some(public) = std::env::var_os("PUBLIC") {
             dirs.push(PathBuf::from(public).join("Desktop"));
@@ -598,6 +636,41 @@ mod tests {
         assert_eq!(preview.interval_ms, 50);
         assert_eq!(preview.global_toggle, Some(KeyId::Keyboard(120)));
         assert!(read_import(&path, Some(0)).is_err());
+    }
+
+    #[test]
+    fn dafeiyu_scan_preview_and_conversion_share_the_same_six_slot_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("CONFIG.JSON");
+        let data = json!({
+            "keys":[49,50,51,52,53,54], "interval_ms":150, "hold_ms":50,
+            "toggle_mods":0, "toggle_vk":119, "cycle_vk":120,
+            "sets":[{"keys":[65,66,67,68]}, {"keys":[69,70]}],
+            "scope_name":"synthetic.exe", "send_mode":"auto", "sfx_volume":90
+        });
+        let original = format!("\u{feff}{data}").into_bytes();
+        std::fs::write(&path, &original).unwrap();
+        let found = scan_targets(vec![dir.path().to_path_buf(); 2], None);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].source_app, dafeiyu::SOURCE);
+        assert_eq!(found[0].source_profile_index, None);
+        let preview = preview_import(path.display().to_string(), None).unwrap();
+        let profile = convert_profile(&path, None).unwrap();
+        assert_eq!(preview.rule_count, 6);
+        assert_eq!(preview.rule_count, profile.rules.len());
+        assert_eq!(preview.interval_ms, 150);
+        assert!(profile
+            .rules
+            .iter()
+            .all(|r| !r.enabled && r.steps[0].interval_ms == 150));
+        assert_eq!(preview.global_toggle, profile.hotkeys.global_toggle);
+        assert_eq!(profile.hotkeys.global_toggle, Some(KeyId::Keyboard(119)));
+        assert!(profile.hotkeys.global_stop.is_none() && profile.hotkeys.panel_toggle.is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), original);
+        assert!(read_import(&path, Some(0)).is_err());
+        let exported = dir.path().join("converted.qzh");
+        write_profile_file_to_path(&exported, &profile).unwrap();
+        assert_eq!(qzh::read(&exported).unwrap().rules.len(), 6);
     }
 
     #[test]

@@ -168,7 +168,8 @@ export default function ImportDialog({ onClose, onImport }: Props) {
       <div className="modal import-modal">
         <h2>导入配置</h2>
         <p className="modal-desc">
-          支持气质花 .qzh，以及丐帮高手、衍天高手、极简按键和小叽按键配置。选择后预览，确认才导入。
+          支持气质花 .qzh，以及丐帮高手、衍天高手、极简按键、小叽按键和大肥鱼按键配置；大肥鱼录制宏
+          JSON 也可导入。选择后预览，确认才导入。
         </p>
 
         {/* 扫描结果列表 */}

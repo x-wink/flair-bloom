@@ -8,7 +8,7 @@ pub(super) fn config_dirs(path: &Path) -> Vec<PathBuf> {
         .map(|s| s.to_string_lossy().to_lowercase())
         .unwrap_or_default();
     if !name.ends_with(".lnk")
-        || !["极简", "小叽", "xiaojiautokey", "丐帮", "衍天"]
+        || !["极简", "小叽", "xiaojiautokey", "丐帮", "衍天", "大肥鱼"]
             .iter()
             .any(|known| name.contains(known))
     {

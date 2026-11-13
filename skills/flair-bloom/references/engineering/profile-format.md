@@ -71,9 +71,15 @@ Windows 的输入偏好保存在 `input_mode`，内部标识保持 `sendinput`�
 
 托盘仅向隐藏面板发送 `profile-switch-requested`，复用同一保存屏障后调用 `load_profile`，不先行激活。默认配置另存失败时不提交规则／热键更新、不排入失败目标的保存快照，恢复编辑前状态后仍可重试或切换。
 
-后端命令：`save_profile` / `load_profile` / `list_profiles` / `init_default_profile` / `get_active_profile_path` / `rename_profile` / `delete_profile` / `fork_active_profile`；统一导入入口由 `commands/import_profile.rs` 提供扫描、预览与导入，支持 `.qzh`、丐帮高手、衍天高手、极简按键、小叽按键配置。`.qzh` 通过 `import_profile/qzh.rs` 直通既有解密、迁移和校验，保留完整配置（包括空规则配置），无需转换成第三方格式；所有格式复用 `save_imported_profile`，选择不冲突的名称并经 `activate_profile_file` 激活。默认配置受保护：修改默认配置自动 fork 成新配置。`.qzh` 欢迎自行研究解析与开发兼容转换工具，文件封装不构成禁止兼容研究的声明。
+后端命令：`save_profile` / `load_profile` / `list_profiles` / `init_default_profile` / `get_active_profile_path` / `rename_profile` / `delete_profile` / `fork_active_profile`；统一导入入口由 `commands/import_profile.rs` 提供扫描、预览与导入，支持 `.qzh`、丐帮高手、衍天高手、极简按键、小叽按键、大肥鱼按键配置。`.qzh` 通过 `import_profile/qzh.rs` 直通既有解密、迁移和校验，保留完整配置（包括空规则配置），无需转换成第三方格式；所有格式复用 `save_imported_profile`，选择不冲突的名称并经 `activate_profile_file` 激活。默认配置受保护：修改默认配置自动 fork 成新配置。`.qzh` 欢迎自行研究解析与开发兼容转换工具，文件封装不构成禁止兼容研究的声明。
 
 解析器仅保留独立实现的必要格式识别和转换规则，测试使用合成样例；不收录第三方源码、程序、真实配置、协议或授权记录。衍天默认位置为 `%APPDATA%\TheCelestialDiviner\config.json`；极简和小叽使用便携程序目录中的 INI / JSON。扫描桌面、下载及默认数据目录和一级子目录，按已知工具名只读解析快捷方式以定位程序或工作目录，不执行或 Resolve 目标程序；同一扫描流程识别 `.qzh`（扩展名不区分大小写），以规范化路径排除本应用 `profiles` 目录内的已有配置。多档位按文件路径 + `source_profile_index` 去重，预览和导入携带同一档位；直接指定文件时读取活动档位，旧衍天格式回退镜像，避免重复合并。
+
+大肥鱼 V5.2 默认位置为 `%APPDATA%\PenJiujiu\config.json`。按槽位、周期和启停键联合特征识别主配置，按 `name`／`created`／`events` 联合特征识别任意文件名的录制 JSON；注册表支持按需声明 JSON 文件名通配及 `prepare` 关联读取，其他解析器仍沿用各自文件名和内容特征。`read_import_text` 统一执行单文件 4 MB 限制与 BOM 解码。主配置只读取 `macros/<macro_name>.json`，校验文件名与规范化目录；缺失或损坏只报告关联宏，基础规则不丢失。不执行源程序，不读取目录之外的关联文件。
+
+大肥鱼按场景迁移：`sets` 优先于顶层兼容键，V5.2 六槽及历史两段各四槽生成默认停用的 Toggle 规则，不因当前程序只展示六槽而丢弃已保存的段；`key_seqs` 生成保留顺序与重复项的输出步骤；`cycle_steps`／`cycle_order` 决定多段宏组顺序。自动轮换按 `cycle_secs`／`auto_cycle_sec` 展开驻留段，超过 256 步时按各段目标数和最长单步约束分配容量、降低点按频率，无法完整容纳则保留手动规则组。录制事件为 `[时间戳毫秒,VK,修饰掩码,可选按压时长]`，相邻起拍差转步骤间隔，尾步用原时长作循环间隔；忽略开头等待与独立按压宽度，单次回放退化循环。主配置关联宏使用原播放主键启动，独立文件暂用首个目标键。
+
+忽略修饰、持续按住退化点按、同步发送退化顺序目标、定时辅助动作退化手动开关，均通过预览说明，不因此丢弃整条配置。退化后相同启动键且目标一致时合并，否则合并输出步骤并提示；无效步骤与超容量截断计入跳过。全局开关键保留可用键盘主键，冲突时留空。源伪 VK 232／233 映射为滚轮，普通基础周期保留 20～2000 ms，录制间隔适配 10～10000 ms。预览显示单键、规则组、多步序列数量，扫描与导入共用同一读取准备、转换和激活契约。
 
 字典键 `K:VK:EXT` / `M:MouseInput` 对应触发键，单目标的 Hold / Toggle 转为规则，Rotate 转规则组，保留方案和目标的启用状态。`GlobalSwitch` / `IndependentClose` 转全局启停键；双宏、多目标轮流执行、修饰键组合、小键盘扩展 Enter 等无法等价表达的动作跳过并在预览中说明。周期是原 `HoldMs + IntervalMs`，钳到本软件范围，独立按压时长无法复现。预览显示周期范围与转换警告，不将所有规则标作长按。文件大小在读取前检查 4 MB 上限，支持 UTF-8 BOM；导入仍经 `activate_profile_file`，不导入源应用的全局运行状态、驱动和界面设置。
 
