@@ -297,7 +297,7 @@ export default function FloatApp() {
   const renderCap = (r: FloatRule) => {
     const isActive = activeSet.has(r.id);
     const isPaused = pausedSet.has(r.id);
-    const modeName = r.mode === 'toggle' ? '切换连发' : '长按连发';
+    const modeName = r.mode === 'toggle' ? '开关规则' : '长按规则';
     const position = progress[r.id];
     const stepLabel =
       position && position.step_count > 1

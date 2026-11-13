@@ -10,8 +10,7 @@ interface StatusItem {
 interface Props {
   name: string;
   /**
-   * 教程聚焦的组，承载锚点 `group-latest` / `group-header`：有示例组时是示例组（规则组教程
-   * 讲的就是它），否则是最后一个组。
+   * 最后一个组承载教程锚点，避免高亮与可见内容不一致。
    */
   isLatest: boolean;
   collapsed: boolean;

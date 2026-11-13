@@ -9,7 +9,8 @@ import KeyCapture, {
   type KeyId,
   type KeyPolicies,
 } from './components/KeyCapture';
-import type { ConflictSeverity } from './conflicts';
+import { severityForRuleField, type Conflict, type ConflictSeverity } from './conflicts';
+import RuleWarning from './components/RuleWarning';
 import SequenceEditor from './components/SequenceEditor';
 import { isSimpleRule, ruleHotkeyDimming, type OutputStep } from './outputSequence';
 import type { RuleProgress } from './useRuleStates';
@@ -46,6 +47,7 @@ interface Props {
   isDragging: boolean;
   isDragTarget: boolean;
   conflict: ConflictSeverity | null;
+  conflictDetails?: readonly Conflict[];
   policies: KeyPolicies;
   intervalMin: number;
   intervalMax: number;
@@ -64,7 +66,8 @@ interface Props {
   onTargetCaptured: () => void;
 }
 
-const MODE_NAME: Record<BurstMode, string> = { hold: '长按', toggle: '切换' };
+const MODE_NAME: Record<BurstMode, string> = { hold: '长按', toggle: '开关' };
+const MODE_LABEL: Record<BurstMode, string> = { hold: '长按规则', toggle: '开关规则' };
 
 function other(mode: BurstMode): BurstMode {
   return mode === 'hold' ? 'toggle' : 'hold';
@@ -81,6 +84,7 @@ export default function RuleCard({
   isDragging,
   isDragTarget,
   conflict,
+  conflictDetails,
   policies,
   intervalMin,
   intervalMax,
@@ -103,6 +107,18 @@ export default function RuleCard({
   const isToggle = rule.mode === 'toggle';
   const dimming = ruleHotkeyDimming(rule);
   const canMute = !isActive && !isPaused;
+  const triggerConflict = conflictDetails
+    ? severityForRuleField(conflictDetails, rule.id, 'trigger_key')
+    : conflict;
+  const stopConflict = conflictDetails
+    ? severityForRuleField(conflictDetails, rule.id, 'stop_key')
+    : null;
+  const targetConflict = conflictDetails
+    ? severityForRuleField(conflictDetails, rule.id, 'target_key')
+    : null;
+  const conflictTitle =
+    conflictDetails?.map((detail) => `${keyLabel(detail.key)}：${detail.message}`).join('\n') ||
+    '请检查按键冲突';
   // 长按键与连发键分开时把「按住哪个键」提到主行：插队要按住的就是它，不能藏在高级设置里。
   const holdSplit = !isToggle && (multiple || !keyEq(rule.trigger_key, rule.steps[0].key));
   const nextMode = other(rule.mode);
@@ -118,7 +134,7 @@ export default function RuleCard({
       ],
     },
     ...(rule.group ? [{ label: '移出组', onClick: onRemoveFromGroup }] : []),
-    { label: `改为${MODE_NAME[nextMode]}连发`, onClick: () => onSetMode(nextMode) },
+    { label: `改为${MODE_LABEL[nextMode]}`, onClick: () => onSetMode(nextMode) },
     { type: 'divider' },
     { label: '删除', danger: true, onClick: onDelete },
   ];
@@ -135,7 +151,6 @@ export default function RuleCard({
     .filter(Boolean)
     .join(' ');
 
-  // 长按不开高级时启动键跟随连发按键（重合态）；切换连发的启动键始终单独可设。
   const targetPolicy =
     isToggle || holdSplit || showAdvanced ? policies.target : policies.trigger_target;
 
@@ -148,16 +163,19 @@ export default function RuleCard({
       {...drag}
     >
       <div className="rule-head">
-        <button
-          type="button"
-          className={`rule-mode-tag ${isToggle ? 'is-toggle' : 'is-hold'}`}
-          data-tour="rule-mode"
-          aria-label={`切换为${MODE_NAME[nextMode]}连发`}
-          title={`${MODE_NAME[rule.mode]}连发（点击改为${MODE_NAME[nextMode]}连发）`}
-          onClick={() => onSetMode(nextMode)}
-        >
-          {MODE_NAME[rule.mode]}
-        </button>
+        <div className="rule-title">
+          <button
+            type="button"
+            className={`rule-mode-tag ${isToggle ? 'is-toggle' : 'is-hold'}`}
+            data-tour="rule-mode"
+            aria-label={`切换为${MODE_LABEL[nextMode]}`}
+            title={`${MODE_LABEL[rule.mode]}（点击改为${MODE_LABEL[nextMode]}）`}
+            onClick={() => onSetMode(nextMode)}
+          >
+            {MODE_NAME[rule.mode]}
+          </button>
+          {conflict && <RuleWarning className="rule-conflict-warning" title={conflictTitle} />}
+        </div>
         <span className="drag-handle" aria-hidden>
           <svg width="18" height="10" viewBox="0 0 18 10" fill="currentColor">
             <circle cx="3" cy="2" r="1.2" />
@@ -194,7 +212,7 @@ export default function RuleCard({
                   value={rule.trigger_key}
                   muted={canMute && dimming.trigger}
                   onChange={(vk) => vk && onPatch({ trigger_key: vk })}
-                  conflict={conflict}
+                  conflict={triggerConflict}
                 />
               </div>
               <span className="rule-arrow">→</span>
@@ -205,7 +223,7 @@ export default function RuleCard({
             {multiple ? (
               <button
                 type="button"
-                className="key-capture sequence-open"
+                className={`key-capture sequence-open${targetConflict === 'error' ? ' key-capture-error' : targetConflict === 'warning' ? ' key-capture-warn' : ''}`}
                 onClick={onToggleAdvanced}
                 aria-label="编辑连发序列"
                 aria-expanded={showAdvanced}
@@ -229,7 +247,11 @@ export default function RuleCard({
                   onPatch(patch);
                   onTargetCaptured();
                 }}
-                conflict={!isToggle && (holdSplit || !showAdvanced) ? conflict : null}
+                conflict={
+                  !isToggle && !holdSplit && !showAdvanced
+                    ? (triggerConflict ?? targetConflict)
+                    : targetConflict
+                }
               />
             )}
           </div>
@@ -246,7 +268,7 @@ export default function RuleCard({
           )}
         </div>
         <div className="rule-field rule-enable-field" data-tour="rule-enable">
-          <label htmlFor={enableId}>开关</label>
+          <label htmlFor={enableId}>启用</label>
           <input
             id={enableId}
             type="checkbox"
@@ -277,7 +299,7 @@ export default function RuleCard({
                     value={rule.trigger_key}
                     muted={canMute && dimming.trigger}
                     onChange={(vk) => vk && onPatch({ trigger_key: vk })}
-                    conflict={conflict}
+                    conflict={triggerConflict}
                   />
                 </div>
               )}
@@ -297,12 +319,20 @@ export default function RuleCard({
                   onChange={(vk) =>
                     vk && onPatch(isToggle ? { stop_key: vk } : { trigger_key: vk })
                   }
-                  conflict={isToggle ? null : conflict}
+                  conflict={isToggle ? stopConflict : triggerConflict}
                 />
               </div>
             </div>
           ) : null}
           <SequenceEditor
+            conflicts={conflictDetails?.filter((detail) =>
+              detail.participants.some(
+                (participant) =>
+                  participant.kind === 'rule' &&
+                  participant.ruleId === rule.id &&
+                  participant.field === 'target_key',
+              ),
+            )}
             steps={rule.steps}
             policy={policies.target}
             min={intervalMin}

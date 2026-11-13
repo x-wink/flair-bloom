@@ -328,7 +328,7 @@ fn config_rules(value: &Value, result: &mut Converted) {
                 None,
             );
             result.warn(format!(
-                "{label}辅助动作已转为独立切换连发，定时结束和优先级退化为手动停止。"
+                "{label}辅助动作已转为独立开关规则，定时结束和优先级退化为手动停止。"
             ));
         }
     }

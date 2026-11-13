@@ -2,7 +2,7 @@ import { isSimpleRule, type OutputStep } from './outputSequence.ts';
 import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
 import WireOverlay from './WireOverlay';
 import { buildWires, wiredKeys } from './hkbWires';
-import { keyToken as token } from './keyToken';
+import { keyEq, keyToken as token } from './keyToken';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import IntervalInput from './components/IntervalInput';
 import {
@@ -14,6 +14,7 @@ import {
   type SlotPolicy,
 } from './components/KeyCapture';
 import { type Conflict, severityForKey } from './conflicts';
+import RuleWarning from './components/RuleWarning';
 import {
   type KeyCap,
   type KeyRow,
@@ -160,7 +161,7 @@ export default function HorizontalLayout({
         onClick: () => onSetEnabled(rule.id, !rule.enabled),
       },
       {
-        label: rule.mode === 'toggle' ? '改为长按连发' : '改为切换连发',
+        label: rule.mode === 'toggle' ? '改为长按规则' : '改为开关规则',
         onClick: () => onSetMode(rule, rule.mode === 'toggle' ? 'hold' : 'toggle'),
       },
     ];
@@ -222,11 +223,16 @@ export default function HorizontalLayout({
     if (st.advanced) {
       title = `${keyLabel(key)} · 高级规则（仅竖版可编辑）`;
     } else if (rule) {
-      const modeName = rule.mode === 'toggle' ? '切换连发' : '长按连发';
+      const modeName = rule.mode === 'toggle' ? '开关规则' : '长按规则';
       title = `${keyLabel(key)} · ${modeName}${rule.enabled ? '' : '（已停用）'}${rule.group ? ` · ${rule.group}` : ''}${paused ? ' · 已暂停（同组长按插队中）' : ''}（左键轮换 · 右键管理）`;
     } else {
       title = `${keyLabel(key)}（点击建立连发）`;
     }
+
+    const conflictMessages = conflicts
+      .filter((item) => keyEq(item.key, key))
+      .map((item) => item.message);
+    if (conflictMessages.length > 0) title += `\n${conflictMessages.join('\n')}`;
 
     return (
       <button
@@ -253,11 +259,7 @@ export default function HorizontalLayout({
         }}
       >
         <span className="hkb-cap-label">{label}</span>
-        {warn && (
-          <span className="hkb-warn-badge" aria-hidden="true">
-            ⚠️
-          </span>
-        )}
+        {warn && <RuleWarning className="hkb-warn-badge" title={title} />}
         {gi > 0 && rule && (
           <span className={`hkb-group-badge ${rule.mode === 'toggle' ? 'is-toggle' : 'is-hold'}`}>
             {gi}
@@ -371,11 +373,11 @@ export default function HorizontalLayout({
           <div className="hbar-legend" data-tour="hbar-legend">
             <span className="hbar-legend-item">
               <span className="hbar-swatch sw-toggle" />
-              切换连发
+              开关规则
             </span>
             <span className="hbar-legend-item">
               <span className="hbar-swatch sw-hold" />
-              长按连发
+              长按规则
             </span>
             <span className="hbar-legend-item">
               <span className="hbar-swatch sw-off" />
@@ -383,7 +385,7 @@ export default function HorizontalLayout({
             </span>
             <span
               className="hbar-legend-item"
-              title="组号角标：实心 = 长按在组内，描边 = 切换在组内"
+              title="组号角标：实心 = 长按在组内，描边 = 开关在组内"
             >
               <span className="hbar-swatch sw-group">1</span>
               <span className="hbar-swatch sw-group is-toggle">1</span>

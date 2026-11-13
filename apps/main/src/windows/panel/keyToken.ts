@@ -4,3 +4,8 @@ import type { KeyId } from './components/KeyCapture';
 export function keyToken(key: KeyId): string {
   return `${key.kind}:${key.code}`;
 }
+
+export function keyEq(a: KeyId | null | undefined, b: KeyId | null | undefined): boolean {
+  if (!a || !b) return false;
+  return a.kind === b.kind && a.code === b.code;
+}

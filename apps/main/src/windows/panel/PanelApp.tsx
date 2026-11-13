@@ -1,4 +1,4 @@
-import { isSimpleRule, outputKeys, type OutputStep } from './outputSequence.ts';
+import { isSimpleRule, type OutputStep } from './outputSequence.ts';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { emit, listen } from '@tauri-apps/api/event';
@@ -47,7 +47,6 @@ import {
   type CaptureReject,
   type KeyPolicies,
   RESTRICTIVE_POLICY,
-  keyboardKey,
   keyEq,
   keyLabel,
   mouseKey,
@@ -62,14 +61,7 @@ import UpdateProgressBar, { type UpdateDownloadProgress } from './components/Upd
 import { detectConflicts, severityForKey, severityForRule } from './conflicts';
 import TourRunner from './tour/TourRunner';
 import { findTour, TOURS } from './tour/tours';
-import {
-  isSampleRule,
-  lastRule,
-  SAMPLE_GROUP,
-  SAMPLE_IDS,
-  sampleRules,
-} from './tour/tours/helpers';
-import { keyToken } from './keyToken';
+import { lastRule } from './tour/tours/helpers';
 import type { TourDef, TourExitResult, TourHost, TourSnapshot } from './tour/types';
 import { useTourProgress } from './tour/useTourProgress';
 import { useKeyRelay } from './useKeyRelay';
@@ -307,7 +299,7 @@ function inputModeRequiresAdmin(mode: InputMode): boolean {
   return mode === 'interception' || mode === 'ddsimple';
 }
 
-// 外设模式仍限制同键切换连发，与横版键鼠图互斥。
+// 外设模式仍限制同键开关规则，与横版键鼠图互斥。
 // 已在横版时的拦截只能看目标模式名——切过去之前拿不到它的能力位。
 function blocksHorizontalLayout(mode: InputMode): boolean {
   return mode === 'hidstick';
@@ -362,7 +354,7 @@ interface ForkResult {
 }
 
 function defaultRules(): BurstRule[] {
-  return [newRule('hold'), newRule('toggle')];
+  return [newRule('toggle'), newRule('hold')];
 }
 
 /** 横版单键规则：触发键 == 连发键（== 停止键，toggle 时）。 */
@@ -649,7 +641,7 @@ export default function PanelApp() {
       }
       if (info.reason === 'slot-disabled') {
         toast.warning(
-          `${INPUT_MODE_LABELS[inputMode]}不支持切换连发的启动键与连发按键相同，请在高级设置里把两者分开`,
+          `${INPUT_MODE_LABELS[inputMode]}不支持开关规则的启动键与连发按键相同，请在高级设置里把两者分开`,
         );
         return;
       }
@@ -1925,7 +1917,7 @@ export default function PanelApp() {
   // ── 横版布局 ────────────────────────────────────────────────────────────────
   async function switchLayout(next: PanelLayout) {
     // 横版是单键模型，每个键位都是 trigger == target 的重合态。后端下发的
-    // coincident_toggle 为 false 时（当前是外设模式）切换连发建不出来，故禁止切到横版。
+    // coincident_toggle 为 false 时（当前是外设模式）开关规则建不出来，故禁止切到横版。
     // 判断依据取自后端能力位而不是模式名，新增后端时不必再改这里。
     //
     // 这里刻意重新拉一次而不用缓存：切换输入模式后策略是异步重取的，在它返回之前
@@ -1967,7 +1959,7 @@ export default function PanelApp() {
     }
   }
 
-  // 横版单键：切换连发的停止键就是这个键本身，轮换出来的规则总是启用
+  // 横版单键：开关规则的停止键就是这个键本身，轮换出来的规则总是启用
   function handleHSetMode(rule: BurstRule, mode: BurstMode) {
     setRuleMode(rule, mode, {
       stop_key: mode === 'toggle' ? rule.trigger_key : null,
@@ -1977,7 +1969,7 @@ export default function PanelApp() {
 
   /** 改模式保留分组：长按也能进组插队。 */
   function setRuleMode(rule: BurstRule, mode: BurstMode, extra: Partial<BurstRule> = {}) {
-    // 后端不支持切换连发的重合态（外设模式）时，启动键 == 连发按键的规则改成切换是空集，
+    // 后端不支持开关规则的重合态（外设模式）时，启动键 == 连发按键的规则改成切换是空集，
     // 写进去也会在装载时被净化掉，不如当场拒绝并说明。
     if (
       mode === 'toggle' &&
@@ -1985,7 +1977,7 @@ export default function PanelApp() {
       rule.steps.some((step) => keyEq(rule.trigger_key, step.key))
     ) {
       toast.warning(
-        `${INPUT_MODE_LABELS[inputMode]}下切换连发的启动键不能与连发按键相同，请先在高级设置里改长按键`,
+        `${INPUT_MODE_LABELS[inputMode]}下开关规则的启动键不能与连发按键相同，请先在高级设置里改长按键`,
       );
       return;
     }
@@ -2024,7 +2016,7 @@ export default function PanelApp() {
     if (dismissed) return;
     let dontShowAgain = false;
     await confirm({
-      title: '长按和切换在同一组',
+      title: '长按和开关规则在同一组',
       body: (
         <>
           <p>按住组里的长按键时，同组正在跑的规则会暂停让位；松手后它自动接着跑。</p>
@@ -2500,32 +2492,23 @@ export default function PanelApp() {
     () => ({
       rules,
       globalEnabled,
-      inputMode,
       layout,
       filter,
       collapsedGroups: [...collapsedGroups].sort(),
       keyCaptureSeq,
-      settingsOpen: showSettings,
-      settingsTab,
-      windowBindingSupported: windowBinding?.supported,
       coincidentToggle: keyPolicies.coincident_toggle,
-      runningRuleIds: [...activeRuleIds].filter((id) => !pausedRuleIds.has(id)).sort(),
-      pausedRuleIds: [...pausedRuleIds].sort(),
+      ruleTriggerLabel: keyLabel(
+        lastRule({ rules, filter, collapsedGroups: [...collapsedGroups] })?.trigger_key,
+      ),
     }),
     [
       rules,
       globalEnabled,
-      inputMode,
       layout,
       filter,
       collapsedGroups,
       keyCaptureSeq,
-      showSettings,
-      settingsTab,
-      windowBinding?.supported,
       keyPolicies.coincident_toggle,
-      activeRuleIds,
-      pausedRuleIds,
     ],
   );
 
@@ -2543,89 +2526,11 @@ export default function PanelApp() {
       closeJx3: () => setShowJx3(false),
       closeMenus,
       openCreateMenu: () => setCreateMenuOpen(true),
-      createSampleGroup,
-      deleteSampleGroup,
     }),
     // 动作都是组件内的普通函数、每次渲染新建，纳入依赖等于每帧换一个 host；
     // 只让快照变化驱动重建
     [tourSnapshot],
   );
-
-  /**
-   * 规则组教程的示例组：两条切换 + 一条长按，全部停用。键位从候选里挑没被占用的——撞上用户
-   * 自己的规则会同时触发、冲突提醒变红，教程就讲不清了。走 pushRules 不走 pushGroupMove：
-   * 教程本身就在讲插队，不再弹 D10 提示。
-   */
-  function createSampleGroup(): boolean {
-    if (sampleRules({ rules })) return true;
-    // 残留的部分示例规则（删了一条、拖出组）当脏数据清掉再重建，否则建组判定与教程判定
-    // 口径不一，按钮成了空操作、第 2 步永远等不到完成。挑键与写入都基于 updater 的 prev
-    // 派生，不拿渲染时的快照写盘；这里先挑一次只为决定要不要提示。
-    if (!pickSampleKeys(rules.filter((r) => !isSampleRule(r)))) {
-      toast.warning('键位都被占用了，请先在规则或热键里腾出几个数字键和字母键，或跳过这一步');
-      return false;
-    }
-    pushRules((prev) => {
-      const kept = prev.filter((r) => !isSampleRule(r));
-      const keys = pickSampleKeys(kept);
-      if (!keys) return prev;
-      const sample = (id: string, mode: BurstMode, trigger: number, target: number): BurstRule => ({
-        ...newRule(mode),
-        id,
-        enabled: false,
-        trigger_key: keyboardKey(trigger),
-        steps: [{ key: keyboardKey(target), interval_ms: 50 }],
-        group: SAMPLE_GROUP,
-      });
-      return [
-        ...kept,
-        sample(SAMPLE_IDS.a, 'toggle', keys.pair[0], keys.targets[0]),
-        sample(SAMPLE_IDS.b, 'toggle', keys.pair[1], keys.targets[1]),
-        sample(SAMPLE_IDS.hold, 'hold', keys.hold, keys.targets[2]),
-      ];
-    });
-    setFilter('all');
-    return true;
-  }
-
-  /**
-   * 示例组键位：从候选里挑没被占用的。撞上用户规则会同时触发、冲突提醒变红，教程就讲不清了。
-   * 占用 = 规则的启动 / 连发 / 停止键 ∪ 三个全局热键；挑不齐返回 undefined。
-   */
-  function pickSampleKeys(
-    list: BurstRule[],
-  ): { pair: [number, number]; hold: number; targets: number[] } | undefined {
-    const used = new Set<string>();
-    const mark = (k: KeyId | null) => k && used.add(keyToken(k));
-    for (const r of list) {
-      mark(r.trigger_key);
-      for (const key of outputKeys(r)) mark(key);
-      mark(r.stop_key);
-    }
-    mark(hotkeys.global_toggle);
-    mark(hotkeys.global_stop);
-    mark(hotkeys.panel_toggle);
-    const free = (vk: number) => !used.has(keyToken(keyboardKey(vk)));
-    const pairs: [number, number][] = [
-      [0x31, 0x32],
-      [0x33, 0x34],
-      [0x35, 0x36],
-      [0x37, 0x38],
-      [0x39, 0x30],
-      [0x5a, 0x58],
-    ];
-    const holds = [0x56, 0x42, 0x4e, 0x4d, 0x48, 0x4a]; // V B N M H J
-    const targetCandidates = [0x51, 0x45, 0x52, 0x54, 0x59, 0x55, 0x49, 0x4f, 0x50]; // Q E R T Y U I O P
-    const pair = pairs.find(([a, b]) => free(a) && free(b));
-    const hold = holds.find(free);
-    const targets = targetCandidates.filter(free).slice(0, 3);
-    if (!pair || hold === undefined || targets.length < 3) return undefined;
-    return { pair, hold, targets };
-  }
-
-  function deleteSampleGroup() {
-    pushRules((prev) => prev.filter((r) => !isSampleRule(r)));
-  }
 
   function logTourEvent(id: string, event: string) {
     invoke('log_from_frontend', { level: 'info', message: `tour ${id} ${event}` }).catch(() => {});
@@ -2647,6 +2552,9 @@ export default function PanelApp() {
       }
     }
     tourProgress.markIntroSeen().catch(() => {});
+    closeMenus();
+    setShowSettings(false);
+    setShowJx3(false);
     setActiveTour(undefined);
   }
 
@@ -2911,12 +2819,12 @@ export default function PanelApp() {
             <Tabs
               tabs={[
                 { id: 'all' as RuleFilter, label: '全部', badge: `${rules.length}` },
-                ...(['hold', 'toggle'] as BurstMode[]).map((mode) => {
+                ...(['toggle', 'hold'] as BurstMode[]).map((mode) => {
                   const inMode = rules.filter((r) => r.mode === mode);
                   const enabled = inMode.filter((r) => r.enabled).length;
                   return {
                     id: mode as RuleFilter,
-                    label: mode === 'hold' ? '长按' : '切换',
+                    label: mode === 'hold' ? '长按' : '开关',
                     badge: `${enabled}/${inMode.length}`,
                   };
                 }),
@@ -2971,8 +2879,7 @@ export default function PanelApp() {
             const latestId = lastRule(tourSnapshot)?.id;
             // 组容器按第一个成员出现的位置整体渲染，与拖拽排序（数组顺序）同一口径。
             const groupNames = ruleGroupNames(rules);
-            const latestGroup =
-              sampleRules({ rules })?.a.group ?? groupNames[groupNames.length - 1];
+            const latestGroup = groupNames[groupNames.length - 1];
             const draggingRule = draggingId ? rules.find((r) => r.id === draggingId) : undefined;
             const canGroupDrop = filter === 'all' || filter === 'groups';
 
@@ -2997,6 +2904,11 @@ export default function PanelApp() {
                   draggingId !== rule.id
                 }
                 conflict={severityForRule(conflicts, rule.id)}
+                conflictDetails={conflicts.filter((item) =>
+                  item.participants.some(
+                    (participant) => participant.kind === 'rule' && participant.ruleId === rule.id,
+                  ),
+                )}
                 policies={keyPolicies}
                 intervalMin={MIN_INTERVAL_MS}
                 intervalMax={MAX_INTERVAL_MS}
@@ -3095,7 +3007,7 @@ export default function PanelApp() {
                       <p className="empty">
                         {filter === 'groups'
                           ? '暂无规则组'
-                          : `没有${filter === 'hold' ? '长按' : '切换'}连发规则`}
+                          : `没有${filter === 'hold' ? '长按' : '开关'}规则`}
                       </p>
                     )}
 
@@ -3285,17 +3197,18 @@ export default function PanelApp() {
         location="bottom-left"
         items={[
           {
-            label: '长按连发',
-            subtitle: '按下开始·松开结束',
-            dataTour: 'add-hold',
-            onClick: () => addRuleFromList('hold'),
-          },
-          {
-            label: '切换连发',
+            label: '开关规则',
             subtitle: '按一次开始·再按结束',
             dataTour: 'add-toggle',
             onClick: () => addRuleFromList('toggle'),
           },
+          {
+            label: '长按规则',
+            subtitle: '按下开始·松开结束',
+            dataTour: 'add-hold',
+            onClick: () => addRuleFromList('hold'),
+          },
+          { type: 'divider' },
           {
             label: '规则组',
             subtitle: '开始时自动停止其他·智能互斥',

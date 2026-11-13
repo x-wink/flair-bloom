@@ -4,6 +4,7 @@ import Button from '../components/Button';
 import { CloseIcon } from '../components/icons';
 import { GAP, PAD, computePos, type Location } from '../components/Overlay';
 import type { TourDef, TourExitResult, TourHost, TourSnapshot } from './types';
+import { targetBounds, type TargetRect as Rect } from './targetGeometry';
 import './TourRunner.css';
 
 interface Props {
@@ -12,13 +13,6 @@ interface Props {
   /** 协议 / 更新弹窗出现时为 true：整层不渲染，步骤索引保留。 */
   paused?: boolean;
   onExit: (result: TourExitResult) => void;
-}
-
-interface Rect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
 }
 
 /** 高亮框比目标外扩的像素。 */
@@ -43,14 +37,27 @@ function queryTarget(name: string): HTMLElement | null {
   );
 }
 
-function waitForTarget(name: string, isCancelled: () => boolean): Promise<HTMLElement | null> {
+function queryTargets(target: NonNullable<TourDef['steps'][number]['target']>): HTMLElement[] {
+  const names = typeof target === 'string' ? [target] : target;
+  const elements = names.map(queryTarget).filter((element): element is HTMLElement => {
+    if (!element) return false;
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  });
+  return elements.length === names.length ? elements : [];
+}
+
+function waitForTargets(
+  target: NonNullable<TourDef['steps'][number]['target']>,
+  isCancelled: () => boolean,
+): Promise<HTMLElement[]> {
   return new Promise((resolve) => {
     const deadline = performance.now() + TARGET_WAIT_MS;
     const tick = () => {
-      if (isCancelled()) return resolve(null);
-      const el = queryTarget(name);
-      if (el) return resolve(el);
-      if (performance.now() > deadline) return resolve(null);
+      if (isCancelled()) return resolve([]);
+      const elements = queryTargets(target);
+      if (elements.length > 0) return resolve(elements);
+      if (performance.now() > deadline) return resolve([]);
       requestAnimationFrame(tick);
     };
     tick();
@@ -104,7 +111,7 @@ export default function TourRunner({ tour, host, paused = false, onExit }: Props
   const [index, setIndex] = useState(0);
   // preparing：跑 prepare 并找目标；shown：正常展示；done：实操已完成，打勾停留中
   const [phase, setPhase] = useState<'preparing' | 'shown' | 'done'>('preparing');
-  const [targetEl, setTargetEl] = useState<HTMLElement | null>(null);
+  const [targetEls, setTargetEls] = useState<HTMLElement[]>([]);
   const [missing, setMissing] = useState(false);
   const [rect, setRect] = useState<Rect | null>(null);
   const [layout, setLayout] = useState<BubbleLayout | null>(null);
@@ -117,8 +124,8 @@ export default function TourRunner({ tour, host, paused = false, onExit }: Props
   onExitRef.current = onExit;
   const enteredRef = useRef<TourSnapshot>(host.snapshot);
   const directionRef = useRef<1 | -1>(1);
-  const targetElRef = useRef<HTMLElement | null>(null);
-  targetElRef.current = targetEl;
+  const targetElsRef = useRef<HTMLElement[]>([]);
+  targetElsRef.current = targetEls;
 
   const step = tour.steps[index];
   const total = tour.steps.length;
@@ -146,7 +153,7 @@ export default function TourRunner({ tour, host, paused = false, onExit }: Props
   useEffect(() => {
     let cancelled = false;
     setPhase('preparing');
-    setTargetEl(null);
+    setTargetEls([]);
     setRect(null);
     setLayout(null);
     setMissing(false);
@@ -165,11 +172,11 @@ export default function TourRunner({ tour, host, paused = false, onExit }: Props
         setPhase('shown');
         return;
       }
-      const el = await waitForTarget(step.target, () => cancelled);
+      const elements = await waitForTargets(step.target, () => cancelled);
       if (cancelled) return;
-      if (el) {
-        el.scrollIntoView({ block: 'nearest' });
-        setTargetEl(el);
+      if (elements.length > 0) {
+        elements.forEach((element) => element.scrollIntoView({ block: 'nearest' }));
+        setTargetEls(elements);
       } else {
         setMissing(true);
       }
@@ -187,18 +194,32 @@ export default function TourRunner({ tour, host, paused = false, onExit }: Props
     let raf = 0;
     let last: Rect | null = null;
     const tick = () => {
-      let el = targetElRef.current;
-      if (el && !el.isConnected) {
-        el = queryTarget(name);
-        setTargetEl(el);
+      let elements = targetElsRef.current;
+      if (elements.length === 0 || elements.some((element) => !element.isConnected)) {
+        const next = queryTargets(name);
+        if (
+          next.length !== elements.length ||
+          next.some((element, index) => element !== elements[index])
+        ) {
+          setTargetEls(next);
+          setMissing(next.length === 0);
+        }
+        elements = next;
       }
-      if (el) {
-        const r = el.getBoundingClientRect();
-        const next = { left: r.left, top: r.top, width: r.width, height: r.height };
+      const rects = elements.map((element) => element.getBoundingClientRect());
+      const next = rects.every((rect) => rect.width > 0 && rect.height > 0)
+        ? targetBounds(rects)
+        : undefined;
+      if (next) {
         if (!sameRect(last, next)) {
           last = next;
           setRect(next);
+          setMissing(false);
         }
+      } else if (last) {
+        last = null;
+        setRect(null);
+        setMissing(true);
       }
       raf = requestAnimationFrame(tick);
     };
@@ -352,16 +373,19 @@ export default function TourRunner({ tour, host, paused = false, onExit }: Props
           </button>
         </div>
         <div className="tour-bubble__body">
-          {typeof step.body === 'function' ? step.body(host) : step.body}
-          {missing && (
-            <p className="tour-bubble__note">这一步的目标当前不在界面上，可以直接看下一步。</p>
+          {missing ? (
+            <p className="tour-bubble__note">目标暂未显示</p>
+          ) : (
+            (typeof step.body === 'function' ? step.body(host) : step.body).map(
+              (line, lineIndex) => <p key={lineIndex}>{line}</p>,
+            )
           )}
         </div>
         {interactive && (
           <div className={`tour-bubble__hint${phase === 'done' ? ' tour-bubble__hint--done' : ''}`}>
             {phase === 'done'
               ? '✓ 完成'
-              : `● ${(typeof step.actionHint === 'function' ? step.actionHint(host.snapshot) : step.actionHint) ?? '等你操作…'}`}
+              : `● ${missing ? '请跳过此步' : (step.actionHint ?? '等你操作')}`}
           </div>
         )}
         <div className="tour-bubble__footer">

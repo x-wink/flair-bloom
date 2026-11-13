@@ -624,6 +624,13 @@ select {
   margin: calc(-1 * var(--fb-space-3)) 0 calc(-1 * var(--fb-space-2));
 }
 
+.rule-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+  min-width: 0;
+}
+
 .rule-mode-tag {
   padding: 1px var(--fb-space-3);
   border-radius: var(--fb-radius-sm);

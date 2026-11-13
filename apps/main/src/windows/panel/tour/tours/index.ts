@@ -1,12 +1,12 @@
 import type { TourDef } from '../types';
-import { gameMode } from './game-mode';
-import { gettingStarted } from './getting-started';
-import { groups } from './groups';
-import { jx3 } from './jx3';
-import { layouts } from './layouts';
-import { profiles } from './profiles';
-import { rules } from './rules';
-import { settings } from './settings';
+import { gameMode } from './game-mode.ts';
+import { gettingStarted } from './getting-started.ts';
+import { groups } from './groups.ts';
+import { jx3 } from './jx3.ts';
+import { layouts } from './layouts.ts';
+import { profiles } from './profiles.ts';
+import { rules } from './rules.ts';
+import { settings } from './settings.ts';
 
 /** 目录里的显示顺序；id 即文件名，scripts/check-skills.ts 据此与说明书比对。 */
 export const TOURS: TourDef[] = [

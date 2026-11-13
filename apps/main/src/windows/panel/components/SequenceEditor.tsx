@@ -3,6 +3,7 @@ import KeyCapture, { type CaptureReject, type SlotPolicy } from './KeyCapture';
 import IntervalInput from './IntervalInput';
 import { MAX_OUTPUT_STEPS, validateSteps, type OutputStep } from '../outputSequence';
 import SequenceRecorder from './SequenceRecorder';
+import { severityForKey, type Conflict } from '../conflicts';
 
 interface Props {
   steps: OutputStep[];
@@ -11,9 +12,18 @@ interface Props {
   max: number;
   onReject: (info: CaptureReject) => void;
   onChange: (steps: OutputStep[]) => void;
+  conflicts?: readonly Conflict[];
 }
 
-export default function SequenceEditor({ steps, policy, min, max, onReject, onChange }: Props) {
+export default function SequenceEditor({
+  steps,
+  policy,
+  min,
+  max,
+  onReject,
+  onChange,
+  conflicts,
+}: Props) {
   const [error, setError] = useState<string>();
 
   const change = (next: OutputStep[]) => {
@@ -49,6 +59,7 @@ export default function SequenceEditor({ steps, policy, min, max, onReject, onCh
               <KeyCapture
                 policy={policy}
                 value={step.key}
+                conflict={conflicts ? severityForKey(conflicts, step.key) : null}
                 onReject={onReject}
                 onChange={(key) =>
                   key && change(steps.map((item, i) => (i === index ? { ...item, key } : item)))

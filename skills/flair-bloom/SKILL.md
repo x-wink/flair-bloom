@@ -1,6 +1,6 @@
 ---
 name: flair-bloom
-description: 气质花（FlairBloom）按键助手的项目文档单一来源：用户说明书大纲（与应用内六组新手教程一一对应）与工程事实（架构、按键策略、数据格式、更新、发版、开发规范）。按任务读取对应 reference，不整套加载。
+description: 气质花（FlairBloom）按键助手的项目文档单一来源：用户说明书大纲（与应用内八组新手教程一一对应）与工程事实（架构、按键策略、数据格式、更新、发版、开发规范）。按任务读取对应 reference，不整套加载。
 ---
 
 # 气质花 · 项目文档
@@ -25,16 +25,16 @@ description: 气质花（FlairBloom）按键助手的项目文档单一来源：
 
 | id                | 篇                                                | 内容                                             |
 | ----------------- | ------------------------------------------------- | ------------------------------------------------ |
-| `getting-started` | [上手三步](references/manual/getting-started.md)  | 添加第一条规则、录键、打开总开关（按教程版本自动进入） |
+| `getting-started` | [上手三步](references/manual/getting-started.md)  | 任选开关或长按、录键并启用、开始运行（按教程版本自动进入） |
 | `game-mode`       | [游戏模式与驱动](references/manual/game-mode.md)  | 为什么游戏里要装驱动、怎么装、装完做什么         |
-| `rules`           | [规则玩法](references/manual/rules.md)            | 筛选、规则卡、点标签换模式、高级设置、冲突提醒   |
-| `groups`          | [规则组](references/manual/groups.md)     | 同组只跑一条：切换是换人、长按是插队、示例组实操 |
-| `layouts`         | [布局与浮窗](references/manual/layouts.md)  | 横版点键三态、图例、统一间隔、收进浮窗           |
+| `rules`           | [规则玩法](references/manual/rules.md)            | 选择类型、设置按键、开始运行   |
+| `groups`          | [规则组](references/manual/groups.md)     | 创建规则组、设置规则、按键切换 |
+| `layouts`         | [布局与浮窗](references/manual/layouts.md)  | 切换布局、横版设键、浮窗入口           |
 | `profiles`        | [多套配置](references/manual/profiles.md)         | 新建 / 切换、导入导出 `.qzh`、托盘切换           |
 | `settings`        | [热键、声音与外观](references/manual/settings.md) | 全局热键、语音播报、主题、关闭行为与自启         |
 | `jx3`             | [剑网三专栏](references/manual/jx3.md)            | 按门派心法查白皮书、复制云端宏名与宏正文         |
 
-每篇的「步骤大纲」表是教程文件的规格：锚点、讲什么、实操判定。写步骤时守一条：文案里让用户做的动作（点、勾、按）必须是实操步（有 `done`），讲解步会铺一层遮挡、高亮的目标也点不动，让用户去点等于卡死。`pnpm skills:check` 校验教程 id 与篇名一一对应、三个入口文件的相对链接存在，pre-commit 在改 `.md`、`skills/`、`tour/` 时自动跑。
+每篇的「步骤大纲」表对应应用内教程。所有教程只保留基础流程，每步最多三句、每句不超过十字；标题、简介和操作提示同样简短。正文只允许纯文本，不嵌入图表或示例操作。实操步骤只读取用户在正常控件上的操作结果；不得用教程状态改变正常菜单、录键或运行逻辑。多控件引导通过锚点联合包围盒实现。完整功能说明保留在说明书参考段落。`pnpm skills:check` 校验教程与说明书对应关系，`pnpm test:ui` 校验字数、三步流程和目标区域。
 
 ## 事实边界
 

@@ -125,12 +125,12 @@ export default function ProfileCardList(props: Props) {
               </span>
               <span className="profile-card-stats">
                 <span>
-                  <strong>{profile.summary.hold_count}</strong>
-                  长按
+                  <strong>{profile.summary.toggle_count}</strong>
+                  开关
                 </span>
                 <span>
-                  <strong>{profile.summary.toggle_count}</strong>
-                  切换
+                  <strong>{profile.summary.hold_count}</strong>
+                  长按
                 </span>
                 {profile.summary.group_count > 0 && (
                   <span>

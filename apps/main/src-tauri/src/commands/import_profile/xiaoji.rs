@@ -159,7 +159,7 @@ fn converted(data: &str) -> (Vec<BurstRule>, usize, Vec<String>) {
             group: (raw_mode == "independent").then(|| "小叽独立切换".into()),
         });
         if raw_mode == "toggle" {
-            warnings.push("小叽的开关模式随总开关自动连发，已迁移为默认停用的同键切换规则；导入后需确认触发方式并启用，打开全局开关不会自动启动这些规则。".into());
+            warnings.push("小叽的开关模式随总开关自动连发，已迁移为默认停用的同键开关规则；导入后需确认触发方式并启用，打开全局开关不会自动启动这些规则。".into());
         }
         if delay.saturating_add(5) > u64::from(MAX_INTERVAL_MS) {
             warnings.push(format!("周期超过上限的规则已钳为 {MAX_INTERVAL_MS} ms。"));

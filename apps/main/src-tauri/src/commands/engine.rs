@@ -126,11 +126,11 @@ pub struct KeyPolicies {
     pub trigger: SlotPolicy,
     /// 规则的连发按键，且与启动 / 停止键不同。纯写。
     pub target: SlotPolicy,
-    /// 长按连发里启动键与连发按键重合（默认模式、横版单键）。读写取交集。
+    /// 长按规则里启动键与连发按键重合（默认模式、横版单键）。读写取交集。
     pub trigger_target: SlotPolicy,
-    /// 切换连发里启动键与连发按键重合。后端不支持重合态时是空集，键盘键也不收。
+    /// 开关规则里启动键与连发按键重合。后端不支持重合态时是空集，键盘键也不收。
     pub trigger_target_toggle: SlotPolicy,
-    /// 当前后端能否支持 Toggle 规则的重合态。为 false 时默认模式建不出切换连发。
+    /// 当前后端能否支持 Toggle 规则的重合态。为 false 时默认模式建不出开关规则。
     pub coincident_toggle: bool,
 }
 
@@ -175,7 +175,7 @@ pub(crate) fn rejection_message(reason: KeyRejection, mode_label: &str) -> Strin
         }
         KeyRejection::MouseNotAllowed => "的按键不支持鼠标按键。".to_string(),
         KeyRejection::CoincidentToggleUnsupported => format!(
-            "是切换连发，且启动 / 停止键与连发按键相同，{mode_label} 模式不支持。请在高级设置里把连发按键改成另一个键。"
+            "是开关规则，且启动 / 停止键与连发按键相同，{mode_label} 模式不支持。请在高级设置里把连发按键改成另一个键。"
         ),
     }
 }

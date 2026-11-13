@@ -3,16 +3,15 @@ import { outputKeys, type OutputStep } from './outputSequence.ts';
  * 热键冲突检测。
  *
  * 规则：
- *  - ERROR  功能损坏：面板键遮蔽全局键；多条已启用规则共用同一触发键
- *  - WARNING 行为意外：全局热键与规则触发键重叠（热键优先返回，该按键不触发连发）
+ *  - ERROR  功能损坏：面板键遮蔽全局键
+ *  - WARNING 行为意外：全局热键与规则触发、停止或连发目标重叠
  *
  * 不检测：
  *  - global_toggle == global_stop（有意的切换模式）
- *  - 全局热键 == target_key（target 走注入通道，hook 过滤自身注入）
  */
 
-import { keyEq, keyLabel, type KeyId } from './components/KeyCapture';
-import { keyToken } from './keyToken';
+import type { KeyId } from './components/KeyCapture';
+import { keyEq, keyToken } from './keyToken.ts';
 
 export type BurstMode = 'hold' | 'toggle';
 
@@ -20,6 +19,7 @@ export interface BurstRule {
   id: string;
   enabled: boolean;
   trigger_key: KeyId;
+  stop_key?: KeyId | null;
   steps: OutputStep[];
   mode: BurstMode;
 }
@@ -31,6 +31,7 @@ export interface Hotkeys {
 }
 
 export type ConflictSeverity = 'error' | 'warning';
+export type RuleConflictField = 'trigger_key' | 'stop_key' | 'target_key';
 
 export type ConflictParticipant =
   | { kind: 'global'; field: 'global_toggle' | 'global_stop' | 'panel_toggle'; label: string }
@@ -38,7 +39,7 @@ export type ConflictParticipant =
       kind: 'rule';
       ruleId: string;
       ruleMode: BurstMode;
-      field: 'trigger_key' | 'target_key';
+      field: RuleConflictField;
       label: string;
     };
 
@@ -99,7 +100,7 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
     });
   }
 
-  // ── 3. 全局热键与规则触发键重叠（warning）──────────────────────────────────
+  // ── 3. 全局热键与规则触发 / 停止键重叠（warning）─────────────────────────
   // 构建需要检查的全局键列表（去重：toggle==stop 不重复报）
   const globalKeys: Array<{
     key: KeyId;
@@ -116,26 +117,63 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
   }
 
   for (const { key, field } of globalKeys) {
-    const clashing = enabled.filter((r) => keyEq(key, r.trigger_key));
-    if (clashing.length === 0) continue;
-
-    // 若该 key 已在第 1/2 条（ERROR）里出现，不再重复 warning
-    const alreadyError = conflicts.some((c) => c.severity === 'error' && keyEq(c.key, key));
-    if (alreadyError) continue;
+    const participants: ConflictParticipant[] = [];
+    const roles = new Set<string>();
+    for (const rule of enabled) {
+      const fields: RuleConflictField[] = [];
+      if (keyEq(key, rule.trigger_key)) fields.push('trigger_key');
+      if (rule.mode === 'toggle' && keyEq(key, rule.stop_key ?? rule.trigger_key))
+        fields.push('stop_key');
+      for (const ruleField of fields) {
+        const role = ruleField === 'trigger_key' ? '触发键' : '停止键';
+        roles.add(role);
+        participants.push({
+          kind: 'rule',
+          ruleId: rule.id,
+          ruleMode: rule.mode,
+          field: ruleField,
+          label: role,
+        });
+      }
+    }
+    if (participants.length === 0) continue;
+    const separateStart =
+      field === 'global_toggle' &&
+      hotkeys.global_stop &&
+      !keyEq(hotkeys.global_stop, hotkeys.global_toggle);
+    const priority = separateStart
+      ? '未开启时热键优先，已开启时可能触发或停止同键规则'
+      : field === 'global_stop'
+        ? '全局开启时优先停止全部规则'
+        : '热键优先，该次按键不交给规则';
 
     conflicts.push({
       id: `hotkey-masks-rule-${field}-${keyToken(key)}`,
       severity: 'warning',
       key,
-      message: `${GLOBAL_LABELS[field]}与规则触发键相同，按下时热键优先，该按键不触发连发`,
+      message: `${GLOBAL_LABELS[field]}与规则${[...roles].join('、')}重叠，${priority}`,
+      participants: [{ kind: 'global', field, label: GLOBAL_LABELS[field] }, ...participants],
+    });
+  }
+
+  for (const { key, field } of globalKeys) {
+    const clashing = enabled.filter((rule) =>
+      outputKeys(rule).some((target) => keyEq(target, key)),
+    );
+    if (clashing.length === 0) continue;
+    conflicts.push({
+      id: `hotkey-overlaps-target-${field}-${keyToken(key)}`,
+      severity: 'warning',
+      key,
+      message: `连发目标与${GLOBAL_LABELS[field]}同键，模拟输出通常会被过滤，物理按键仍可能触发该热键`,
       participants: [
         { kind: 'global', field, label: GLOBAL_LABELS[field] },
-        ...clashing.map((r) => ({
+        ...clashing.map((rule) => ({
           kind: 'rule' as const,
-          ruleId: r.id,
-          ruleMode: r.mode,
-          field: 'trigger_key' as const,
-          label: r.mode === 'hold' ? '长按连发' : '切换连发',
+          ruleId: rule.id,
+          ruleMode: rule.mode,
+          field: 'target_key' as const,
+          label: '连发目标',
         })),
       ],
     });
@@ -152,19 +190,11 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
       );
       if (cascading.length === 0) continue;
 
-      // 若该 key 已被更高优先级冲突覆盖，不重复报
-      const alreadyCovered = conflicts.some(
-        (c) =>
-          keyEq(c.key, ruleA.steps[0].key) &&
-          c.participants.some((p) => p.kind === 'rule' && p.ruleId === ruleA.id),
-      );
-      if (alreadyCovered) continue;
-
       conflicts.push({
         id: `target-cascades-trigger-${ruleA.id}-${keyToken(ruleA.steps[0].key)}`,
         severity: 'warning',
         key: ruleA.steps[0].key,
-        message: `连发按键 ${keyLabel(ruleA.steps[0].key)} 同时是另一条规则的触发键，注入时可能意外激活该规则`,
+        message: '连发按键同时是另一条规则的触发键，注入时可能意外激活该规则',
         participants: [
           {
             kind: 'rule',
@@ -190,7 +220,10 @@ export function detectConflicts(rules: BurstRule[], hotkeys: Hotkeys): Conflict[
 // ── 查询工具（供 UI 组件高亮具体控件）────────────────────────────────────────
 
 /** 给定 KeyId，返回涉及它的最高冲突级别（用于 KeyCapture 控件着色）。 */
-export function severityForKey(conflicts: Conflict[], key: KeyId | null): ConflictSeverity | null {
+export function severityForKey(
+  conflicts: readonly Conflict[],
+  key: KeyId | null,
+): ConflictSeverity | null {
   if (!key) return null;
   const matching = conflicts.filter((c) => keyEq(c.key, key));
   if (matching.some((c) => c.severity === 'error')) return 'error';
@@ -205,5 +238,21 @@ export function severityForRule(conflicts: Conflict[], ruleId: string): Conflict
   );
   if (matching.some((c) => c.severity === 'error')) return 'error';
   if (matching.some((c) => c.severity === 'warning')) return 'warning';
+  return null;
+}
+
+export function severityForRuleField(
+  conflicts: readonly Conflict[],
+  ruleId: string,
+  field: RuleConflictField,
+): ConflictSeverity | null {
+  const matching = conflicts.filter((conflict) =>
+    conflict.participants.some(
+      (participant) =>
+        participant.kind === 'rule' && participant.ruleId === ruleId && participant.field === field,
+    ),
+  );
+  if (matching.some((conflict) => conflict.severity === 'error')) return 'error';
+  if (matching.some((conflict) => conflict.severity === 'warning')) return 'warning';
   return null;
 }

@@ -16,7 +16,7 @@ export default function TourCatalogDialog({ tours, completed, snapshot, onStart,
     <DialogShell
       className="tour-catalog-card"
       title="新手教程"
-      subtitle="每组几分钟，随时可退出，走完会打勾"
+      subtitle="快速了解常用操作"
       labelId="tour-catalog-title"
       footer={<Button onClick={onClose}>关闭</Button>}
     >

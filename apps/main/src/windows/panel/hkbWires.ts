@@ -33,7 +33,7 @@ export interface Rect {
   height: number;
 }
 
-/** 横版画不出来的「高级」关系：启动键 ≠ 连发按键、切换连发的独立停止键。 */
+/** 横版画不出来的「高级」关系：启动键 ≠ 连发按键、开关规则的独立停止键。 */
 export function buildWires(rules: WireRule[]): Wire[] {
   const wires: Wire[] = [];
   for (const r of rules) {

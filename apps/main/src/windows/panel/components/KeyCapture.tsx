@@ -13,11 +13,7 @@ export type KeyId = { kind: 'keyboard'; code: number } | { kind: 'mouse'; code: 
 export const keyboardKey = (vk: number): KeyId => ({ kind: 'keyboard', code: vk });
 export const mouseKey = (btn: MouseButton): KeyId => ({ kind: 'mouse', code: btn });
 
-/** KeyId 相等判断；任一为空视为不等。 */
-export function keyEq(a: KeyId | null | undefined, b: KeyId | null | undefined): boolean {
-  if (!a || !b) return false;
-  return a.kind === b.kind && a.code === b.code;
-}
+export { keyEq } from '../keyToken';
 
 const KEY_NAMES: Record<number, string> = {
   0x41: 'A',
@@ -283,11 +279,11 @@ export interface KeyPolicies {
   hotkey: SlotPolicy;
   trigger: SlotPolicy;
   target: SlotPolicy;
-  /** 长按连发里启动键与连发按键重合。 */
+  /** 长按规则里启动键与连发按键重合。 */
   trigger_target: SlotPolicy;
-  /** 切换连发里启动键与连发按键重合。后端不支持重合态时是空集。 */
+  /** 开关规则里启动键与连发按键重合。后端不支持重合态时是空集。 */
   trigger_target_toggle: SlotPolicy;
-  /** 当前后端能否支持切换连发的重合态（启动键与连发按键相同）。 */
+  /** 当前后端能否支持开关规则的重合态（启动键与连发按键相同）。 */
   coincident_toggle: boolean;
 }
 

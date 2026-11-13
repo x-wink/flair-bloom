@@ -1,87 +1,53 @@
 import type { TourDef } from '../types';
-import { lastRule, p } from './helpers';
+import { lastRule } from './helpers.ts';
 
 export const gettingStarted: TourDef = {
   id: 'getting-started',
   title: '上手三步',
-  summary: '添加第一条规则并让它跑起来',
+  summary: '建规则后开始连发',
   steps: [
     {
-      id: 'modes',
-      target: 'add-buttons',
-      title: '两种连发',
-      body: p(
-        '长按连发：按住那个键就一直连，松手就停。',
-        '切换连发：按一下开始连，再按一下停。先从长按连发开始。',
-        '已有 .qzh 或其他助手配置可从底栏「配置下拉 → 导入配置」迁移，先扫描和预览，再由你确认。',
-      ),
-      // 横版键鼠图没有筛选条，也没有规则卡，整组都讲不了
+      id: 'add',
+      target: ['add-toggle', 'add-hold'],
+      title: '新建规则',
+      body: ['选择开关或长按'],
       prepare: async (host) => {
         host.closeMenus();
         await host.setLayout('vertical');
         host.setFilter('all');
-      },
-    },
-    {
-      id: 'add',
-      target: 'add-hold',
-      title: '添加第一条规则',
-      body: p('从「我要新建」菜单选择「长按连发」，下面会出现一张规则卡。'),
-      prepare: (host) => {
-        host.setFilter('all');
         host.openCreateMenu();
       },
       done: (now, entered) => now.rules.length > entered.rules.length,
-      actionHint: '等你点一下…',
+      actionHint: '选择一种规则',
     },
     {
-      id: 'key',
-      target: 'rule-key',
-      title: '按下要连的键',
-      body: p(
-        '点一下这个按键框，再按键盘或鼠标上要连的那个键。',
-        '鼠标左右中键、两个侧键、滚轮上下都能录。',
-      ),
-      // 上一步「添加规则」被跳过且列表仍为空：这一步和下一步没有卡可指，直接跳过
-      prepare: (host) => (host.snapshot.rules.length === 0 ? 'skip' : undefined),
-      // 按「录入过一次」判定而不是比较键值：新规则的连发按键默认就是 Q，
-      // 照提示按 Q 的用户键值不变，会卡在这一步出不去。
-      done: (now, entered) => now.keyCaptureSeq > entered.keyCaptureSeq,
-      actionHint: '等你按一个键…',
-    },
-    {
-      id: 'enable',
-      target: 'rule-enable',
-      title: '启用这条规则',
-      body: p(
-        '勾上这个开关，这条规则才会跑。',
-        '旁边的间隔是每次按键相隔多少毫秒，默认值一般够用，调得太小软件会自动控速。',
-      ),
-      prepare: (host) => (host.snapshot.rules.length === 0 ? 'skip' : undefined),
-      // 让用户动手的步骤必须是实操步：讲解步会铺一层 blocker，高亮的开关也点不动
-      done: (now) => lastRule(now)?.enabled === true,
-      actionHint: '等你勾上它…',
+      id: 'configure',
+      target: ['rule-key', 'rule-enable'],
+      title: '设置并启用',
+      body: ['点按键框录入', '打开启用开关'],
+      prepare: (host) => {
+        host.closeMenus();
+        return lastRule(host.snapshot) ? undefined : 'skip';
+      },
+      done: (now, entered) =>
+        now.keyCaptureSeq > entered.keyCaptureSeq &&
+        now.rules.some((rule) => rule.id === lastRule(entered)?.id && rule.enabled),
+      actionHint: '录键并启用规则',
     },
     {
       id: 'global',
       target: 'global',
       title: '开始运行',
-      body: p(
-        '点右下角「开始运行」，按钮变为「结束运行」，面板出现明显描边和呼吸提示；再点即可结束运行。',
-        '出厂配置也可以按 F1 切换全局开关，已有配置以按钮上显示的快捷键为准。',
-        '按住刚才录的那个键就开始自动连发，运行中的规则卡会脉冲高亮，松手停。',
-      ),
+      body: (host) => {
+        const label = host.snapshot.ruleTriggerLabel ?? '触发键';
+        const key = label !== '—' && Array.from(label).length <= 5 ? label : '触发键';
+        return lastRule(host.snapshot)?.mode === 'toggle'
+          ? ['点击开始运行', `按${key}开始连发`, '再按一次就停止']
+          : ['点击开始运行', `按住${key}连发`, '松手即可停止'];
+      },
+      prepare: (host) => (host.snapshot.globalEnabled ? 'skip' : undefined),
       done: (now) => now.globalEnabled,
-      actionHint: '等你点「开始运行」…',
-    },
-    {
-      id: 'finish',
-      title: '会了',
-      body: p(
-        '☰ 菜单里的「新手教程」还有六组，随时能回来看。',
-        '要在游戏里用，接着看「游戏模式与驱动」那一组。',
-        'Windows 桌面快捷方式名为「气质花 v版本号」，是否创建由你在安装时选择。',
-      ),
+      actionHint: '等你开始运行',
     },
   ],
 };

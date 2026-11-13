@@ -1,0 +1,8 @@
+.rule-warning {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  font-size: 11px;
+  line-height: 1;
+  cursor: help;
+}

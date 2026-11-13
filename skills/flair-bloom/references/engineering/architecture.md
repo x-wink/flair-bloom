@@ -72,7 +72,7 @@ DD 共存边界：随包 `dd63330.dll` 以 `dwShareMode=0` 打开 `\\.\dd63330`�
 
 Interception 就绪门：`collect_interception_health` 读取运行通道、硬件 ID 与 `HKLM\HARDWARE\DEVICEMAP` 的 `KeyboardClass` / `PointerClass` 编号，纯判定在 `win-input/src/interception_health.rs`，随共享 crate 的 CI 测试。只有通道不可打开或没有可读键盘才阻止启用；SDK 的合法键盘槽为 1–10、鼠标槽为 11–20，恰好满槽、Windows 类设备编号偏高或类编号读取失败只作为诊断提示，不能证明现有设备失效。鼠标缺失保留键盘通道，鼠标注入可回退 SendInput。诊断记录可读槽号、类设备编号、当前／保存模式、启用判定与原因；阻止时也写入应用日志，便于核对当时的证据。后端先检查管理员权限，再检查就绪；前端临时回退使用 `set_input_mode` 的可选 `persist: false`，只更换运行通道，不改保存的模式，手动切换默认仍持久化。首次安装成功先使用 SendInput，未就绪弹窗可打开诊断修复。诊断复用本应用持有的 context，临时探测与初始化同锁，避免把自身独占误判成故障。通道不可用不等于服务残留；只有明确识别 Interception 服务且对应 SYS 文件缺失，才推荐清理该服务，文件存在、位置不明或被占用时保留注册。
 
-DD 同键启停仍依靠事件名额与时间窗口推测来源，不能可靠识别物理输入。竞品 TheCelestialDiviner 1.9.1 的 [EchoGuard](https://github.com/Dyse-Sofqi/The-Celestial-Diviner/blob/c2faa67e90b1229f687a4722281607eb38914b82/src/TheCelestialDiviner/Services/EchoGuard.cs) 使用预登记、FIFO、自适应超时和按住表恢复；这是降低故障概率的策略，不能保证持续注入下的物理停止不会被消费。产品允许 DD 同键切换连发与横版键鼠图，接受同键启停可能误判，由全局关闭和正常退出时的停连发、抬键清理兜底；强杀进程无法执行退出清理。
+DD 同键启停仍依靠事件名额与时间窗口推测来源，不能可靠识别物理输入。竞品 TheCelestialDiviner 1.9.1 的 [EchoGuard](https://github.com/Dyse-Sofqi/The-Celestial-Diviner/blob/c2faa67e90b1229f687a4722281607eb38914b82/src/TheCelestialDiviner/Services/EchoGuard.cs) 使用预登记、FIFO、自适应超时和按住表恢复；这是降低故障概率的策略，不能保证持续注入下的物理停止不会被消费。产品允许 DD 同键开关规则与横版键鼠图，接受同键启停可能误判，由全局关闭和正常退出时的停连发、抬键清理兜底；强杀进程无法执行退出清理。
 
 `win_input::dispatch(KeyId, is_up)` 是统一入口，按 `(mode, KeyId)` 分发到对应后端。常驻显示通用、游戏与 DD 三档；外设模式只在握手确认硬件后出现在底部菜单和设置中：
 
@@ -93,7 +93,7 @@ X1/X2 在 DD 模式 / 鼠标设备缺失时按 once 旗标 warn 一次后自动�
 
 **外设驱动与 Interception 设备槽**：Interception 的 `keyboard.sys` / `mouse.sys` 是键盘类 / 鼠标类的上层过滤驱动，每类 10 个设备槽，按设备出现先后往后分配，拔掉不还、重启才清零（实测鼠标槽 12、14–17 空着，新插的仍分到 18）。某类槽满后再插进来的设备分不到槽，输入被过滤驱动吞掉，设备管理器却显示正常——外设驱动对每条指令照回 `OK`，低级钩子一个键也收不到。装卸 DD-HID 每次都会留下一个虚拟键盘占槽。诊断修复的「外设驱动」两项（`repair.rs` 的 `diagnose_hidstick`）：串口扫描对每个非转串口芯片的 USB 串口握一次手（外设模式正用着的口不碰），设备槽检查用 `interception::device_hardware_ids`（只读、不要管理员）按 VID/PID 找外设驱动的键盘与鼠标各占几号槽，缺哪个报错并建议重启。**别用「移除全部键盘再重扫」去清槽**：实测 `keyboard.sys` 不会因此卸载，重新加回的键盘（包括用户的实体键盘）全都分不到槽而失灵，只能重启。
 
-**输入模式与布局互斥**：仅 HidStick 的单键规则约束无法用横版键鼠图表达（横版每个键位都是 `trigger == target` 的重合态，外设模式下重合态切换连发是空集，见 [key-policy](key-policy.md)），故外设模式与横版互斥——`selectInputMode`（横版下禁选外设模式）与 `switchLayout`（外设模式下禁切横版）两个入口拦截并提示。后者按后端下发的 `coincident_toggle` 能力位判断而非模式名。底栏左侧为配置与输入模式下拉，右侧为布局与运行按钮。布局按钮仅显示图标和当前「竖版」／「横版」，菜单使用完整名称「竖版·规则卡片」「横版·键鼠按键」；两者复用 `switchLayout`，受限时仍可点击查看原因，切换前重新读取后端能力，避免使用过期状态放行。DDSimple 支持两种布局。
+**输入模式与布局互斥**：仅 HidStick 的单键规则约束无法用横版键鼠图表达（横版每个键位都是 `trigger == target` 的重合态，外设模式下重合态开关规则是空集，见 [key-policy](key-policy.md)），故外设模式与横版互斥——`selectInputMode`（横版下禁选外设模式）与 `switchLayout`（外设模式下禁切横版）两个入口拦截并提示。后者按后端下发的 `coincident_toggle` 能力位判断而非模式名。底栏左侧为配置与输入模式下拉，右侧为布局与运行按钮。布局按钮仅显示图标和当前「竖版」／「横版」，菜单使用完整名称「竖版·规则卡片」「横版·键鼠按键」；两者复用 `switchLayout`，受限时仍可点击查看原因，切换前重新读取后端能力，避免使用过期状态放行。DDSimple 支持两种布局。
 
 ## 连发引擎（`packages/burst-engine`）
 
@@ -115,7 +115,7 @@ X1/X2 在 DD 模式 / 鼠标设备缺失时按 once 旗标 warn 一次后自动�
 - 规则卡高级设置集中编辑连发序列，复用 `onPatch` 的规则校验与配置自动保存；不维护独立序列草稿或前端试播状态。单键保留主行快捷编辑，多步主行展示按键摘要。
 - 规则组（`BurstRule.group`）：同组同一时间只有一条规则在跑。切换规则开启时停止同组其他切换规则；同组切换时只播报「新规则开始」。
 - 组内插队栈：组内长按规则按下时插队——同组正在跑的规则标 `paused`（仍留在活跃集合）并让调度器停下，长按入该组的 `hold_stacks` 栈开跑；松开时先停自己，再把组还给栈里仍按着的上一条长按，否则还给被暂停的切换规则。栈中间先松的只出栈，不影响栈顶。插队期间开启的同组切换规则以 `paused` 登记，只成为松手后的恢复目标——正在按住的长按不能被挤掉，否则手指按着却不连发。滚轮触发的长按每格只是一次点按、没有「按住」，不参与插队。全局暂停、换规则、切后端、退出时清空栈与暂停状态。启停命令在 runtime 锁内发给调度器：面板聚焦时键盘走 relay 命令线程、鼠标走钩子线程，锁外发送会让命令到达顺序与状态变更顺序相反，留下一条引擎以为已停的连发；发送只是无界通道入队，不阻塞钩子线程。
-- `get_active_ids` 返回运行 ∪ 暂停，`get_rule_states` 返回 `RuleStates { running, paused }` 供界面区分两种状态。切换连发语音使用 `set_on_toggle_changed` → `toggle-feedback` 事件，与全部入口的全局开关通知共用有序通道；状态变更和通知入队在同一把 runtime 锁内，回调只能入队，独立任务串行 emit。不依赖状态轮询，短暂启停也能收到通知；前端按事件到达时的最新全局开关过滤，已停止时不再播放旧规则语音。面板和浮窗只按统一通知更新开关，命令返回时不另写本地状态。同组替换只通知新规则开始，长按插队暂停与恢复不重复通知。
+- `get_active_ids` 返回运行 ∪ 暂停，`get_rule_states` 返回 `RuleStates { running, paused }` 供界面区分两种状态。开关规则语音使用 `set_on_toggle_changed` → `toggle-feedback` 事件，与全部入口的全局开关通知共用有序通道；状态变更和通知入队在同一把 runtime 锁内，回调只能入队，独立任务串行 emit。不依赖状态轮询，短暂启停也能收到通知；前端按事件到达时的最新全局开关过滤，已停止时不再播放旧规则语音。面板和浮窗只按统一通知更新开关，命令返回时不另写本地状态。同组替换只通知新规则开始，长按插队暂停与恢复不重复通知。
 - 全局启用描边由 `active-feedback.css` 的独立覆盖层绘制，位于页脚之上且不接受指针事件；主面板与浮窗复用。运行中的卡片使用淡底、持续高对比描边和外圈脉冲，键帽附加角落亮点；暂停态不使用运行高亮。描边颜色使用明暗自适配的 `--fb-color-primary-text`，不提高文字底色的主色浓度上限。所有循环动效遵守 `prefers-reduced-motion`，减少动态时保留静态状态提示。
 - 多规则隔离：模拟目标键不会触发其他规则的启动 / 停止逻辑。
 - 非 Windows 平台提供空实现（`cfg(windows)` 隔离）。
@@ -126,7 +126,7 @@ X1/X2 在 DD 模式 / 鼠标设备缺失时按 once 旗标 warn 一次后自动�
 
 Windows 前台监听、窗口候选、点选和图标提取由 `packages/win-foreground` 提供，不依赖 Tauri；非 Windows 返回空能力。`SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` 独立线程只投递通知，app 层的窗口绑定状态在工作线程读取当前窗口，先计算输出闸门再补图标与候选。没有绑定时不限制，有绑定时目标程序和助手自身前台允许输出；查询失败时保守暂停。候选与点选均过滤本进程所有窗口；捕获遮罩阻止面板操作，Esc 或点击遮罩通过共享取消标志结束原生任务，自身点击只用于取消。
 
-引擎的窗口闸门与总开关、插队暂停分开：切走暂停切换规则并保留游标与剩余等待，释放长按和一次性点按；切回恢复切换规则，长按须重新按住。路由代际与调度代际独立，切窗前已进入路由的输入不能在切回后迟到启动。规则停止键及全局停止仍生效，换规则、配置、后端或全局关闭会取消恢复资格。图标的前台状态与输出闸门、总开关各自独立。
+引擎的窗口闸门与总开关、插队暂停分开：切走暂停开关规则并保留游标与剩余等待，释放长按和一次性点按；切回恢复开关规则，长按须重新按住。路由代际与调度代际独立，切窗前已进入路由的输入不能在切回后迟到启动。规则停止键及全局停止仍生效，换规则、配置、后端或全局关闭会取消恢复资格。图标的前台状态与输出闸门、总开关各自独立。
 
 ## 全局热键
 
@@ -155,7 +155,7 @@ AltGr 布局（德语 / 法语 / 波兰语等）把右 Alt 当 AltGr，键盘驱
 - 主面板与浮窗共用 `components/RunningFrame.tsx`，在现有启用描边上叠加单个 Canvas 的连续渐变流光。`ResizeObserver` 按 CSS 尺寸计算圆角内边框，横版／竖版／浮窗自动采用大／中／小尺寸；两道流光相隔半圈，固定每秒一圈。`requestAnimationFrame` 逐帧绘制单层实心渐细倾斜带，头部直接使用所在面板的文字色，避免叠加深色内芯形成空洞；不经 React 或逐帧读取样式，像素比最高为 2。切布局或尺寸变化重建画布与时钟。主题变量 `--fb-frame-*` 推导明暗配色，主题变化时更新画笔；隐藏窗口或减少动态效果时停止绘制。不改变原生窗口尺寸和拖边范围。
 - 流光画布保留 alpha 并关闭 `desynchronized`，通过常规合成保留底层面板；低延迟路径可能在 Windows WebView2 中将透明区域显示为黑底（[Chromium 问题记录](https://issues.chromium.org/issues/450752884)）。流光外缘贴着轨迹，整圈向内渐细扩展，轨迹压住高亮描边内缘半像素，避免抗锯齿留下细缝。主面板与浮窗分别匹配 2px／1px 高亮描边。
 - `StatusLogo` 共用灰调未运行态与彩色运行态，运行时按 0.4 秒周期脉冲、双重扩散虚影；两张独立 Logo 影像以 ease-out 放大至 1.8 倍，透明度从 0.48 渐隐，错开半个周期。`useVisualEnhancement` 从 settings 读取默认开启的 `visualEnhancement` 并广播 `visual-enhancement-changed`，先监听再读取，并用修订号阻止迟到读取或保存覆盖新选择。此开关同时控制流光与 Logo 脉冲虚影；显式关闭持久保留，原有呼吸与键帽高亮不受影响。系统减少动态效果时保留静态 Logo 和描边。
-- 新手引导 `tour/`：`TourRunner.tsx` 是唯一有 DOM 逻辑的文件（四块遮罩镂空、锚定气泡、实操判定），教程内容在 `tour/tours/<id>.ts`，只经 `TourHost` 接口操作宿主（含规则组教程用的 `createSampleGroup` / `deleteSampleGroup`，快照带引擎的 `runningRuleIds` / `pausedRuleIds` 供实操判定）；进度存 `settings.json` 的 `tours` 键：`completed` 是学过的教程，`introVersion` 是已自动展示过的首启教程版本——与用户协议同一套语义，`TOUR_INTRO_VERSION`（`tour/types.ts`）一 bump，老用户下次启动会再自动看一遍。判定刻意不看「有没有规则」：新装配置自带两条未启用的出厂规则，那个口径对新用户永远为假。说明书大纲在本 skill 的 `references/manual/<id>.md`，`pnpm skills:check` 钉住一一对应。
+- 新手引导 `tour/`：八组教程各三步，正文只承载纯文本，每步最多三句、每句不超过十字；上手允许任选开关或长按。`TourRunner.tsx` 负责 DOM 定位，支持单锚点或多锚点联合包围盒，缺少任一目标时等待后提示跳过。教程只读取状态与打开讲解界面，不通过教程状态改变菜单、录键或引擎行为，也不创建示例数据。进度存 `settings.json` 的 `tours` 键，首启内容版本由 `TOUR_INTRO_VERSION` 控制；说明书与教程一一对应。
 - 剑网三专栏（☰ 菜单 → 剑网三专栏，`dialogs/Jx3ColumnDialog.tsx`）：数据格式与校验在 `jx3/column.ts`，界面用的纯计算在 `jx3/view.ts`，断言在 `scripts/jx3-column.test.ts`。数据只有一份 `apps/site/public/jx3/column.json`，产品站发布后的地址是 `https://app.xwink.fun/flair-bloom/jx3/column.json`；后端 `commands/jx3.rs` 启动时后台预取（`prefetch`），按「线上 → `{app_data_dir}/jx3-column.json` 缓存 → 随包快照（`include_str!` 同一个文件）」回落，线上 `schema` 比应用新时也回落并提示更新。取数排队（`Jx3State.loading`）：预取、打开、刷新同时到时依次取，不刷新的请求复用前一个的结果，状态里留下的总是最后返回给界面的那份，外链放行与界面一致。后端只认格式版本与骨架，前端拿到后再跑 `validateColumn`，不合格就提示而不渲染；产品站发布流程先跑 `scripts/jx3-column.test.ts`，坏数据发不出去。应用不直接调 JX3Box：它的接口没有文档，一改格式所有已装客户端都会坏；经产品站中转，坏了改数据重发站点即可。专栏外链走 `open_jx3_link`：`xwink.fun` 根域与任意层级子域名共用应用的 HTTPS 放行规则，其他域名必须出现在后端当前持有的数据里。条目带授权记录（`authorized_at` / `authorized_note`）的常驻展示，不带的公开帖折叠并标来源；宏正文只允许出现在授权条目里，`validateColumn` 拦下。门派 id 与主题预设 id 一致，打开时按主题色默认选中。
 
 - 应用外链统一由 `commands/app.rs` 的 `open_link` 交给系统默认浏览器。`xwink.fun` 根域与所有子域名按解析后的主机名放行 HTTPS 地址，拒绝带凭据的链接及相似域名；邮件、会员协议和 JX3Box 的已有命名目标继续保留。菜单「前往官网」与关于页共用 `PRODUCT_WEBSITE`，关于页同时提供复制链接；「更多产品」打开 `https://app.xwink.fun/`。

@@ -28,6 +28,7 @@
 }
 .hkb-numpad-grid {
   display: grid;
+  align-self: flex-end;
 }
 .hkb-spacer {
   flex: none;
@@ -93,14 +94,14 @@
   box-shadow: none;
 }
 
-/* 切换连发：主题色边框 + 淡主色背景 + 主色前景 */
+/* 开关规则：主题色边框 + 淡主色背景 + 主色前景 */
 .hkb-cap--key.is-toggle {
   background: var(--fb-color-primary-soft);
   border-color: var(--fb-color-primary);
   color: var(--fb-color-primary-text);
   font-weight: var(--fb-fw-semibold);
 }
-/* 长按连发：主题色实心 */
+/* 长按规则：主题色实心 */
 .hkb-cap--key.is-hold {
   background: var(--fb-color-primary);
   border-color: var(--fb-color-primary);

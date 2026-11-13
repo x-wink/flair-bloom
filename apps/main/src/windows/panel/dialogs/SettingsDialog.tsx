@@ -623,7 +623,7 @@ export default function SettingsDialog(props: Props) {
                 {INPUT_MODE_ORDER.filter(
                   (mode) => mode !== 'hidstick' || props.hidStickPresent,
                 ).map((mode) => {
-                  // 外设模式仍限制同键切换连发，横版下禁用。
+                  // 外设模式仍限制同键开关规则，横版下禁用。
                   const layoutBlocked = props.layout === 'horizontal' && mode === 'hidstick';
                   return (
                     <CardListButton
@@ -793,7 +793,7 @@ export default function SettingsDialog(props: Props) {
                   onPreview={() => props.onPreviewSound('end')}
                 />
                 <SoundStatementRow
-                  title="切换连发开始"
+                  title="开关规则开始"
                   value={sound.toggleStartText}
                   source={sound.toggleStartSource}
                   audioName={sound.toggleStartAudio}
@@ -806,7 +806,7 @@ export default function SettingsDialog(props: Props) {
                   onPreview={() => props.onPreviewSound('toggleStart')}
                 />
                 <SoundStatementRow
-                  title="切换连发结束"
+                  title="开关规则结束"
                   value={sound.toggleEndText}
                   source={sound.toggleEndSource}
                   audioName={sound.toggleEndAudio}
