@@ -21,7 +21,7 @@ pnpm coverage:html              # 浏览器打开 HTML 报告
 
 前端类型检查：`cd apps/main && pnpm exec tsc --noEmit`（根目录没有 tsconfig，`scripts/*.ts` 不在类型检查与 lint 范围）。
 
-Windows 构建会把 `interception-sys` 产出的 `interception.dll` 同步到 EXE 同级和 `src-tauri/resources/`，只有内容变化时才复制。重复写入资源会触发 Tauri 文件监听重启；无变化时不写入，也避免覆盖正在使用的 DLL。同步逻辑回归测试：`cargo test -p flair-bloom --test build_resources`。
+Windows 构建会把 `interception-sys` 产出的 `interception.dll` 同步到 EXE 同级和 `src-tauri/resources/`，从 `OUT_DIR` 的 `build` 祖先定位 profile 目录，同时识别传统 `<包名>-<hash>/out` 与 Cargo 新布局 `<包名>/<hash>/out`；缺少 DLL 或复制失败即中止打包。只有内容变化时才复制，避免触发 Tauri 文件监听重启或覆盖正在使用的 DLL。目录定位与同步逻辑回归测试：`cargo test -p flair-bloom --test build_resources`。
 
 ## 克隆后执行一次
 

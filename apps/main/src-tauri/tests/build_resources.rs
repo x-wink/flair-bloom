@@ -6,7 +6,55 @@ use std::{
     time::{Duration, SystemTime},
 };
 
-use build_support::copy_if_changed;
+use build_support::{copy_if_changed, find_interception_dll};
+
+#[test]
+fn legacy_layout_finds_dll_and_executable_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("target/x86_64-pc-windows-msvc/release");
+    let out = profile.join("build/flair-bloom-123/out");
+    let source = profile.join("build/interception-sys-456/out/interception.dll");
+    fs::create_dir_all(&out).unwrap();
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::write(&source, b"dll").unwrap();
+
+    assert_eq!(find_interception_dll(&out).unwrap(), (source, profile));
+}
+
+#[test]
+fn cargo_v2_layout_finds_dll_and_executable_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let profile = dir.path().join("target/x86_64-pc-windows-msvc/release");
+    let out = profile.join("build/flair-bloom/123/out");
+    let source = profile.join("build/interception-sys/456/out/interception.dll");
+    fs::create_dir_all(&out).unwrap();
+    fs::create_dir_all(source.parent().unwrap()).unwrap();
+    fs::write(&source, b"dll").unwrap();
+
+    assert_eq!(find_interception_dll(&out).unwrap(), (source, profile));
+}
+
+#[test]
+fn missing_dll_reports_not_found() {
+    let dir = tempfile::tempdir().unwrap();
+    let out = dir.path().join("debug/build/flair-bloom/123/out");
+    fs::create_dir_all(&out).unwrap();
+
+    assert_eq!(
+        find_interception_dll(&out).unwrap_err().kind(),
+        std::io::ErrorKind::NotFound
+    );
+}
+
+#[test]
+fn invalid_layout_reports_invalid_input() {
+    let dir = tempfile::tempdir().unwrap();
+
+    assert_eq!(
+        find_interception_dll(dir.path()).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
+    );
+}
 
 #[test]
 fn creates_missing_destination() {
