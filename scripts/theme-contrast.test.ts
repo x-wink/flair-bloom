@@ -40,8 +40,7 @@ const BLOCKS = { light: block(':root'), dark: block(":root[data-theme='dark']") 
 const TEXT_LADDER = ['on-surface', 'on-surface-variant', 'on-surface-muted', 'on-surface-faint'];
 
 /** 暗色块只覆盖颜色，未覆盖的 token 沿用 :root */
-const tokenOf = (mode: 'light' | 'dark', name: string) =>
-  BLOCKS[mode](name) ?? BLOCKS.light(name);
+const tokenOf = (mode: 'light' | 'dark', name: string) => BLOCKS[mode](name) ?? BLOCKS.light(name);
 
 test('theme.ts 的表面色与 theme.css 一致', () => {
   for (const mode of ['light', 'dark'] as const) {
@@ -87,7 +86,10 @@ test('文字四档与语义色文字在所有预设的面板底上都过 4.5:1�
       assert.ok(fg, `${mode} 档缺 --fb-color-${tone}-text`);
       for (const preset of SECT_PRESETS) {
         const ratio = minContrast(fg, textBackgrounds(preset.color, mode));
-        assert.ok(ratio >= 4.5, `${mode} ${preset.name} 上 ${tone} 文字 ${fg} 只有 ${ratio.toFixed(2)}:1`);
+        assert.ok(
+          ratio >= 4.5,
+          `${mode} ${preset.name} 上 ${tone} 文字 ${fg} 只有 ${ratio.toFixed(2)}:1`,
+        );
       }
     }
     const ratios = ladder.map((fg) => contrastRatio(fg, MODE_SURFACES[mode][0]));
@@ -102,7 +104,11 @@ test('预设主色原样保留，实底前景在 normal / hover / active 三态�
     for (const preset of SECT_PRESETS) {
       const v = deriveThemeVariables(preset.color, mode);
       assert.equal(v['--fb-color-primary'], preset.color, `${preset.name} 的主色被改动了`);
-      for (const key of ['--fb-color-primary', '--fb-color-primary-hover', '--fb-color-primary-active']) {
+      for (const key of [
+        '--fb-color-primary',
+        '--fb-color-primary-hover',
+        '--fb-color-primary-active',
+      ]) {
         const ratio = contrastRatio(v['--fb-on-primary'], v[key]);
         assert.ok(ratio >= 4.5, `${mode} ${preset.name} ${key} 上前景只有 ${ratio.toFixed(2)}:1`);
       }
@@ -127,6 +133,21 @@ test('白与近黑都不过线的自定义中间调，实底沿离开前景的�
   assert.ok(minContrast(pickForeground([mid], ['#ffffff', '#111827']), [mid]) < 4.5);
   const v = deriveThemeVariables(mid, 'light');
   assert.ok(contrastRatio(v['--fb-on-primary'], v['--fb-color-primary']) >= 4.5);
+});
+
+test('运行边框与流光适配所有门派的亮暗底色', () => {
+  for (const mode of ['light', 'dark'] as const) {
+    for (const preset of SECT_PRESETS) {
+      const variables = deriveThemeVariables(preset.color, mode);
+      const surfaces = textBackgrounds(preset.color, mode);
+      assert.ok(minContrast(variables['--fb-frame-border'], surfaces) >= 4.5);
+      assert.ok(minContrast(variables['--fb-frame-flow-body'], surfaces) >= 4.5);
+    }
+  }
+  const light = deriveThemeVariables('#6c4de6', 'light');
+  const dark = deriveThemeVariables('#6c4de6', 'dark');
+  assert.notEqual(light['--fb-frame-flow-body'], dark['--fb-frame-flow-body']);
+  assert.ok(Number(dark['--fb-frame-glow-alpha']) > Number(light['--fb-frame-glow-alpha']));
 });
 
 test('shiftLightness 只动明度：加深变暗、提亮变亮，零位移不变', () => {

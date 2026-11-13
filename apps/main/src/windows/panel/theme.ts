@@ -120,6 +120,11 @@ export function deriveThemeVariables(
   const backgrounds = textBackgrounds(solid, mode);
   backgrounds.push(composite(solid, backgrounds[backgrounds.length - 1], PRIMARY_SOFT_MAX));
   const primaryText = ensureContrast(solid, backgrounds, mode === 'light' ? -1 : 1);
+  const flowBody = ensureContrast(
+    shiftLightness(primaryText, mode === 'light' ? -0.08 : 0.08),
+    backgrounds,
+    mode === 'light' ? -1 : 1,
+  );
 
   return {
     '--fb-color-primary': solid,
@@ -128,6 +133,9 @@ export function deriveThemeVariables(
     '--fb-color-primary-active': shiftLightness(solid, away * SHADE_STEP * 2),
     '--fb-color-primary-text': primaryText,
     '--fb-on-primary': onPrimary,
+    '--fb-frame-border': primaryText,
+    '--fb-frame-flow-body': flowBody,
+    '--fb-frame-glow-alpha': mode === 'light' ? '0.28' : '0.46',
   };
 }
 

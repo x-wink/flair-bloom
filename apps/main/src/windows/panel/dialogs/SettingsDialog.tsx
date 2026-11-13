@@ -120,6 +120,8 @@ interface Props {
   onPickSoundAudio: (slot: SoundSlot) => void;
   theme: ThemeSettings;
   onThemeChange: (patch: Partial<ThemeSettings>) => void;
+  visualEnhancement: boolean;
+  onVisualEnhancementChange: (enabled: boolean) => void;
   onCreateProfile: () => void;
   onImportProfile: () => void;
   onSwitchProfile: (path: string) => void;
@@ -493,6 +495,19 @@ export default function SettingsDialog(props: Props) {
                     />
                   ))}
                 </div>
+              </div>
+              <div className="settings-row">
+                <div className="settings-row-main">
+                  <span className="settings-row-title">视觉强化</span>
+                  <span className="settings-row-desc">运行时显示边框流光与 Logo 脉冲虚影</span>
+                </div>
+                <input
+                  type="checkbox"
+                  className="enable-checkbox"
+                  checked={props.visualEnhancement}
+                  onChange={(event) => props.onVisualEnhancementChange(event.target.checked)}
+                  aria-label="视觉强化"
+                />
               </div>
               <div className="settings-row">
                 <div className="settings-row-main">

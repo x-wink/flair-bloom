@@ -71,6 +71,10 @@ body {
   z-index: 0;
 }
 
+.panel.off::before {
+  filter: grayscale(1);
+}
+
 .panel::after {
   content: '花间游悟 · 斗转星移';
   position: absolute;

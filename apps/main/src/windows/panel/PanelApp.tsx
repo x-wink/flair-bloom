@@ -90,6 +90,9 @@ import SettingsDialog, {
   type SoundSlot,
   type SoundSource,
 } from './dialogs/SettingsDialog';
+import RunningFrame from './components/RunningFrame';
+import StatusLogo from './components/StatusLogo';
+import { useVisualEnhancement } from './useVisualEnhancement';
 import {
   applyThemeColor,
   applyThemeMode,
@@ -107,7 +110,6 @@ import UpdateNoticeDialog, {
 import { changelogSection } from './changelog';
 import { grantsSignature, type LicenseSummary, watermarkSignature } from './license';
 import './PanelApp.css';
-import './active-feedback.css';
 
 /** 后端 `take_profile_notice` 的返回形态，与 `qzh_profile::SanitizeReport` 同源。 */
 interface SanitizeReport {
@@ -497,6 +499,8 @@ export default function PanelApp() {
   const audioElRef = useRef<HTMLAudioElement | null>(null);
   const playbackSeq = useRef(0);
   const [theme, setTheme] = useState<ThemeSettings>(DEFAULT_THEME);
+  const { enabled: visualEnhancement, update: updateVisualEnhancement } =
+    useVisualEnhancement(settingsStore);
   const themeModeRef = useRef<ThemeMode>(DEFAULT_THEME.mode);
   const [availableVoices, setAvailableVoices] = useState<string[]>([]);
   const [switchingMode, setSwitchingMode] = useState(false);
@@ -2761,9 +2765,14 @@ export default function PanelApp() {
       data-signature={activeSignature}
       style={{ ['--panel-bg' as string]: `url(${bgUrl})` }}
     >
-      {globalEnabled && <div className="global-active-frame" aria-hidden="true" />}
+      {globalEnabled && <RunningFrame key={layout} variant={layout} flow={visualEnhancement} />}
       <header className="panel-header" onMouseDown={handleHeaderMouseDown}>
-        <img className="header-icon" src={iconUrl} alt="" draggable={false} />
+        <StatusLogo
+          className="header-icon"
+          src={iconUrl}
+          active={globalEnabled}
+          pulse={visualEnhancement}
+        />
         <div className="header-heading">
           {hotkeys.panel_toggle && (
             <Kbd title="面板显隐快捷键">{keyLabel(hotkeys.panel_toggle)}</Kbd>
@@ -3332,6 +3341,10 @@ export default function PanelApp() {
           onPickSoundAudio={pickSoundAudio}
           theme={theme}
           onThemeChange={persistTheme}
+          visualEnhancement={visualEnhancement}
+          onVisualEnhancementChange={(next) => {
+            void updateVisualEnhancement(next).catch(() => toast.warning('更新视觉强化设置失败'));
+          }}
           onCreateProfile={() => {
             setShowSettings(false);
             void handleCreateProfile();

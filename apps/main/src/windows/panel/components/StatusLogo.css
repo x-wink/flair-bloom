@@ -1,0 +1,71 @@
+.status-logo {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  pointer-events: none;
+  isolation: isolate;
+}
+
+.status-logo-image {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.status-logo-echo {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  transform-origin: center;
+  animation: status-logo-echo 0.4s ease-out infinite;
+}
+
+.status-logo.is-idle .status-logo-image {
+  filter: grayscale(1);
+}
+.status-logo.is-running.is-enhanced .status-logo-image {
+  animation: status-logo-pulse 0.4s ease-in-out infinite;
+}
+.status-logo-echo--second {
+  animation-delay: -0.2s;
+}
+
+@keyframes status-logo-pulse {
+  0%,
+  70%,
+  100% {
+    transform: scale(1);
+  }
+  35% {
+    transform: scale(1.13);
+  }
+}
+
+@keyframes status-logo-echo {
+  from {
+    transform: scale(1);
+    opacity: 0.48;
+  }
+  to {
+    transform: scale(1.8);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-logo.is-running.is-enhanced .status-logo-image {
+    animation: none;
+  }
+  .status-logo-echo {
+    display: none;
+    animation: none;
+  }
+}

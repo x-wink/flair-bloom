@@ -13,6 +13,9 @@ import iconUrl from '../../assets/icon-64.png';
 import { keyLabel, type KeyId } from '../panel/components/KeyCapture';
 import { useKeyRelay } from '../panel/useKeyRelay';
 import { useRuleStates } from '../panel/useRuleStates';
+import RunningFrame from '../panel/components/RunningFrame';
+import StatusLogo from '../panel/components/StatusLogo';
+import { useVisualEnhancement } from '../panel/useVisualEnhancement';
 import {
   applyThemeColor,
   applyThemeMode,
@@ -29,7 +32,6 @@ import {
 } from '../panel/windowScale';
 import '../panel/HorizontalLayout.css';
 import './FloatApp.css';
-import '../panel/active-feedback.css';
 
 const settingsStore = new LazyStore('settings.json');
 const THEME_KEY = 'theme';
@@ -70,6 +72,7 @@ export default function FloatApp() {
   const [togglingGlobal, setTogglingGlobal] = useState(false);
   const [rules, setRules] = useState<FloatRule[]>([]);
   const floatRef = useRef<HTMLDivElement>(null);
+  const { enabled: visualEnhancement } = useVisualEnhancement(settingsStore);
 
   // 浮窗聚焦时全局键盘钩子失效，与主面板共用键盘事件中继，避免热键被吞。
   useKeyRelay();
@@ -321,8 +324,14 @@ export default function FloatApp() {
       className={`fb-float ${globalEnabled ? 'on' : 'off'}`}
       data-tauri-drag-region
     >
-      {globalEnabled && <div className="global-active-frame" aria-hidden="true" />}
-      <img className="fb-float-logo" src={iconUrl} alt="" data-tauri-drag-region />
+      {globalEnabled && <RunningFrame variant="float" flow={visualEnhancement} />}
+      <StatusLogo
+        className="fb-float-logo"
+        src={iconUrl}
+        active={globalEnabled}
+        pulse={visualEnhancement}
+        dragRegion
+      />
 
       <div className="fb-float-content" data-tauri-drag-region>
         {!hasAny ? (

@@ -46,6 +46,8 @@
 
 统计不读取或写入用户关闭选择，历史 `usageInsightsEnabled` 不再生效。队列、服务配置缓存与环境回退文件独立于 `.qzh`，开发构建位于应用数据目录 `insights-development/`，正式位于 `insights/`；范围和保留边界见[架构](architecture.md#使用统计)。
 
+`settings.json` 的 `visualEnhancement` 是应用级外观偏好：缺失或类型无效时默认开启，保留显式 `false`；主面板与浮窗实时同步。它控制运行边框流光与 Logo 脉冲虚影，不改配置 schema 或现有呼吸、高亮设置。
+
 ## 输入约束
 
 规则组仍仅以 `BurstRule.group` 保存成员关系，没有独立的空组记录。界面通过 `ruleGroupNames` 从实际成员派生组列表；升级不恢复旧版未落盘的待命空组，移出或删除最后一名成员后自动解散，不修改 schema，也不清理仍有成员的旧组或自定义名称。
