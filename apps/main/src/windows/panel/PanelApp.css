@@ -518,6 +518,14 @@ body {
   outline-offset: 2px;
 }
 
+.rule-enable-field {
+  flex-shrink: 0;
+}
+
+.rule-enable-field .enable-checkbox {
+  margin: 3px 0;
+}
+
 .rule-field {
   display: flex;
   flex-direction: column;
@@ -643,6 +651,12 @@ select {
 .rule-advanced .rule-field {
   align-self: flex-start;
   min-width: 80px;
+}
+
+.rule-advanced-hotkeys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--fb-space-4);
 }
 
 .rule-advanced label {
@@ -968,7 +982,7 @@ select {
 .sequence-summary {
   color: var(--fb-text-faint);
 }
-.rule-advanced > .rule-field + .sequence-editor {
+.rule-advanced > .rule-advanced-hotkeys + .sequence-editor {
   padding-top: var(--fb-space-4);
   border-top: 1px solid var(--fb-border);
 }
@@ -1013,7 +1027,6 @@ select {
   align-items: center;
   font-size: var(--fb-fs-xs);
 }
-.sequence-actions > button,
 .sequence-step-actions > button {
   font: inherit;
   font-size: var(--fb-fs-xs);
@@ -1046,10 +1059,100 @@ select {
   line-height: 1.5;
 }
 .sequence-recording {
-  margin-top: var(--fb-space-4);
-  padding-top: var(--fb-space-4);
-  border-top: 1px solid var(--fb-border);
+  margin-top: var(--fb-space-3);
 }
 .sequence-recording > .sequence-actions:first-child {
   margin-top: 0;
+}
+
+.sequence-actions > .fb-btn {
+  height: 28px;
+  padding: 0 var(--fb-space-3);
+  font-size: var(--fb-fs-xs);
+  flex-shrink: 0;
+}
+
+.recording-overlay-layer.overlay-mask {
+  z-index: calc(var(--fb-z-tour-bubble) + 1);
+}
+
+.recording-overlay-layer.overlay-center {
+  z-index: calc(var(--fb-z-tour-bubble) + 2);
+}
+
+.recording-overlay-layer.overlay-center > div {
+  width: 360px;
+  max-width: calc(100% - 28px);
+}
+
+.recording-dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100vh - 48px);
+  padding: 18px;
+  border-radius: var(--fb-radius-xl);
+  background: var(--fb-surface);
+  box-shadow: var(--fb-shadow-modal);
+  outline: none;
+}
+
+.recording-dialog h2 {
+  display: flex;
+  align-items: center;
+  gap: var(--fb-space-3);
+  font-size: var(--fb-fs-xl);
+}
+
+.recording-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--fb-space-3);
+}
+
+.sequence-recording-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: var(--fb-space-3);
+  min-height: 80px;
+  max-height: 320px;
+  margin-top: var(--fb-space-6);
+  padding: var(--fb-space-4);
+  list-style: none;
+  overflow-y: auto;
+  border: 1px solid var(--fb-border);
+  border-radius: var(--fb-radius-md);
+  background: var(--fb-surface-soft);
+  font-size: var(--fb-fs-xs);
+}
+
+.sequence-recording-preview li {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--fb-space-2);
+}
+
+.sequence-recording-preview li > span {
+  color: var(--fb-text-weak);
+}
+
+.sequence-recording-preview li:not(:last-child)::after {
+  content: '→';
+  color: var(--fb-text-faint);
+}
+
+.recording-notice {
+  margin-top: var(--fb-space-3);
+  font-size: var(--fb-fs-xs);
+  color: var(--fb-text-weak);
+}
+
+.recording-actions {
+  justify-content: flex-end;
+  margin-top: var(--fb-space-6);
+}
+
+.recording-rerecord {
+  margin-right: auto;
 }

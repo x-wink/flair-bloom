@@ -1,38 +1,31 @@
 import { invoke } from '@tauri-apps/api/core';
-import { useEffect, useRef, useState } from 'react';
-import KeyCapture, {
-  keyLabel,
-  keyboardKey,
-  type KeyId,
-  type SlotPolicy,
-  type CaptureReject,
-} from './KeyCapture';
-import IntervalInput from './IntervalInput';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { keyboardKey } from './KeyCapture';
+import Button from './Button';
+import { useConfirm } from './ConfirmDialog';
+import { RecordIcon } from './icons';
+import RecordingOverlay from './RecordingOverlay';
 import type { OutputStep } from '../outputSequence';
+import { beginRecording, prepareRecordingSteps, type RecordingSnapshot } from '../recordingSession';
 
-interface Snapshot {
-  session_id: number;
-  recording: boolean;
-  steps: OutputStep[];
-  notice?: string;
-}
 interface Props {
-  policy: SlotPolicy;
-  min: number;
-  max: number;
-  onReject: (info: CaptureReject) => void;
   onRecorded: (steps: OutputStep[]) => void;
+  canAddStep: boolean;
+  onAddStep: () => void;
 }
 
-export default function SequenceRecorder({ policy, min, max, onReject, onRecorded }: Props) {
-  const [stopKey, setStopKey] = useState<KeyId>(keyboardKey(123));
-  const [snapshot, setSnapshot] = useState<Snapshot>();
+const STOP_KEY = keyboardKey(0x7b);
+
+export default function SequenceRecorder({ onRecorded, canAddStep, onAddStep }: Props) {
+  const confirm = useConfirm();
+  const [snapshot, setSnapshot] = useState<RecordingSnapshot>();
   const [message, setMessage] = useState<string>();
   const [pending, setPending] = useState(false);
-  const [remainingSeconds, setRemainingSeconds] = useState<number>();
-  const [tail, setTail] = useState(1000);
+  const [confirming, setConfirming] = useState(false);
+  const [closing, setClosing] = useState(false);
   const owned = useRef<number | undefined>(undefined);
-  const countdown = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const starting = useRef(false);
+  const ending = useRef(false);
   const mounted = useRef(true);
   const attempt = useRef(0);
 
@@ -41,7 +34,6 @@ export default function SequenceRecorder({ policy, min, max, onReject, onRecorde
     return () => {
       mounted.current = false;
       attempt.current += 1;
-      clearTimeout(countdown.current);
       if (owned.current !== undefined)
         void invoke('stop_recording', { sessionId: owned.current }).catch(() => {});
     };
@@ -50,141 +42,151 @@ export default function SequenceRecorder({ policy, min, max, onReject, onRecorde
   useEffect(() => {
     if (!snapshot?.recording) return;
     let cancelled = false;
-    const poll = () =>
-      invoke<Snapshot>('get_recording', { sessionId: snapshot.session_id })
+    const timer = setInterval(() => {
+      if (ending.current) return;
+      void invoke<RecordingSnapshot>('get_recording', { sessionId: snapshot.session_id })
         .then((next) => {
-          if (!cancelled) setSnapshot(next);
+          if (!cancelled && !ending.current && owned.current === snapshot.session_id) {
+            if (!next.recording) ending.current = true;
+            setSnapshot(next);
+          }
         })
         .catch((error) => {
-          if (!cancelled) {
+          if (!cancelled && !ending.current && owned.current === snapshot.session_id) {
+            ending.current = true;
             setMessage(String(error));
-            setSnapshot(undefined);
+            setSnapshot((current) => current && { ...current, recording: false });
+            void invoke('stop_recording', { sessionId: snapshot.session_id }).catch(() => {});
           }
         });
-    const timer = setInterval(() => void poll(), 150);
+    }, 150);
     return () => {
       cancelled = true;
       clearInterval(timer);
     };
   }, [snapshot?.recording, snapshot?.session_id]);
 
-  const start = () => {
+  const start = async () => {
+    if (starting.current) return;
+    starting.current = true;
     const ticket = ++attempt.current;
-    const deadline = performance.now() + 3000;
+    const isCurrent = () => mounted.current && attempt.current === ticket;
     setPending(true);
+    setMessage(undefined);
+    try {
+      const next = await beginRecording({
+        isCurrent,
+        getGlobalEnabled: () => invoke<boolean>('get_global_enabled'),
+        confirmStop: async () => {
+          setConfirming(true);
+          try {
+            return await confirm({
+              title: '开始录制宏',
+              description: '当前全局开关已开启，需要结束运行后才能录制。',
+              confirmText: '结束运行并录制',
+            });
+          } finally {
+            if (mounted.current) setConfirming(false);
+          }
+        },
+        stopGlobal: () => invoke('set_global_enabled', { enabled: false }),
+        start: () => invoke<RecordingSnapshot>('start_recording', { stopKey: STOP_KEY }),
+        stop: (sessionId) => invoke('stop_recording', { sessionId }),
+      });
+      if (next) {
+        if (!isCurrent()) {
+          void invoke('stop_recording', { sessionId: next.session_id }).catch(() => {});
+          return;
+        }
+        owned.current = next.session_id;
+        ending.current = false;
+        setSnapshot(next);
+      }
+    } catch (error) {
+      if (isCurrent()) setMessage(String(error));
+    } finally {
+      starting.current = false;
+      if (mounted.current) setPending(false);
+    }
+  };
+
+  const stop = useCallback(async () => {
+    const sessionId = owned.current;
+    if (sessionId === undefined || ending.current) return;
+    ending.current = true;
+    try {
+      const next = await invoke<RecordingSnapshot>('stop_recording', { sessionId });
+      if (mounted.current && owned.current === sessionId) setSnapshot(next);
+    } catch (error) {
+      if (mounted.current && owned.current === sessionId) {
+        ending.current = false;
+        setMessage(String(error));
+      }
+    }
+  }, []);
+
+  const reset = () => {
+    ending.current = true;
+    owned.current = undefined;
     setSnapshot(undefined);
     setMessage(undefined);
-    const tick = () => {
-      if (!mounted.current || attempt.current !== ticket) return;
-      const remainingMs = deadline - performance.now();
-      const seconds = Math.max(0, Math.ceil(remainingMs / 1000));
-      setRemainingSeconds(seconds || undefined);
-      if (seconds > 0) {
-        countdown.current = setTimeout(tick, Math.max(1, remainingMs - (seconds - 1) * 1000));
-        return;
-      }
-      countdown.current = undefined;
-      void invoke<Snapshot>('start_recording', { stopKey })
-        .then((next) => {
-          if (!mounted.current || attempt.current !== ticket) {
-            void invoke('stop_recording', { sessionId: next.session_id }).catch(() => {});
-            return;
-          }
-          owned.current = next.session_id;
-          setSnapshot(next);
-          setMessage(undefined);
-        })
-        .catch((error) => {
-          if (mounted.current && attempt.current === ticket) setMessage(String(error));
-        })
-        .finally(() => {
-          if (mounted.current && attempt.current === ticket) setPending(false);
-        });
-    };
-    tick();
   };
 
-  const stop = async () => {
-    if (pending) {
-      attempt.current += 1;
-      clearTimeout(countdown.current);
-      setRemainingSeconds(undefined);
-      setPending(false);
-      setMessage('已取消录制');
-      return;
-    }
-    if (owned.current === undefined) return;
-    try {
-      const next = await invoke<Snapshot>('stop_recording', { sessionId: owned.current });
-      if (mounted.current) setSnapshot(next);
-    } catch (error) {
-      if (mounted.current) setMessage(String(error));
+  const discard = async () => {
+    if (closing) return;
+    attempt.current += 1;
+    ending.current = true;
+    setClosing(true);
+    const sessionId = owned.current;
+    if (sessionId !== undefined) await invoke('stop_recording', { sessionId }).catch(() => {});
+    if (mounted.current) {
+      reset();
+      setClosing(false);
     }
   };
 
-  const status = pending
-    ? remainingSeconds !== undefined
-      ? `${remainingSeconds} 秒后开始录制，请切换窗口`
-      : '正在开始录制…'
-    : message || snapshot?.notice;
+  const steps = prepareRecordingSteps(snapshot?.steps ?? []);
 
   return (
-    <section className="sequence-recording" aria-label="录制连发序列">
+    <section className="sequence-recording" aria-label="录制宏">
       <div className="sequence-actions">
-        <span>结束键</span>
-        <KeyCapture
-          policy={{ ...policy, mouse: [] }}
-          value={stopKey}
-          onReject={onReject}
-          onChange={(key) => key && !snapshot?.recording && !pending && setStopKey(key)}
-        />
-        <button type="button" disabled={pending || snapshot?.recording} onClick={start}>
-          录制序列
-        </button>
-        {(pending || snapshot?.recording) && (
-          <button type="button" onClick={() => void stop()}>
-            {pending ? '取消录制' : '结束录制'}
-          </button>
-        )}
+        <Button
+          size="sm"
+          tone="neutral"
+          variant="outline"
+          prependIcon={<RecordIcon size={12} />}
+          loading={pending}
+          disabled={snapshot !== undefined}
+          onClick={() => void start()}
+        >
+          录制宏
+        </Button>
+        <Button
+          size="sm"
+          tone="neutral"
+          variant="outline"
+          disabled={!canAddStep || pending || snapshot !== undefined}
+          onClick={onAddStep}
+        >
+          ＋ 添加步骤
+        </Button>
       </div>
-      {snapshot?.recording && (
-        <p role="status">
-          正在录制 {snapshot.steps.length} 步，按 {keyLabel(stopKey)} 结束。
-        </p>
-      )}
-      {status && <p role="status">{status}</p>}
-      {snapshot && !snapshot.recording && snapshot.steps.length > 0 && (
-        <>
-          <p>{snapshot.steps.map((step) => keyLabel(step.key)).join(' → ')}</p>
-          <div className="sequence-actions">
-            <span>末步到首步间隔</span>
-            <IntervalInput value={tail} min={min} max={max} onChange={setTail} />
-            <button
-              type="button"
-              onClick={() => {
-                setSnapshot(undefined);
-                setMessage(undefined);
-              }}
-            >
-              取消
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                onRecorded(
-                  snapshot.steps.map((step, index) =>
-                    index === snapshot.steps.length - 1
-                      ? { ...step, interval_ms: tail }
-                      : { ...step },
-                  ),
-                );
-                setSnapshot(undefined);
-              }}
-            >
-              采用
-            </button>
-          </div>
-        </>
+      {!snapshot && message && <p role="alert">{message}</p>}
+      {snapshot && !confirming && (
+        <RecordingOverlay
+          recording={snapshot.recording}
+          pending={pending}
+          closing={closing}
+          steps={steps}
+          message={message || snapshot.notice}
+          onStop={stop}
+          onAdopt={() => {
+            onRecorded(steps);
+            reset();
+          }}
+          onRerecord={start}
+          onDiscard={discard}
+        />
       )}
     </section>
   );

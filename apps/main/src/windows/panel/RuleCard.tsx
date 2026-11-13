@@ -1,4 +1,4 @@
-import { useRef, useState, type DragEventHandler } from 'react';
+import { useId, useRef, useState, type DragEventHandler } from 'react';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
 import { ChevronIcon } from './components/icons';
 import IntervalInput from './components/IntervalInput';
@@ -94,13 +94,13 @@ export default function RuleCard({
   onKeyReject,
   onTargetCaptured,
 }: Props) {
+  const enableId = useId();
   const menuRef = useRef<HTMLButtonElement>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const multiple = rule.steps.length > 1;
   const isToggle = rule.mode === 'toggle';
   // 长按键与连发键分开时把「按住哪个键」提到主行：插队要按住的就是它，不能藏在高级设置里。
   const holdSplit = !isToggle && (multiple || !keyEq(rule.trigger_key, rule.steps[0].key));
-  const showTrigger = isToggle || holdSplit;
   const nextMode = other(rule.mode);
 
   const moveTargets = groups.filter((g) => g !== rule.group);
@@ -178,10 +178,10 @@ export default function RuleCard({
       </div>
       <div className="rule-body">
         <div className="rule-main">
-          {showTrigger && (
+          {holdSplit && (
             <>
               <div className="rule-field">
-                <label>{isToggle ? '启动热键' : '长按键'}</label>
+                <label>长按键</label>
                 <KeyCapture
                   onReject={onKeyReject}
                   policy={policies.trigger}
@@ -218,11 +218,11 @@ export default function RuleCard({
                 onChange={(vk) => {
                   if (!vk) return;
                   const patch: Partial<CardRule> = { steps: [{ ...rule.steps[0], key: vk }] };
-                  if (!showTrigger && !showAdvanced) patch.trigger_key = vk;
+                  if (!isToggle && !holdSplit && !showAdvanced) patch.trigger_key = vk;
                   onPatch(patch);
                   onTargetCaptured();
                 }}
-                conflict={showTrigger || !showAdvanced ? conflict : null}
+                conflict={!isToggle && (holdSplit || !showAdvanced) ? conflict : null}
               />
             )}
           </div>
@@ -238,14 +238,16 @@ export default function RuleCard({
             </div>
           )}
         </div>
-        <input
-          type="checkbox"
-          className="enable-checkbox"
-          data-tour="rule-enable"
-          checked={rule.enabled}
-          onChange={(e) => onPatch({ enabled: e.target.checked })}
-          aria-label="启用"
-        />
+        <div className="rule-field rule-enable-field" data-tour="rule-enable">
+          <label htmlFor={enableId}>开关</label>
+          <input
+            id={enableId}
+            type="checkbox"
+            className="enable-checkbox"
+            checked={rule.enabled}
+            onChange={(e) => onPatch({ enabled: e.target.checked })}
+          />
+        </div>
       </div>
       {progress && (multiple || progress.error || progress.max_lateness_ms > 0) && (
         <p className="sequence-progress" role="status">
@@ -256,15 +258,31 @@ export default function RuleCard({
       {showAdvanced && (
         <div className="rule-advanced">
           {isToggle || !holdSplit ? (
-            <div className="rule-field">
-              <label>{isToggle ? '停止热键' : '长按键'}</label>
-              <KeyCapture
-                onReject={onKeyReject}
-                policy={policies.trigger}
-                value={isToggle ? (rule.stop_key ?? rule.trigger_key) : rule.trigger_key}
-                onChange={(vk) => vk && onPatch(isToggle ? { stop_key: vk } : { trigger_key: vk })}
-                conflict={isToggle ? null : conflict}
-              />
+            <div className="rule-advanced-hotkeys">
+              {isToggle && (
+                <div className="rule-field">
+                  <label>启动热键</label>
+                  <KeyCapture
+                    onReject={onKeyReject}
+                    policy={policies.trigger}
+                    value={rule.trigger_key}
+                    onChange={(vk) => vk && onPatch({ trigger_key: vk })}
+                    conflict={conflict}
+                  />
+                </div>
+              )}
+              <div className="rule-field">
+                <label>{isToggle ? '停止热键' : '长按键'}</label>
+                <KeyCapture
+                  onReject={onKeyReject}
+                  policy={policies.trigger}
+                  value={isToggle ? (rule.stop_key ?? rule.trigger_key) : rule.trigger_key}
+                  onChange={(vk) =>
+                    vk && onPatch(isToggle ? { stop_key: vk } : { trigger_key: vk })
+                  }
+                  conflict={isToggle ? null : conflict}
+                />
+              </div>
             </div>
           ) : null}
           <SequenceEditor

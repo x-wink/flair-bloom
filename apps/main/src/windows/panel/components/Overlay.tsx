@@ -49,6 +49,7 @@ export interface OverlayConfig {
   mask?: boolean;
   closeOnBackdrop?: boolean;
   onClose?: () => void;
+  className?: string;
   duration?: number;
 }
 
@@ -75,6 +76,7 @@ interface OverlayItem {
   mask?: boolean;
   closeOnBackdrop?: boolean;
   onClose?: () => void;
+  className?: string;
 }
 
 // ---------- context ----------
@@ -121,6 +123,7 @@ export function OverlayRoot({ children }: { children: ReactNode }) {
           mask: config.mask,
           closeOnBackdrop: config.closeOnBackdrop,
           onClose: config.onClose,
+          className: config.className,
         };
         setItems((prev) => [...prev, item]);
         const inst: OverlayInstance = { id, close: () => close(id) };
@@ -193,6 +196,7 @@ export function OverlayRoot({ children }: { children: ReactNode }) {
           mask={item.mask}
           closeOnBackdrop={item.closeOnBackdrop}
           onClose={() => api.close(item.id)}
+          className={item.className}
         >
           {item.content}
         </Overlay>
@@ -297,6 +301,7 @@ interface OverlayProps {
   managed?: boolean;
   /** 内容版本号，递增时重新计算锚定位置 */
   version?: number;
+  className?: string;
 }
 
 function Overlay({
@@ -311,6 +316,7 @@ function Overlay({
   closeOnBackdrop = true,
   managed = false,
   version = 0,
+  className,
 }: OverlayProps) {
   const [anchored, setAnchored] = useState<CSSProperties>({
     position: 'absolute',
@@ -407,7 +413,7 @@ function Overlay({
       {hasMask && (
         <div
           ref={maskRef}
-          className="overlay-mask"
+          className={`overlay-mask${className ? ` ${className}` : ''}`}
           onClick={(e) => {
             if (e.target === maskRef.current && closeOnBackdrop && onClose) onClose();
           }}
@@ -415,11 +421,15 @@ function Overlay({
       )}
 
       {anchor ? (
-        <div ref={childRef} className="overlay-anchored" style={anchored}>
+        <div
+          ref={childRef}
+          className={`overlay-anchored${className ? ` ${className}` : ''}`}
+          style={anchored}
+        >
           {children}
         </div>
       ) : (
-        <div className="overlay-center">
+        <div className={`overlay-center${className ? ` ${className}` : ''}`}>
           <div ref={childRef}>{children}</div>
         </div>
       )}
