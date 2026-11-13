@@ -25,6 +25,12 @@ pub fn load_or_init_profile(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
         }
     };
 
+    match qzh_profile::storage::migrate_default_hotkeys(&profiles_dir) {
+        Ok(count) if count > 0 => info!("已迁移 {count} 份配置的默认全局快捷键"),
+        Err(error) => warn!("迁移默认全局快捷键失败，下次启动重试: {error}"),
+        _ => {}
+    }
+
     let active_path = active_path.map(|path| {
         if std::path::Path::new(&path)
             .file_name()

@@ -127,7 +127,7 @@ pub fn start_hid_stick_watcher(app: &tauri::AppHandle) {
                 });
                 if let Some(connected) = flip {
                     if !connected {
-                        // 先让后端回退通用模式，再报断开，界面取到的才是回退后的状态
+                        // 先让后端回退轻量模式，再报断开，界面取到的才是回退后的状态
                         win_input::hidstick_link_down("外设驱动的串口不见了");
                     }
                     set_hid_stick_connected(&app, connected);

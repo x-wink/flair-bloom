@@ -2,6 +2,23 @@ use super::*;
 use crate::key_id::{KeyId, MouseButton};
 use serde_json::json;
 
+#[test]
+fn factory_hotkeys_bind_f1_as_a_shared_toggle() {
+    let hotkeys = Hotkeys::for_new_profile();
+    assert_eq!(hotkeys.global_toggle, Some(KeyId::Keyboard(0x70)));
+    assert_eq!(hotkeys.global_stop, None);
+    assert_eq!(hotkeys.panel_toggle, None);
+}
+
+#[test]
+fn loading_hotkeys_preserves_custom_bindings_and_unbound_keys() {
+    for key in [None, Some(KeyId::Keyboard(0x71))] {
+        let hotkeys: Hotkeys = serde_json::from_value(json!({"global_toggle": key})).unwrap();
+        assert_eq!(hotkeys.global_toggle, key);
+    }
+    assert_eq!(Hotkeys::default().global_toggle, None);
+}
+
 fn make_profile(rules: Vec<BurstRule>) -> Profile {
     Profile {
         schema_version: CURRENT_SCHEMA_VERSION,
@@ -35,6 +52,42 @@ fn rule(id: &str, mode: BurstMode, trigger: KeyId, target: KeyId, interval: u32)
 
 fn kbd(vk: u32) -> KeyId {
     KeyId::Keyboard(vk)
+}
+
+#[test]
+fn upgrade_binds_f1_once_and_keeps_custom_hotkeys() {
+    let mut profile = make_profile(vec![]);
+    assert!(profile.migrate_default_hotkeys());
+    assert_eq!(profile.hotkeys.global_toggle, Some(kbd(0x70)));
+    profile.hotkeys.global_toggle = None;
+    assert!(!profile.migrate_default_hotkeys());
+    assert_eq!(profile.hotkeys.global_toggle, None);
+
+    let mut custom = make_profile(vec![]);
+    custom.hotkeys.global_toggle = Some(kbd(0x71));
+    custom.migrate_default_hotkeys();
+    assert_eq!(custom.hotkeys.global_toggle, Some(kbd(0x71)));
+}
+
+#[test]
+fn upgrade_does_not_take_f1_from_other_hotkeys_or_rule_slots() {
+    let f1 = kbd(0x70);
+    for slot in ["stop", "panel", "trigger", "rule_stop", "output"] {
+        let mut profile =
+            make_profile(vec![rule("r", BurstMode::Toggle, kbd(0x51), kbd(0x45), 10)]);
+        match slot {
+            "stop" => profile.hotkeys.global_stop = Some(f1),
+            "panel" => profile.hotkeys.panel_toggle = Some(f1),
+            "trigger" => profile.rules[0].trigger_key = f1,
+            "rule_stop" => profile.rules[0].stop_key = Some(f1),
+            "output" => profile.rules[0].steps[0].key = f1,
+            _ => unreachable!(),
+        }
+        profile.rules[0].enabled = false;
+        profile.migrate_default_hotkeys();
+        assert_eq!(profile.hotkeys.global_toggle, None, "{slot}");
+        assert_eq!(profile.advanced.default_hotkeys_version, 1);
+    }
 }
 
 #[test]

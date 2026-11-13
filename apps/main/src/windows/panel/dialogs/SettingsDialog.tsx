@@ -15,6 +15,7 @@ import Tabs from '../components/Tabs';
 import { useToast } from '../components/Toast';
 import type { ConflictSeverity } from '../conflicts';
 import { clampSignature } from '../license';
+import { INPUT_MODE_HINTS, INPUT_MODE_ORDER } from '../inputModes';
 import DialogShell from './DialogShell';
 import ProfileCardList, { type SettingsProfileEntry } from './ProfileCardList';
 import { SECT_PRESETS, type ThemeMode, type ThemeSettings } from '../theme';
@@ -148,17 +149,10 @@ const SOUND_SOURCE_OPTIONS: { value: SoundSource; label: string }[] = [
 ];
 
 const INPUT_MODE_LABELS: Record<SettingsInputMode, string> = {
-  sendinput: '通用模式',
+  sendinput: '轻量模式',
   interception: '游戏模式',
-  ddsimple: 'DD驱动',
+  ddsimple: '网吧模式',
   hidstick: '外设模式',
-};
-
-const INPUT_MODE_HINTS: Record<SettingsInputMode, string> = {
-  sendinput: '普通软件与网页 · 大部分游戏无效',
-  interception: 'Interception',
-  ddsimple: 'DD驱动',
-  hidstick: '外设驱动',
 };
 
 const CLOSE_BEHAVIOR_OPTIONS: {
@@ -246,21 +240,6 @@ function modeDetail(mode: SettingsInputMode, props: Props): string {
   }
   return '无需驱动';
 }
-
-/// 模式角标：游戏模式主推（推荐）、DD驱动降级（备用）。通用模式无角标。
-function modeTag(mode: SettingsInputMode): { text: string; kind: 'recommend' | 'backup' } | null {
-  if (mode === 'interception') return { text: '推荐', kind: 'recommend' };
-  if (mode === 'ddsimple') return { text: '备用', kind: 'backup' };
-  return null;
-}
-
-/// 可选输入模式：游戏模式置顶主推，通用模式次之，DD驱动仅作备用；外设模式要有外设驱动，放最后。
-const SELECTABLE_INPUT_MODES: SettingsInputMode[] = [
-  'interception',
-  'sendinput',
-  'ddsimple',
-  'hidstick',
-];
 
 function SliderRow({
   label,
@@ -591,8 +570,8 @@ export default function SettingsDialog(props: Props) {
                   <span className="settings-row-title">以管理员模式启动</span>
                   <span className="settings-row-desc">
                     {props.runAsAdmin
-                      ? '下次启动自动请求管理员权限，游戏模式不用再提权重启'
-                      : '普通权限启动，游戏模式需要时再提权重启'}
+                      ? '下次启动自动请求管理员权限，网吧模式和游戏模式不用再提权重启'
+                      : '普通权限启动，网吧模式和游戏模式需要时再提权重启'}
                   </span>
                 </div>
                 <Button
@@ -641,10 +620,9 @@ export default function SettingsDialog(props: Props) {
 
             <SettingsSection title="输入模式">
               <CardList>
-                {SELECTABLE_INPUT_MODES.filter(
+                {INPUT_MODE_ORDER.filter(
                   (mode) => mode !== 'hidstick' || props.hidStickPresent,
                 ).map((mode) => {
-                  const tag = modeTag(mode);
                   // 外设模式仍限制同键切换连发，横版下禁用。
                   const layoutBlocked = props.layout === 'horizontal' && mode === 'hidstick';
                   return (
@@ -655,14 +633,7 @@ export default function SettingsDialog(props: Props) {
                       disabled={props.switchingMode || layoutBlocked}
                       onClick={() => props.onSelectInputMode(mode)}
                     >
-                      <span className="settings-mode-name">
-                        {INPUT_MODE_LABELS[mode]}
-                        {tag && (
-                          <span className={`settings-mode-tag settings-mode-tag-${tag.kind}`}>
-                            {tag.text}
-                          </span>
-                        )}
-                      </span>
+                      <span className="settings-mode-name">{INPUT_MODE_LABELS[mode]}</span>
                       <span className="settings-mode-meta">
                         {layoutBlocked
                           ? '横版键鼠图下不可用，请先切回竖版'
@@ -673,8 +644,8 @@ export default function SettingsDialog(props: Props) {
                 })}
               </CardList>
               <p className="settings-note settings-note-warn">
-                ⚠️ DD 驱动可能无法正确停止连发、甚至自行停止连发，仅在「游戏模式」不可用时作为备用。
-                同键启停异常时可关闭全局开关或正常退出应用，停止连发并释放按键。优先使用游戏模式。
+                网吧模式的同键启停可能误判，导致连发自停或按原键停不下。
+                遇到时可按全局开关快捷键、关闭全局开关或正常退出应用；剑三推荐使用游戏模式。
               </p>
               <p className="settings-note">驱动安装与卸载操作请前往「诊断修复」。</p>
             </SettingsSection>

@@ -316,6 +316,8 @@ pub fn run() {
             }
 
             let need_agreement = check_agreement(app.handle());
+            #[cfg(windows)]
+            bootstrap::input_preferences::initialize(app.handle());
             load_or_init_profile(app.handle(), &burst_engine);
             init_input_backend(app.handle());
             start_hid_stick_watcher(app.handle());

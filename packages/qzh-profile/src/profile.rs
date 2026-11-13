@@ -220,12 +220,25 @@ pub struct Hotkeys {
     pub panel_toggle: Option<KeyId>,
 }
 
-/// 高级选项。当前仅含日志级别，未来可扩展。
+impl Hotkeys {
+    pub fn for_new_profile() -> Self {
+        // 只给出厂配置提供快捷键，读取旧配置和导入时保留用户的未绑定状态。
+        Self {
+            global_toggle: Some(KeyId::Keyboard(0x70)),
+            ..Self::default()
+        }
+    }
+}
+
+/// 高级选项与持久化迁移标记。
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Advanced {
     /// 应用日志级别（与 `tracing_subscriber::EnvFilter` 一致），如 `info` / `debug`。
     #[serde(default = "default_log_level")]
     pub log_level: String,
+    // 目录迁移中断后重试时，不能覆盖用户已经清空的快捷键。
+    #[serde(default)]
+    pub default_hotkeys_version: u32,
 }
 
 fn default_log_level() -> String {
@@ -268,6 +281,25 @@ pub enum ProfileError {
 }
 
 impl Profile {
+    pub(crate) fn migrate_default_hotkeys(&mut self) -> bool {
+        if self.advanced.default_hotkeys_version >= 1 {
+            return false;
+        }
+        let f1 = KeyId::Keyboard(0x70);
+        // 已有 F1 用途时不抢键，停用规则也可能被用户重新启用。
+        let occupied = [self.hotkeys.global_stop, self.hotkeys.panel_toggle].contains(&Some(f1))
+            || self.rules.iter().any(|rule| {
+                rule.trigger_key == f1
+                    || rule.stop_key == Some(f1)
+                    || rule.steps.iter().any(|step| step.key == f1)
+            });
+        if self.hotkeys.global_toggle.is_none() && !occupied {
+            self.hotkeys.global_toggle = Some(f1);
+        }
+        self.advanced.default_hotkeys_version = 1;
+        true
+    }
+
     /// 把所有规则的连发间隔钳进 \[[`MIN_EFFECTIVE_INTERVAL_MS`], [`MAX_INTERVAL_MS`]\]。
     /// 加载旧配置时调用：低于有效操作下限的间隔静默抬到下限（管线可持续注入上限，
     /// 详见 [`MIN_EFFECTIVE_INTERVAL_MS`]），而非拒绝加载。

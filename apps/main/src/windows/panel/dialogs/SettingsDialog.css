@@ -144,27 +144,6 @@
   white-space: nowrap;
 }
 
-.settings-mode-tag {
-  display: inline-block;
-  margin-left: var(--fb-space-3);
-  padding: 0 var(--fb-space-3);
-  border-radius: var(--fb-radius-sm);
-  font-size: var(--fb-fs-xs);
-  font-weight: var(--fb-fw-semibold);
-  vertical-align: middle;
-  line-height: 1.7;
-}
-
-.settings-mode-tag-recommend {
-  color: var(--fb-color-success-text);
-  background: var(--fb-color-success-soft);
-}
-
-.settings-mode-tag-backup {
-  color: var(--fb-text-weak);
-  background: var(--fb-color-neutral-soft);
-}
-
 .settings-note-warn {
   color: var(--fb-color-warning-text);
 }

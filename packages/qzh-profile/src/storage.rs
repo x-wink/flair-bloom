@@ -10,6 +10,35 @@ use std::sync::{
 static MIGRATION: Mutex<()> = Mutex::new(());
 static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
 
+/// 仅迁移首轮已有配置，避免以后导入的文件或用户清空的热键被补回。
+pub fn migrate_default_hotkeys(directory: &Path) -> Result<usize, crate::ProfileError> {
+    let _migration = MIGRATION.lock().unwrap_or_else(|e| e.into_inner());
+    let marker = directory.join(".default-hotkeys-v1");
+    if marker.exists() {
+        return Ok(0);
+    }
+    let mut migrated = 0;
+    for entry in fs::read_dir(directory)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !entry.file_type()?.is_file()
+            || !path
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("qzh"))
+        {
+            continue;
+        }
+        let mut profile = crate::load_from_path(&path)?;
+        if profile.migrate_default_hotkeys() {
+            crate::save_to_path(&path, &profile)?;
+            migrated += 1;
+        }
+    }
+    // 各文件也记版本，目录标记写失败后重试不会改回用户已经清空的热键。
+    fs::write(marker, b"1")?;
+    Ok(migrated)
+}
+
 /// 准备新版配置目录；旧文件只复制一次且不覆盖新版已存在的文件。
 pub fn prepare_profile_directory(base: &Path) -> std::io::Result<PathBuf> {
     let _migration = MIGRATION.lock().unwrap_or_else(|e| e.into_inner());
@@ -78,6 +107,69 @@ mod tests {
             std::process::id(),
             NEXT_TEMP.fetch_add(1, Ordering::Relaxed)
         ))
+    }
+
+    fn unbound_profile() -> crate::Profile {
+        serde_json::from_value(serde_json::json!({
+            "schema_version": crate::CURRENT_SCHEMA_VERSION,
+            "meta": {"name": "test", "created_at": 1, "updated_at": 1, "app_version": "0.10.0"},
+            "rules": [], "hotkeys": {"global_toggle": null}, "advanced": {"log_level": "debug"}
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn hotkey_upgrade_persists_once_and_preserves_later_clears_and_imports() {
+        let directory = fixture();
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("defaults.QZH");
+        crate::save_to_path(&path, &unbound_profile()).unwrap();
+        assert_eq!(migrate_default_hotkeys(&directory).unwrap(), 1);
+        let mut profile = crate::load_from_path(&path).unwrap();
+        assert_eq!(
+            profile.hotkeys.global_toggle,
+            Some(crate::KeyId::Keyboard(0x70))
+        );
+        assert_eq!(profile.advanced.log_level, "debug");
+        profile.hotkeys.global_toggle = None;
+        crate::save_to_path(&path, &profile).unwrap();
+        assert_eq!(migrate_default_hotkeys(&directory).unwrap(), 0);
+        assert_eq!(
+            crate::load_from_path(&path).unwrap().hotkeys.global_toggle,
+            None
+        );
+
+        fs::remove_file(directory.join(".default-hotkeys-v1")).unwrap();
+        assert_eq!(migrate_default_hotkeys(&directory).unwrap(), 0);
+        assert_eq!(
+            crate::load_from_path(&path).unwrap().hotkeys.global_toggle,
+            None
+        );
+        let imported = directory.join("imported.qzh");
+        crate::save_to_path(&imported, &unbound_profile()).unwrap();
+        assert_eq!(migrate_default_hotkeys(&directory).unwrap(), 0);
+        assert_eq!(
+            crate::load_from_path(&imported)
+                .unwrap()
+                .hotkeys
+                .global_toggle,
+            None
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn failed_hotkey_upgrade_keeps_the_file_and_retries_before_marking_complete() {
+        let directory = fixture();
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("broken.qzh");
+        fs::write(&path, b"broken-profile").unwrap();
+        assert!(migrate_default_hotkeys(&directory).is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"broken-profile");
+        assert!(!directory.join(".default-hotkeys-v1").exists());
+        crate::save_to_path(&path, &unbound_profile()).unwrap();
+        assert_eq!(migrate_default_hotkeys(&directory).unwrap(), 1);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

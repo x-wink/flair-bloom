@@ -89,9 +89,9 @@ const ACTION_CONFIRM: Record<RepairCommand, string> = {
 };
 
 const INPUT_MODE_LABEL: Record<string, string> = {
-  sendinput: '通用模式',
+  sendinput: '轻量模式',
   interception: '游戏模式',
-  ddsimple: 'DD驱动',
+  ddsimple: '网吧模式',
   dd_hid: 'DDHID',
   hidstick: '外设模式',
 };

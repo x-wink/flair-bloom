@@ -27,7 +27,7 @@ pub enum DriverStatus {
 pub struct AppStatus {
     pub elevated: bool,
     pub interception_installed: DriverStatus,
-    /// 游戏模式当前不可启用的具体原因；不影响通用模式。
+    /// 游戏模式当前不可启用的具体原因；不影响轻量模式。
     pub interception_issue: Option<String>,
     pub dd_hid_installed: DriverStatus,
     /// 外设驱动连着没有（插拔监视握过手才算）。外设模式的「驱动已装」。

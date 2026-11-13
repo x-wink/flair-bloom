@@ -385,8 +385,11 @@ pub(crate) fn create_default_profile(
             signature: String::new(),
         },
         rules: factory_default_rules(),
-        hotkeys: Hotkeys::default(),
-        advanced: Advanced::default(),
+        hotkeys: Hotkeys::for_new_profile(),
+        advanced: Advanced {
+            default_hotkeys_version: 1,
+            ..Advanced::default()
+        },
     };
 
     let dir = profiles_dir(app)?;

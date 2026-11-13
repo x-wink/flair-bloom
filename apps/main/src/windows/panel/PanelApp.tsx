@@ -73,6 +73,7 @@ import { useTourProgress } from './tour/useTourProgress';
 import { useKeyRelay } from './useKeyRelay';
 import { useRuleStates } from './useRuleStates';
 import { createProfilePersistence, type ProfileWriteTicket } from './profilePersistence';
+import { INPUT_MODE_HINTS, INPUT_MODE_ORDER } from './inputModes';
 import { createToggleFeedbackHandler, type ToggleFeedback } from './toggleFeedback';
 import { useWindowScale } from './useWindowScale';
 import { PANEL_LAYOUT_KEY as LAYOUT_KEY, type PanelLayout } from './windowScale';
@@ -273,9 +274,9 @@ interface UpdateDownloadFailed {
 }
 
 const INPUT_MODE_LABELS: Record<InputMode, string> = {
-  sendinput: '通用模式',
+  sendinput: '轻量模式',
   interception: '游戏模式',
-  ddsimple: 'DD驱动',
+  ddsimple: '网吧模式',
   hidstick: '外设模式',
 };
 const INPUT_MODE_LIST: InputMode[] = ['sendinput', 'interception', 'ddsimple', 'hidstick'];
@@ -316,7 +317,7 @@ interface Profile {
   meta: ProfileMeta;
   rules: BurstRule[];
   hotkeys: { global_toggle: KeyId | null; global_stop?: KeyId | null; panel_toggle?: KeyId | null };
-  advanced: { log_level: string };
+  advanced: { log_level: string; default_hotkeys_version?: number };
 }
 
 interface ProfileSummary {
@@ -770,17 +771,19 @@ export default function PanelApp() {
 
     if (inputModeRequiresAdmin(configured) && !status.elevated) {
       const label = INPUT_MODE_LABELS[configured];
-      const ok = await confirm({
-        title: `以管理员模式恢复${label}`,
-        description: (
-          <>
-            已保存的输入模式是{label}，需要管理员权限才能初始化驱动通道。当前将先使用通用模式；
-            授权后应用会以管理员权限重启，并自动切换到{label}。
-          </>
-        ),
-        confirmText: '以管理员重启',
-        cancelText: '保持通用模式',
-      });
+      const ok =
+        status.run_as_admin ||
+        (await confirm({
+          title: `以管理员模式恢复${label}`,
+          description: (
+            <>
+              已保存的输入模式是{label}，需要管理员权限才能初始化驱动通道。当前将先使用轻量模式；
+              授权后应用会以管理员权限重启，并自动切换到{label}。
+            </>
+          ),
+          confirmText: '以管理员重启',
+          cancelText: '保持轻量模式',
+        }));
       if (!ok) return;
       try {
         await invoke('relaunch_as_admin', { mode: configured });
@@ -1705,7 +1708,7 @@ export default function PanelApp() {
           驱动安装程序已启动。如系统弹出「可能未正确安装此程序」提示，请点击「已正确安装此程序」。
           <br />
           <br />
-          <strong>安装完成后请重启电脑</strong>。当前已切换为通用模式，重启生效前不能启用游戏模式。
+          <strong>安装完成后请重启电脑</strong>。当前已切换为轻量模式，重启生效前不能启用游戏模式。
           <br />
           <br />
           {WINDOWS_RESTART_HINT}
@@ -1716,7 +1719,7 @@ export default function PanelApp() {
     });
   }
 
-  // 后端只报连上 / 断开，状态由这里现取。断开时外设模式已被后端回退成通用模式。
+  // 后端只报连上 / 断开，状态由这里现取。断开时外设模式已被后端回退成轻量模式。
   // 后端只报连上 / 断开，状态由这里现取；取不到返回 undefined。
   async function refreshAppStatus(): Promise<AppStatus | undefined> {
     try {
@@ -1728,12 +1731,12 @@ export default function PanelApp() {
     }
   }
 
-  // 后端先把外设模式回退成通用模式、再报断开，现取的状态已是回退后的。
+  // 后端先把外设模式回退成轻量模式、再报断开，现取的状态已是回退后的。
   async function handleHidStickDisconnected() {
     const wasHidStick = inputMode === 'hidstick';
     const status = await refreshAppStatus();
     if (wasHidStick && status?.input_mode !== 'hidstick') {
-      toast.warning('外设驱动断开了，已回退到通用模式。插回后会问你要不要切回外设模式');
+      toast.warning('外设驱动断开了，已回退到轻量模式。插回后会问你要不要切回外设模式');
     }
   }
 
@@ -1849,7 +1852,7 @@ export default function PanelApp() {
     await refreshAppStatus();
     const inspect = await confirm({
       title: '游戏模式尚未就绪',
-      description: `${issue} 本次临时使用通用模式，已保留原先选择的输入模式。诊断修复中可查看检测依据并导出报告。`,
+      description: `${issue} 本次临时使用轻量模式，已保留原先选择的输入模式。诊断修复中可查看检测依据并导出报告。`,
       confirmText: '打开诊断',
       cancelText: '知道了',
     });
@@ -1923,7 +1926,7 @@ export default function PanelApp() {
       setKeyPolicies(live);
       if (!live.coincident_toggle) {
         toast.warning(
-          `${INPUT_MODE_LABELS[inputMode]}不支持横版键鼠图，请先切换到游戏模式或通用模式`,
+          `${INPUT_MODE_LABELS[inputMode]}不支持横版键鼠图，请先切换到游戏模式或轻量模式`,
         );
         return;
       }
@@ -2663,7 +2666,7 @@ export default function PanelApp() {
       title: '卸载驱动',
       description: (
         <>
-          将卸载 Interception 内核驱动。卸载后游戏模式将不可用，应用会切回通用模式。
+          将卸载 Interception 内核驱动。卸载后游戏模式将不可用，应用会切回轻量模式。
           <br />
           <br />
           <strong>卸载完成后必须重启电脑才能彻底生效。</strong>
@@ -3224,33 +3227,15 @@ export default function PanelApp() {
         onClose={() => setModePickerOpen(false)}
         target={modeBtnRef}
         location="bottom-left"
-        items={(['interception', 'sendinput', 'ddsimple', 'hidstick'] as InputMode[])
-          .filter((m) => m !== 'hidstick' || hidStickPresent)
-          .map((m) => ({
-            label: `${INPUT_MODE_LABELS[m]}${m === 'interception' ? ' ★' : ''}`,
-            subtitle:
-              m === 'sendinput'
-                ? '普通软件与网页 · 大部分游戏无效'
-                : m === 'interception'
-                  ? interceptionIssue && interceptionInstalled !== 'not_installed'
-                    ? '驱动未就绪 · 点击查看原因'
-                    : interceptionInstalled === 'installed'
-                      ? elevated
-                        ? '推荐 · 管理员已就绪'
-                        : '推荐 · 需要管理员'
-                      : interceptionInstalled === 'pending_reboot'
-                        ? '推荐 · 驱动待重启生效'
-                        : '推荐 · 点击安装驱动'
-                  : m === 'hidstick'
-                    ? hidStickPresent
-                      ? '外设 · 已插入'
-                      : '外设 · 需插入外设驱动'
-                    : elevated
-                      ? '备用 · 内置DD驱动，无需重启'
-                      : '备用 · 需要管理员',
-            active: inputMode === m,
-            onClick: () => void selectInputMode(m),
-          }))}
+        items={INPUT_MODE_ORDER.filter((m) => m !== 'hidstick' || hidStickPresent).map((m) => ({
+          label: INPUT_MODE_LABELS[m],
+          subtitle:
+            m === 'interception' && interceptionIssue && interceptionInstalled !== 'not_installed'
+              ? `${INPUT_MODE_HINTS[m]} · 驱动未就绪`
+              : INPUT_MODE_HINTS[m],
+          active: inputMode === m,
+          onClick: () => void selectInputMode(m),
+        }))}
       />
 
       <ContextMenu

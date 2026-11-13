@@ -1,5 +1,6 @@
 pub mod agreement;
 pub mod input;
+pub mod input_preferences;
 pub mod logging;
 pub mod profile;
 pub mod startup;

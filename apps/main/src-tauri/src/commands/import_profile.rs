@@ -644,6 +644,7 @@ mod tests {
             },
             advanced: Advanced {
                 log_level: "debug".into(),
+                ..Advanced::default()
             },
         }
     }

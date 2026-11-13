@@ -22,6 +22,8 @@
 
 ## JSON schema 与迁移（策略 B）
 
+出厂配置通过 `Hotkeys::for_new_profile()` 绑定 F1（VK `0x70`）为共用全局开关；`Hotkeys::default()` 仍为空绑定，反序列化、导入与复制配置保留原值。首轮升级由 `storage::migrate_default_hotkeys` 遍历当前管理目录，给未绑定全局开关且 F1 未用于其他热键或规则任意槽位的配置补上 F1；目录标记 `.default-hotkeys-v1` 完成后不再扫描。各文件 `advanced.default_hotkeys_version` 以 `#[serde(default)]` 读取，用于中断重试，避免用户清空后被补回；迁移后导入的文件不补绑。此默认值不改变 `.qzh` schema。
+
 解密后的 JSON 首字段 `schema_version` 驱动 `qzh-profile/src/schema_migrate.rs` 的迁移链（调用 `packages/migrate` 的 `run_migrations()` 泛型运行器）。读取：`version == CURRENT` 直接反序列化；`< CURRENT` 按序迁移到内存中的当前结构，保存时写当前 schema；`> CURRENT` 拒绝加载（`TooNew`）并提示升级应用。每个版本一个迁移函数，不允许跳版本。
 
 **新增字段原则**：一律 `#[serde(default)]` 走向后兼容；仅字段重命名 / 移动 / 删除 / 类型变更才递增 `schema_version`。高风险版本禁止裸 bump（原因见 [release](release.md) 护栏）。
@@ -45,6 +47,8 @@
 统计不读取或写入用户关闭选择，历史 `usageInsightsEnabled` 不再生效。队列、服务配置缓存与环境回退文件独立于 `.qzh`，开发构建位于应用数据目录 `insights-development/`，正式位于 `insights/`；范围和保留边界见[架构](architecture.md#使用统计)。
 
 ## 输入约束
+
+Windows 的输入偏好保存在 `input_mode`，内部标识保持 `sendinput`／`interception`／`ddsimple`／`hidstick`。`bootstrap/input_preferences.rs` 在装载配置前以 `inputModeOnboardingVersion = 1` 执行一次性迁移：缺省或轻量模式选择网吧模式，保留游戏、外设与已移除模式；显式 `--switch-mode` 在其后覆盖。标记存在后尊重用户手动选择的轻量模式。新装及轻量模式迁移时，未设置 `runAsAdmin` 且未开机自启才默认写入管理员启动；已有明确偏好及游戏模式用户保持原样。模式与标记一次保存，不修改 `.qzh` schema。
 
 | 参数                 | 范围                                  | 执行位置                                                               |
 | -------------------- | ------------------------------------- | ---------------------------------------------------------------------- |

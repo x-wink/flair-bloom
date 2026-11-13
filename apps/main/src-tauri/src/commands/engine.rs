@@ -334,7 +334,7 @@ pub fn set_input_mode(
                 tracing::warn!("游戏模式启用被阻止：{}", health.detail);
                 switch_input_backend_runtime(&state.0, InputMode::SendInput)?;
                 crate::commands::status::emit_status_changed(&app);
-                return Err(format!("{issue} 已回退到通用模式，游戏模式未启用。"));
+                return Err(format!("{issue} 已回退到轻量模式，游戏模式未启用。"));
             }
         }
 
@@ -352,8 +352,8 @@ pub fn set_input_mode(
         crate::commands::status::emit_status_changed(&app);
         if win_input::current_mode() != input_mode {
             return Err(match input_mode {
-                InputMode::DdSimple => "DD 驱动通道未就绪，已回退通用模式。请退出其他使用 DD 的程序后重试；如仍失败，请正常退出本应用后重开，并在诊断修复中检查驱动残留。".into(),
-                _ => "输入通道初始化失败，已回退通用模式；请刷新诊断并检查设备连接或重启 Windows。".into(),
+                InputMode::DdSimple => "DD 驱动通道未就绪，已回退轻量模式。请退出其他使用 DD 的程序后重试；如仍失败，请正常退出本应用后重开，并在诊断修复中检查驱动残留。".into(),
+                _ => "输入通道初始化失败，已回退轻量模式；请刷新诊断并检查设备连接或重启 Windows。".into(),
             });
         }
         Ok(())
@@ -409,9 +409,9 @@ pub(crate) fn leave_driver_backend(app: &AppHandle, engine: &BurstEngine) -> Res
 #[cfg(windows)]
 fn input_mode_label(mode: win_input::InputMode) -> &'static str {
     match mode {
-        win_input::InputMode::SendInput => "通用模式",
+        win_input::InputMode::SendInput => "轻量模式",
         win_input::InputMode::Interception => "游戏模式",
-        win_input::InputMode::DdSimple => "DD驱动",
+        win_input::InputMode::DdSimple => "网吧模式",
         win_input::InputMode::HidStick => "外设模式",
     }
 }

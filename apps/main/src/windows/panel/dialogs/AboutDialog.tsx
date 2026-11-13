@@ -6,9 +6,9 @@ import DialogShell from './DialogShell';
 import './AboutDialog.css';
 
 const INPUT_MODE_LABELS: Record<string, string> = {
-  sendinput: '通用模式',
+  sendinput: '轻量模式',
   interception: '游戏模式',
-  ddsimple: 'DD驱动',
+  ddsimple: '网吧模式',
   hidstick: '外设模式',
 };
 
