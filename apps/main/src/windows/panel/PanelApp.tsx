@@ -2208,10 +2208,17 @@ export default function PanelApp() {
 
   async function handleCreateProfile() {
     let name = '';
+    let copyRules = false;
     const ok = await confirm({
       title: '新建配置',
       description: '请输入新配置的名称：',
       confirmText: '创建',
+      checkbox: {
+        label: '复制当前规则',
+        onChange: (checked) => {
+          copyRules = checked;
+        },
+      },
       body: (
         <ProfileNameForm
           placeholder="例如：刺客 / 法师 / 测试用"
@@ -2235,11 +2242,15 @@ export default function PanelApp() {
       toast.warning('已存在同名配置');
       return;
     }
-    // 复用 fork：会基于「当前激活配置」创建副本，名字冲突由后端 pick_unique_name 兜底
     try {
       await changeProfile(async () => {
-        const res = await invoke<ForkResult>('fork_active_profile', { suggestedName: trimmed });
-        applyLoadedProfile(res.profile);
+        const res = await invoke<ForkResult>('fork_active_profile', {
+          suggestedName: trimmed,
+          copyRules,
+        });
+        // 走统一激活入口，空配置才能同步清除引擎中的旧规则。
+        const profile = await invoke<Profile>('load_profile', { path: res.path });
+        applyLoadedProfile(profile);
         await refreshProfileList();
         toast.success(`已创建配置「${res.profile.meta.name}」`);
       });

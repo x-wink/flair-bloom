@@ -1,5 +1,80 @@
 use super::*;
 
+fn source_profile_for_fork() -> Profile {
+    let mut rules = factory_default_rules();
+    rules[0].enabled = true;
+    rules[0].group = Some("规则组 1".into());
+    rules[0].steps.push(qzh_profile::OutputStep {
+        key: KeyId::Keyboard(0x52),
+        interval_ms: 50,
+    });
+    rules[1].stop_key = Some(KeyId::Keyboard(0x73));
+    Profile {
+        schema_version: CURRENT_SCHEMA_VERSION,
+        meta: meta(100, "署名"),
+        rules,
+        hotkeys: Hotkeys {
+            global_toggle: Some(KeyId::Keyboard(0x71)),
+            global_stop: Some(KeyId::Keyboard(0x72)),
+            panel_toggle: Some(KeyId::Keyboard(0x74)),
+        },
+        advanced: Advanced {
+            log_level: "debug".into(),
+            default_hotkeys_version: 1,
+        },
+    }
+}
+
+#[test]
+fn fork_without_rules_keeps_profile_settings_and_creates_new_metadata() {
+    let source = source_profile_for_fork();
+    let result = prepare_profile_fork(source.clone(), "空白配置".into(), Some(false), 500);
+    assert!(result.rules.is_empty());
+    assert_eq!(
+        serde_json::to_value(&result.hotkeys).unwrap(),
+        serde_json::to_value(&source.hotkeys).unwrap()
+    );
+    assert_eq!(
+        serde_json::to_value(&result.advanced).unwrap(),
+        serde_json::to_value(&source.advanced).unwrap()
+    );
+    assert_eq!(result.meta.signature, source.meta.signature);
+    assert_eq!(result.meta.name, "空白配置");
+    assert_eq!(result.meta.created_at, 500);
+    assert_eq!(result.meta.updated_at, 500);
+    assert_eq!(result.meta.app_version, env!("CARGO_PKG_VERSION"));
+    assert_eq!(result.schema_version, CURRENT_SCHEMA_VERSION);
+}
+
+#[test]
+fn explicit_copy_and_default_auto_fork_preserve_complete_rules() {
+    let source = source_profile_for_fork();
+    for copy_rules in [Some(true), None] {
+        let result = prepare_profile_fork(source.clone(), "副本".into(), copy_rules, 500);
+        assert_eq!(
+            serde_json::to_value(result.rules).unwrap(),
+            serde_json::to_value(&source.rules).unwrap()
+        );
+    }
+}
+
+#[test]
+fn empty_fork_is_persisted_without_changing_the_source_file() {
+    let directory = tempfile::tempdir().unwrap();
+    let source_path = directory.path().join("source.qzh");
+    let destination_path = directory.path().join("empty.qzh");
+    write_profile_file_to_path(&source_path, &source_profile_for_fork()).unwrap();
+    let original_bytes = std::fs::read(&source_path).unwrap();
+    let source = read_profile_from_file(&source_path).unwrap();
+    let blank = prepare_profile_fork(source, "空白".into(), Some(false), 500);
+    write_profile_file_to_path(&destination_path, &blank).unwrap();
+    assert!(read_profile_from_file(&destination_path)
+        .unwrap()
+        .rules
+        .is_empty());
+    assert_eq!(std::fs::read(source_path).unwrap(), original_bytes);
+}
+
 #[test]
 fn sanitize_replaces_windows_reserved_chars() {
     assert_eq!(

@@ -24,7 +24,7 @@ export interface ConfirmOptions {
   checkbox?: {
     label: string;
     defaultChecked?: boolean;
-    checkedConfirmText: string;
+    checkedConfirmText?: string;
     onChange: (checked: boolean) => void;
   };
 }
@@ -74,9 +74,7 @@ function ConfirmContent({
           tone={opts.tone === 'danger' ? 'danger' : 'primary'}
           onClick={() => onClose(true)}
         >
-          {checked && opts.checkbox
-            ? opts.checkbox.checkedConfirmText
-            : (opts.confirmText ?? '确定')}
+          {(checked ? opts.checkbox?.checkedConfirmText : undefined) ?? opts.confirmText ?? '确定'}
         </Button>
       </div>
     </div>

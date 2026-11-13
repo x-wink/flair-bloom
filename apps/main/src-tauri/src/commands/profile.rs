@@ -584,10 +584,14 @@ pub fn delete_profile(
 }
 
 /// 基于当前激活配置 fork 出一份副本：选一个不冲突的名字，落盘新文件，
-/// 把 `activeProfilePath` 切到新文件。返回新 [`Profile`] 与新路径。
-/// 用于「修改默认配置时自动新建一份」的 fork-on-edit 流程。
+/// 更新当前配置路径。返回新 [`Profile`] 与新路径。
+/// 显式新建可选择不复制规则；默认配置另存省略参数，保留全部规则。
 #[tauri::command]
-pub fn fork_active_profile(app: AppHandle, suggested_name: String) -> Result<ForkResult, String> {
+pub fn fork_active_profile(
+    app: AppHandle,
+    suggested_name: String,
+    copy_rules: Option<bool>,
+) -> Result<ForkResult, String> {
     let dir = profiles_dir(&app)?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建配置目录: {e}"))?;
 
@@ -600,7 +604,7 @@ pub fn fork_active_profile(app: AppHandle, suggested_name: String) -> Result<For
         })
         .ok_or("当前没有激活配置")?;
     let active_path = Path::new(&active_path_str);
-    let mut profile = read_profile_from_file(active_path)?;
+    let profile = read_profile_from_file(active_path)?;
 
     let base = {
         let trimmed = suggested_name.trim();
@@ -611,13 +615,7 @@ pub fn fork_active_profile(app: AppHandle, suggested_name: String) -> Result<For
         }
     };
     let (final_name, final_path) = pick_unique_name(&dir, base);
-
-    let now = now_secs();
-    profile.meta.name = final_name.clone();
-    profile.meta.created_at = now;
-    profile.meta.updated_at = now;
-    profile.meta.app_version = env!("CARGO_PKG_VERSION").to_string();
-    profile.schema_version = CURRENT_SCHEMA_VERSION;
+    let profile = prepare_profile_fork(profile, final_name, copy_rules, now_secs());
 
     let saved_path = write_profile_file_to_path(&final_path, &profile)?;
     set_active_path(&app, &saved_path);
@@ -627,6 +625,23 @@ pub fn fork_active_profile(app: AppHandle, suggested_name: String) -> Result<For
         profile,
         path: saved_path,
     })
+}
+
+fn prepare_profile_fork(
+    mut profile: Profile,
+    name: String,
+    copy_rules: Option<bool>,
+    now: u64,
+) -> Profile {
+    if !copy_rules.unwrap_or(true) {
+        profile.rules.clear();
+    }
+    profile.meta.name = name;
+    profile.meta.created_at = now;
+    profile.meta.updated_at = now;
+    profile.meta.app_version = env!("CARGO_PKG_VERSION").to_string();
+    profile.schema_version = CURRENT_SCHEMA_VERSION;
+    profile
 }
 
 #[derive(serde::Serialize)]
