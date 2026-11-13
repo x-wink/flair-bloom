@@ -33,6 +33,69 @@ body {
   color: var(--ui-fg);
 }
 
+/* 原图四角已合成白底，沿内缘裁切以避开抗锯齿白边。 */
+.floating-screenshot {
+  clip-path: inset(1px round 8px);
+}
+
+.product-first-screen {
+  display: flex;
+  flex-direction: column;
+  min-height: 100svh;
+  overflow-x: clip;
+}
+
+#download {
+  display: flex;
+  flex: 1 0 auto;
+  align-items: center;
+  width: 100%;
+}
+
+#download > div {
+  width: 100%;
+}
+
+#layouts {
+  flex: none;
+  width: 100%;
+}
+
+@media (min-width: 48rem) {
+  #download {
+    padding-top: 6rem;
+    padding-bottom: 2rem;
+  }
+
+  .hero-description {
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+
+  .hero-actions {
+    margin-top: 1.25rem;
+  }
+
+  #layouts {
+    padding-top: 1rem;
+    padding-bottom: 3rem;
+  }
+
+  .product-previews-grid {
+    grid-template-columns: minmax(0, 1fr) 18rem;
+    margin-top: 1.5rem;
+  }
+
+  .product-previews-left {
+    gap: 1rem;
+  }
+
+  #layouts .product-preview-floating {
+    min-height: 7rem;
+    padding: 1rem;
+  }
+}
+
 @layer components {
   /* 江湖骚话：错落、互相压一点边的气泡。底色必须不透明，否则叠在一起的字会互相透出来 */
   .rumor-card {

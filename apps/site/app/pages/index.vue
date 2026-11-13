@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useHashAnchor, useTheme } from '@xwink/ui';
+import '../../../main/src/windows/panel/components/StatusLogo.css';
 
 const { releases, latest, status } = useReleases();
 const { isDark, preference: themePreference, toggle: toggleTheme } = useTheme();
@@ -89,6 +90,15 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
           <a href="#features" class="hover:text-(--ui-fg)">功能介绍</a>
           <a href="#changelog" class="hover:text-(--ui-fg)">更新公告</a>
           <a href="#support" class="hover:text-(--ui-fg)">支持&帮助</a>
+          <a
+            :href="REPOSITORY"
+            target="_blank"
+            rel="noopener"
+            class="inline-flex items-center gap-1 hover:text-(--ui-fg)"
+          >
+            源码仓库
+            <XIcon name="ph:arrow-up-right" class="size-3.5" />
+          </a>
         </nav>
         <!-- 顶栏只留一键明暗翻转；三档选择与门派色块在功能区卡片里。图标取决于本地存的档位，同样只在客户端渲染 -->
         <ClientOnly>
@@ -107,9 +117,10 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
     </XGlassHeader>
 
     <main id="top">
+      <div class="product-first-screen">
       <section id="download" class="scroll-mt-16 mx-auto max-w-5xl px-4 pt-30 pb-16 sm:px-6 sm:pt-36">
         <div class="flex flex-col items-start gap-10 md:flex-row md:items-center">
-          <div class="flex-1">
+          <div class="min-w-0 flex-1">
             <XReveal>
               <p class="text-sm font-medium text-(--ui-primary)">
                 PVE 打本按键小助手 · 极速连发 · 降低延迟 · 提高输出
@@ -120,13 +131,13 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
               <ProductUsage />
             </XReveal>
             <XReveal :delay="120">
-              <p class="mt-4 max-w-xl text-lg text-(--ui-fg-muted)">
+              <p class="hero-description mt-4 max-w-xl text-lg text-(--ui-fg-muted)">
                 手搓技能卡 GCD、一键宏\武学助手 FFF 启动、多段宏丝滑切换……<br/>让手指<PinyinGag gag="(duì xiàng)" real="(shǒu zhǐ)" />歇一会儿，DPS也能更高点。
               </p>
             </XReveal>
 
             <XReveal :delay="240">
-            <div class="mt-8 flex flex-wrap items-center gap-3">
+            <div class="hero-actions mt-8 flex flex-wrap items-center gap-3">
               <a
                 v-if="nsis"
                 :href="nsis.url"
@@ -162,7 +173,7 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
             </div>
 
             <!-- 清单在浏览器里异步读，读到之前用同样长度的不可见文本占住行高，免得读完把下面整页往下推 -->
-            <p class="mt-3 text-xs text-(--ui-fg-muted)">
+            <p class="hero-platform mt-3 text-xs text-(--ui-fg-muted)">
               Windows 10 / 11（64 位）<template v-if="nsis">
                 · {{ formatSize(nsis.size) }} · 发布于
                 {{ formatDate(latest?.publishedAt ?? '') }} ·
@@ -177,7 +188,7 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
                 · 0.0 MB · 发布于 0000-00-00 · GitHub 下载</span
               >
             </p>
-            <p class="mt-3 text-sm text-(--ui-fg-muted)">
+            <p class="hero-support mt-3 text-sm text-(--ui-fg-muted)">
               使用问题或建议？
               <a href="#support" class="text-(--ui-primary) underline-offset-2 hover:underline">
                 加入产品QQ群
@@ -187,16 +198,69 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
           </div>
 
           <XReveal :delay="360" class="mx-auto">
-            <img
-              src="/icon.png"
-              alt="气质花图标"
-              width="220"
-              height="220"
-              class="size-40 drop-shadow-xl sm:size-56"
-            />
+            <div class="hero-logo size-40 drop-shadow-xl sm:size-56">
+              <span class="status-logo is-running is-enhanced" style="width: 100%; height: 100%">
+                <img
+                  v-for="echo in 2"
+                  :key="echo"
+                  src="/icon.png"
+                  alt=""
+                  aria-hidden="true"
+                  draggable="false"
+                  :class="['status-logo-echo', { 'status-logo-echo--second': echo === 2 }]"
+                />
+                <img
+                  src="/icon.png"
+                  alt="气质花图标"
+                  width="220"
+                  height="220"
+                  class="status-logo-image"
+                  draggable="false"
+                />
+              </span>
+            </div>
           </XReveal>
         </div>
       </section>
+
+      <section id="layouts" aria-labelledby="layouts-title" class="scroll-mt-16 mx-auto max-w-5xl px-4 py-16 sm:px-6">
+        <XReveal class="product-layout-intro">
+          <h2 id="layouts-title" class="text-2xl font-semibold text-(--ui-fg-strong)">
+            三种布局，随心切换
+          </h2>
+          <p class="mt-2 text-sm text-(--ui-fg-muted)">横版看全局，竖版调规则，浮窗随时启停。</p>
+        </XReveal>
+        <div class="product-previews-grid mt-8 grid gap-6 md:grid-cols-[minmax(0,1.8fr)_minmax(0,1fr)]">
+          <div class="product-previews-left flex min-w-0 flex-col gap-6">
+            <XReveal>
+              <figure>
+                <ProductScreenshot view="landscape" />
+                <figcaption class="mt-3 text-center text-sm text-(--ui-fg-muted)">
+                  横版键鼠图
+                </figcaption>
+              </figure>
+            </XReveal>
+            <XReveal :delay="120" class="flex-1">
+              <figure class="product-preview-floating flex h-full min-h-40 flex-col items-center justify-center rounded-lg bg-(--ui-primary)/5 p-6">
+                <ProductScreenshot view="floating" />
+                <figcaption class="mt-3 text-center text-sm text-(--ui-fg-muted)">
+                  悬浮窗 · 随时启停
+                </figcaption>
+              </figure>
+            </XReveal>
+          </div>
+          <XReveal :delay="240" class="min-w-0">
+            <figure class="mx-auto w-full max-w-[324px] md:max-w-none">
+              <ProductScreenshot view="portrait" />
+              <figcaption class="mt-3 text-center text-sm text-(--ui-fg-muted)">
+                竖版规则列表
+              </figcaption>
+            </figure>
+          </XReveal>
+        </div>
+      </section>
+
+      </div>
 
       <section id="features" class="scroll-mt-16">
         <div class="mx-auto max-w-5xl px-4 py-16 sm:px-6">
@@ -555,6 +619,15 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
         class="mx-auto flex max-w-5xl flex-wrap items-center gap-x-4 gap-y-2 px-4 py-6 text-xs text-(--ui-fg-muted) sm:px-6"
       >
         <span>© 2026 x-wink</span>
+        <a
+          :href="REPOSITORY"
+          target="_blank"
+          rel="noopener"
+          class="inline-flex items-center gap-1 hover:text-(--ui-fg)"
+        >
+          GitHub 仓库
+          <XIcon name="ph:arrow-up-right" class="size-3.5" />
+        </a>
         <a
           :href="`${REPOSITORY}/blob/main/LICENSE`"
           target="_blank"

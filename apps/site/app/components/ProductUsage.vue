@@ -49,7 +49,7 @@ const values = computed(() => [
 ]);
 </script>
 <template>
-  <div class="mt-6 text-(--ui-fg-muted)">
+  <div class="product-usage mt-6 text-(--ui-fg-muted)">
     <dl class="flex flex-wrap gap-x-6 gap-y-3 text-sm">
       <div v-for="item in values" :key="item.label">
         <dt>{{ item.label }}</dt>
@@ -58,11 +58,8 @@ const values = computed(() => [
         </dd>
       </div>
     </dl>
-    <p class="mt-2 text-xs">
-      按持久设备环境去重；每设备每日运行计一个设备日，不等于自然人数。{{
-        failed ? '统计暂不可用。' : stats?.stale ? '当前显示缓存值。' : ''
-      }}
-      <NuxtLink to="/privacy" class="underline">协议与数据政策</NuxtLink>
+    <p v-if="failed || stats?.stale" class="mt-2 text-xs">
+      {{ failed ? '统计暂不可用。' : '当前显示缓存值。' }}
     </p>
   </div>
 </template>

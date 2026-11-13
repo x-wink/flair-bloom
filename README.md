@@ -27,9 +27,17 @@
 
 **竖版规则列表**适合精细调整：连哪个键、多久一次、开关还是长按，都在卡片上。高级设置内可编辑、录制连发序列，修改自动保存；也能做「按住侧键连左键」「按 F 连滚轮」这样的组合。按键冲突会在卡片标题显示警告，悬停可查看原因。
 
+<p align="center">
+  <img src="apps/site/public/screenshots/dark/portrait.png" alt="竖版规则列表" width="324" />
+</p>
+
 **横版键鼠图**适合一眼看全：在键盘、鼠标示意图上点键，就能轮换开关规则、长按规则和取消；正在连发的键会亮起。
 
+![横版键鼠图](apps/site/public/screenshots/dark/landscape.png)
+
 **悬浮窗**把面板收成一个可拖动的小条，能看正在运行的按键，也能直接暂停、恢复和展开面板。界面跟随显示器缩放，主面板可拖动边缘放大。
+
+![悬浮窗](apps/site/public/screenshots/dark/floating.png)
 
 键盘、鼠标左／右／中键、侧键和滚轮都能配置。全局热键、语音提示、明暗主题与 21 套门派配色，也可以按习惯调整。
 
@@ -93,7 +101,6 @@
 
 - 按前台游戏自动切换对应配置，复用已实现的[窗口绑定](docs/roadmaps/archive/window-binding.md)识别与监听能力。
 - 组合键触发与连发，例如按 `Ctrl+F` 连发 `Shift+1`（[评估草案](docs/roadmaps/key-chords.md)）。
-- 官网补实拍截图。
 - 界面迁到 Vue 与 xwink 组件库（[路线图](docs/roadmaps/vue-migration.md)）。
 
 ---
