@@ -135,7 +135,7 @@ export default function ProfileCardList(props: Props) {
                 {profile.summary.group_count > 0 && (
                   <span>
                     <strong>{profile.summary.group_count}</strong>
-                    互斥组
+                    规则组
                   </span>
                 )}
                 <span>

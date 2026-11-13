@@ -28,8 +28,8 @@ export function lastRule(snapshot: TourSnapshot): TourRule | undefined {
   return visible[visible.length - 1];
 }
 
-/** 互斥组教程的示例组：组名与三条规则的固定 id，宿主建组、教程判定共用这一份。 */
-export const SAMPLE_GROUP = '示例·多段宏';
+/** 规则组教程的示例组：组名与三条规则的固定 id，宿主建组、教程判定共用这一份。 */
+export const SAMPLE_GROUP = '示例规则组';
 export const SAMPLE_IDS = {
   a: 'sample-macro-a',
   b: 'sample-macro-b',

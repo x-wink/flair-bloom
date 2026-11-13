@@ -17,7 +17,7 @@ function prefersReducedMotion(): boolean {
 }
 
 /**
- * 互斥组四拍时间线：按 A → 按 B → 按住长按 → 松开。气泡里先给画面，再让用户按真键对照。
+ * 规则组四拍时间线：按 A → 按 B → 按住长按 → 松开。气泡里先给画面，再让用户按真键对照。
  * 减少动态效果时不跑定时器，直接展示四拍全貌。
  */
 export default function GroupTimeline({ keys: [a, b, hold] }: Props) {
@@ -32,13 +32,13 @@ export default function GroupTimeline({ keys: [a, b, hold] }: Props) {
 
   const beats = [`按 ${a}`, `按 ${b}`, `按住 ${hold}`, `松开 ${hold}`];
   const lanes: { name: string; mode: 'toggle' | 'hold'; cells: Cell[] }[] = [
-    { name: '宏A', mode: 'toggle', cells: ['run', 'idle', 'idle', 'idle'] },
-    { name: '宏B', mode: 'toggle', cells: ['idle', 'run', 'pause', 'run'] },
+    { name: '规则 A', mode: 'toggle', cells: ['run', 'idle', 'idle', 'idle'] },
+    { name: '规则 B', mode: 'toggle', cells: ['idle', 'run', 'pause', 'run'] },
     { name: '长按', mode: 'hold', cells: ['idle', 'idle', 'run', 'idle'] },
   ];
 
   return (
-    <div className="group-timeline" aria-label="互斥组时间线示意">
+    <div className="group-timeline" aria-label="规则组时间线示意">
       <span className="group-timeline__lane-name">按键</span>
       {beats.map((label, i) => (
         <span

@@ -27,14 +27,14 @@ function button(label: string, onClick: () => void) {
 
 /**
  * 第 6 步的两段判定：先看到某条示例切换规则被暂停，再看到它恢复运行且长按已松开。
- * 用户第 4、5 步按的顺序不同（最后在跑的可能是宏A 也可能是宏B）都能过。进入该步时复位。
+ * 用户第 4、5 步按的顺序不同（最后在跑的可能是规则 A 也可能是规则 B）都能过。进入该步时复位。
  */
 let pausedSeen: string | undefined;
 
 export const groups: TourDef = {
   id: 'groups',
-  title: '互斥组与多段宏',
-  summary: '同组只跑一条：切换是换人，长按是插队',
+  title: '规则组',
+  summary: '常用于多段宏自动切换',
   steps: [
     {
       id: 'concept',
@@ -45,8 +45,8 @@ export const groups: TourDef = {
           Fragment,
           null,
           p(
-            '放进同一个互斥组的规则，同一时间只跑一条。',
-            `切换是换人：按 ${b} 宏B 接班、宏A 停；长按是插队：按住 ${hold} 时宏B 让位，松手它自己接着跑。`,
+            '放进同一个规则组的规则，同一时间只跑一条。',
+            `切换是换人：按 ${b} 规则 B 接班、规则 A 停；长按是插队：按住 ${hold} 时规则 B 让位，松手它自己接着跑。`,
           ),
           createElement(GroupTimeline, { keys: [a, b, hold] }),
         );
@@ -66,8 +66,8 @@ export const groups: TourDef = {
           Fragment,
           null,
           p(
-            '平时用这里新建分组，再把规则拖进去。',
-            '这次直接建一个现成的「示例·多段宏」：两条切换、一条长按，都先停用着，键位会避开你已经在用的键。',
+            '平时点「新建规则组」，会自动加入按键为 1、2 的两条切换规则，都先停用着，设置好后再启用；也可以把已有规则拖进去。',
+            '这次直接建一个现成的「示例规则组」：两条切换、一条长按，都先停用着，键位会避开你已经在用的键。',
           ),
           button('建示例组', () => host.createSampleGroup()),
         ),
@@ -83,8 +83,10 @@ export const groups: TourDef = {
       target: 'group-latest',
       title: '组容器',
       body: p(
-        '规则拖进拖出就是进组出组，卡片右上角 ⋯ 里也能移入分组。',
-        '组头这句话就是这个组的规则；组里只有一条规则时互斥没有意义。',
+        '规则拖进拖出就是进组出组，卡片右上角 ⋯ 里也能移入组。',
+        '解散时，组内规则全部停用会默认勾选「同时删除组内规则」，按钮显示「清空并解散」；只要有规则启用就默认保留，也可自行勾选或取消勾选。',
+        '组头显示名称和用途，下面显示当前运行与暂停的规则；同组只运行一条，切换替换，长按插队。',
+        '箭头朝右表示折叠，朝下表示展开；没有规则运行时居中显示「未在运行」，折叠后仍保留状态和底部留白。',
       ),
       prepare: (host) => {
         host.setFilter('all');
@@ -94,12 +96,12 @@ export const groups: TourDef = {
     {
       id: 'switch-a',
       target: 'group-header',
-      title: '让宏A 跑起来',
+      title: '让规则 A 跑起来',
       body: (host: TourHost) => {
         const [a] = sampleKeys(host.snapshot);
         return p(
           '要做三件事：把示例组三条规则的开关都勾上；点亮右下角的总开关；',
-          `再按一下 ${a}——组头亮起「宏A 在跑」。保持这个窗口在前面，连发的键会打进前台窗口。`,
+          `再按一下 ${a}——组头会显示正在运行的按键。保持这个窗口在前面，连发的键会打进前台窗口。`,
         );
       },
       prepare: (host) => (sampleRules(host.snapshot) ? undefined : 'skip'),
@@ -109,10 +111,10 @@ export const groups: TourDef = {
     {
       id: 'switch-b',
       target: 'group-header',
-      title: '换成宏B',
+      title: '换成规则 B',
       body: (host: TourHost) => {
         const [, b] = sampleKeys(host.snapshot);
-        return p(`按一下 ${b}：宏A 自动停、宏B 接着跑——这就是多段宏切换。`);
+        return p(`按一下 ${b}：规则 A 自动停、规则 B 接着跑，同组规则自动切换。`);
       },
       prepare: (host) => (sampleRules(host.snapshot) ? undefined : 'skip'),
       done: (now) =>

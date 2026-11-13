@@ -48,7 +48,7 @@ interface Props {
   policies: KeyPolicies;
   intervalMin: number;
   intervalMax: number;
-  /** 全部已有分组名，供「移入分组」子菜单。 */
+  /** 全部已有分组名，供「移入组」子菜单。 */
   groups: string[];
   drag: CardDragHandlers;
   onPatch: (patch: Partial<CardRule>) => void;
@@ -106,14 +106,14 @@ export default function RuleCard({
   const moveTargets = groups.filter((g) => g !== rule.group);
   const menuItems: ContextMenuItem[] = [
     {
-      label: '移入分组',
+      label: '移入组',
       children: [
         ...moveTargets.map((g) => ({ label: g, onClick: () => onMoveToGroup(g) })),
         ...(moveTargets.length > 0 ? [{ type: 'divider' as const }] : []),
-        { label: '新建分组', onClick: onNewGroupWith },
+        { label: '新建规则组', onClick: onNewGroupWith },
       ],
     },
-    ...(rule.group ? [{ label: '移出分组', onClick: onRemoveFromGroup }] : []),
+    ...(rule.group ? [{ label: '移出组', onClick: onRemoveFromGroup }] : []),
     { label: `改为${MODE_NAME[nextMode]}连发`, onClick: () => onSetMode(nextMode) },
     { type: 'divider' },
     { label: '删除', danger: true, onClick: onDelete },

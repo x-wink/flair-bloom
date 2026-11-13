@@ -697,11 +697,11 @@ select {
   flex-shrink: 0;
   color: var(--fb-color-primary-text);
   transition: transform 0.2s;
-  transform: rotate(180deg);
+  transform: rotate(0deg);
 }
 
 .group-collapse-indicator.collapsed .group-chevron {
-  transform: rotate(0deg);
+  transform: rotate(-90deg);
 }
 
 .group-name-text {
@@ -793,6 +793,15 @@ select {
   padding: var(--fb-space-1) var(--fb-space-3) 0;
   font-size: var(--fb-fs-xs);
   color: var(--fb-text-weak);
+}
+
+.group-status:last-child {
+  padding-bottom: var(--fb-space-3);
+}
+
+.group-status-idle {
+  width: 100%;
+  text-align: center;
 }
 
 .group-status-item.is-running {

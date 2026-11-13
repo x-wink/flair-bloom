@@ -9,7 +9,7 @@ interface StatusItem {
 interface Props {
   name: string;
   /**
-   * 教程聚焦的组，承载锚点 `group-latest` / `group-header`：有示例组时是示例组（互斥组教程
+   * 教程聚焦的组，承载锚点 `group-latest` / `group-header`：有示例组时是示例组（规则组教程
    * 讲的就是它），否则是最后一个组。
    */
   isLatest: boolean;
@@ -19,7 +19,6 @@ interface Props {
   dragActive: boolean;
   /** 筛选状态下不接受拖入：被隐藏的成员看不见，拖进去的位置不可预期。 */
   acceptDrop: boolean;
-  hasHold: boolean;
   /** 组内在跑 / 暂停的规则；同组可能有两条同键位规则，故带 id 作 key。 */
   running: StatusItem[];
   paused: StatusItem[];
@@ -43,7 +42,6 @@ export default function RuleGroup({
   draft,
   dragActive,
   acceptDrop,
-  hasHold,
   running,
   paused,
   hiddenCount,
@@ -104,11 +102,7 @@ export default function RuleGroup({
             <span className="group-name-text">{name}</span>
           </div>
         )}
-        {!editing && (
-          <span className="group-rule-text">
-            同一时间只跑一条{hasHold ? '，长按松手后恢复' : ''}
-          </span>
-        )}
+        {!editing && <span className="group-rule-text">常用于多段宏自动切换</span>}
         {!editing && (
           <button
             className="group-edit-btn"
@@ -127,7 +121,7 @@ export default function RuleGroup({
             e.stopPropagation();
             onDisband();
           }}
-          title="解散分组（规则保留）"
+          title="解散规则组（可选择同时删除组内规则）"
         >
           解散
         </button>

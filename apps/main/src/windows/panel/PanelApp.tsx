@@ -31,14 +31,7 @@ import Button from './components/Button';
 import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
 import { useConfirm, useConfirmOpen } from './components/ConfirmDialog';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
-import {
-  ChevronIcon,
-  CloseIcon,
-  EditIcon,
-  MenuIcon,
-  MinimizeIcon,
-  UpdateIcon,
-} from './components/icons';
+import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon, UpdateIcon } from './components/icons';
 import Kbd from './components/Kbd';
 
 import {
@@ -74,6 +67,13 @@ import { useKeyRelay } from './useKeyRelay';
 import { useRuleStates } from './useRuleStates';
 import { createProfilePersistence, type ProfileWriteTicket } from './profilePersistence';
 import { INPUT_MODE_HINTS, INPUT_MODE_ORDER } from './inputModes';
+import {
+  createRuleGroup,
+  disbandRuleGroup,
+  ruleGroupNames,
+  shouldClearRuleGroupByDefault,
+} from './ruleGroups';
+import { DEFAULT_INTERVAL_MS, newRule } from './ruleDefaults';
 import { createToggleFeedbackHandler, type ToggleFeedback } from './toggleFeedback';
 import { useWindowScale } from './useWindowScale';
 import { PANEL_LAYOUT_KEY as LAYOUT_KEY, type PanelLayout } from './windowScale';
@@ -232,7 +232,6 @@ const DEFAULT_PROFILE_NAME = 'defaults';
 // 此值；多条规则同时连发时后端按活跃规则数等分总速率（见 burst-engine process_due），避免叠加
 // 超发导致停止「收不住」。与后端 MIN_EFFECTIVE_INTERVAL_MS 对齐。
 const MIN_INTERVAL_MS = 10;
-const DEFAULT_INTERVAL_MS = 10;
 const MAX_INTERVAL_MS = 10000;
 
 type BurstMode = 'hold' | 'toggle';
@@ -342,22 +341,6 @@ interface ForkResult {
   path: string;
 }
 
-function newRule(mode: BurstMode = 'hold'): BurstRule {
-  const isHold = mode === 'hold';
-  const triggerVk = isHold ? 0x51 : 0x46; // Hold: Q, Toggle: F
-  const targetVk = isHold ? 0x51 : 0x51; // 默认连发 Q；切换模式用 F 启停。
-  return {
-    id: crypto.randomUUID(),
-    enabled: !isHold,
-    trigger_key: keyboardKey(triggerVk),
-    steps: [{ key: keyboardKey(targetVk), interval_ms: DEFAULT_INTERVAL_MS }],
-    mode,
-    stop_key: null,
-
-    group: null,
-  };
-}
-
 function defaultRules(): BurstRule[] {
   return [newRule('hold'), newRule('toggle')];
 }
@@ -365,14 +348,10 @@ function defaultRules(): BurstRule[] {
 /** 横版单键规则：触发键 == 连发键（== 停止键，toggle 时）。 */
 function newSingleKeyRule(key: KeyId, mode: BurstMode, interval: number): BurstRule {
   return {
-    id: crypto.randomUUID(),
+    ...newRule(mode, key),
     enabled: true,
-    trigger_key: key,
     steps: [{ key: key, interval_ms: interval }],
-    mode,
     stop_key: mode === 'toggle' ? key : null,
-
-    group: null,
   };
 }
 
@@ -544,7 +523,6 @@ export default function PanelApp() {
     | { kind: 'ungrouped' }
     | undefined
   >(undefined);
-  const [pendingGroupName, setPendingGroupName] = useState<string | null>(null);
   const [editingGroupName, setEditingGroupName] = useState<{
     current: string;
     draft: string;
@@ -1998,7 +1976,7 @@ export default function PanelApp() {
   }
 
   /**
-   * 会改变分组成员或成员模式的写入都走这里（拖拽、移入分组、换模式、重命名合组）：某组从
+   * 会改变分组成员或成员模式的写入都走这里（拖拽、移入组、换模式、重命名合组）：某组从
    * 非混排变成长按与切换混排时提示插队语义（D10），直到勾选「不再提示」。按组的状态变化判定
    * 而不只提示一次：用户每次造出混排组都是在依赖插队语义，没关提示就该再看到。
    * 双向都提示——长按拖进切换组、切换拖进长按组，结果一样，用户同样需要知道长按会插队。
@@ -2064,32 +2042,41 @@ export default function PanelApp() {
   }
 
   function handleHCreateGroupWith(ruleId: string) {
-    const existingGroups = new Set(rules.map((r) => r.group).filter(Boolean));
-    let n = 1;
-    while (existingGroups.has(`互斥组${n}`)) n++;
-    updateRule(ruleId, { group: `互斥组${n}` });
+    handleNewGroup(ruleId);
   }
 
-  function handleNewGroup() {
-    const existingGroups = new Set(rules.map((r) => r.group).filter(Boolean));
-    let n = 1;
-    while (existingGroups.has(`互斥组${n}`)) n++;
-    const name = `互斥组${n}`;
-    // 待命空组靠拖入成形，筛选下不接受拖入，故回到全部。
+  function handleNewGroup(moveRuleId?: string) {
+    const next = createRuleGroup(rulesRef.current, moveRuleId);
+    pushGroupMove(() => next.rules);
     setFilter('all');
-    setPendingGroupName(name);
-    setEditingGroupName({ current: name, draft: name });
+    setCollapsedGroups((previous) => {
+      const expanded = new Set(previous);
+      expanded.delete(next.name);
+      return expanded;
+    });
+    setEditingGroupName({ current: next.name, draft: next.name });
   }
 
   async function disbandGroup(groupName: string) {
+    let deleteMembers = shouldClearRuleGroupByDefault(rulesRef.current, groupName);
     const ok = await confirm({
-      title: '解散分组',
-      description: `将「${groupName}」解散，组内规则保留但不再互斥。`,
+      title: '解散规则组',
+      description: deleteMembers
+        ? `「${groupName}」内的规则均已停用，默认清空并解散；取消勾选可保留规则。`
+        : `将「${groupName}」解散。默认保留组内规则，勾选下方选项时同时删除。`,
+      checkbox: {
+        label: '同时删除组内规则',
+        defaultChecked: deleteMembers,
+        checkedConfirmText: '清空并解散',
+        onChange: (checked) => {
+          deleteMembers = checked;
+        },
+      },
       confirmText: '解散',
       tone: 'danger',
     });
     if (!ok) return;
-    pushRules((prev) => prev.map((r) => (r.group === groupName ? { ...r, group: null } : r)));
+    pushRules((prev) => disbandRuleGroup(prev, groupName, deleteMembers));
   }
 
   function toggleGroupCollapse(groupName: string) {
@@ -2104,7 +2091,6 @@ export default function PanelApp() {
   function commitRenameGroup(oldName: string, newName: string) {
     const trimmed = newName.trim();
     const name = trimmed || oldName;
-    if (pendingGroupName === oldName) setPendingGroupName(name);
     // 改成已有组的名字等于合组，可能造出混排组，同样要走 D10 判定。
     if (trimmed)
       pushGroupMove((prev) => prev.map((r) => (r.group === oldName ? { ...r, group: name } : r)));
@@ -2141,14 +2127,6 @@ export default function PanelApp() {
 
   function handleDropToUngrouped(ruleId: string) {
     pushRules((prev) => prev.map((r) => (r.id === ruleId ? { ...r, group: null } : r)));
-  }
-
-  function handleDropToPending(ruleId: string) {
-    const name = editingGroupName?.draft.trim() || pendingGroupName;
-    if (!name) return;
-    setPendingGroupName(null);
-    setEditingGroupName(null);
-    pushGroupMove((prev) => prev.map((r) => (r.id === ruleId ? { ...r, group: name } : r)));
   }
 
   /** 取出拖拽源规则并复位拖拽状态。 */
@@ -2488,7 +2466,7 @@ export default function PanelApp() {
   );
 
   /**
-   * 互斥组教程的示例组：两条切换 + 一条长按，全部停用。键位从候选里挑没被占用的——撞上用户
+   * 规则组教程的示例组：两条切换 + 一条长按，全部停用。键位从候选里挑没被占用的——撞上用户
    * 自己的规则会同时触发、冲突提醒变红，教程就讲不清了。走 pushRules 不走 pushGroupMove：
    * 教程本身就在讲插队，不再弹 D10 提示。
    */
@@ -2506,13 +2484,11 @@ export default function PanelApp() {
       const keys = pickSampleKeys(kept);
       if (!keys) return prev;
       const sample = (id: string, mode: BurstMode, trigger: number, target: number): BurstRule => ({
+        ...newRule(mode),
         id,
         enabled: false,
         trigger_key: keyboardKey(trigger),
         steps: [{ key: keyboardKey(target), interval_ms: 50 }],
-        mode,
-        stop_key: null,
-
         group: SAMPLE_GROUP,
       });
       return [
@@ -2903,15 +2879,11 @@ export default function PanelApp() {
             const visible = rules.filter(matches);
             const latestId = lastRule(tourSnapshot)?.id;
             // 组容器按第一个成员出现的位置整体渲染，与拖拽排序（数组顺序）同一口径。
-            const groupNames = [
-              ...new Set(rules.filter((r) => r.group).map((r) => r.group as string)),
-            ];
-            const latestGroup = groupNames.includes(SAMPLE_GROUP)
-              ? SAMPLE_GROUP
-              : groupNames[groupNames.length - 1];
+            const groupNames = ruleGroupNames(rules);
+            const latestGroup =
+              sampleRules({ rules })?.a.group ?? groupNames[groupNames.length - 1];
             const draggingRule = draggingId ? rules.find((r) => r.id === draggingId) : undefined;
             const canGroupDrop = filter === 'all';
-            const groupList = groupNames.filter((g) => g !== pendingGroupName);
 
             const renderCard = (rule: BurstRule) => (
               <RuleCard
@@ -2932,7 +2904,7 @@ export default function PanelApp() {
                 policies={keyPolicies}
                 intervalMin={MIN_INTERVAL_MS}
                 intervalMax={MAX_INTERVAL_MS}
-                groups={groupList}
+                groups={groupNames}
                 drag={cardDragHandlers(rule)}
                 onPatch={(patch) => updateRule(rule.id, patch)}
                 onSetMode={(mode) => setRuleMode(rule, mode)}
@@ -2958,7 +2930,6 @@ export default function PanelApp() {
                   draft={editingGroupName?.current === name ? editingGroupName.draft : undefined}
                   dragActive={dragOverInfo?.kind === 'group' && dragOverInfo.name === name}
                   acceptDrop={canGroupDrop}
-                  hasHold={members.some((r) => r.mode === 'hold')}
                   running={members
                     .filter((r) => activeRuleIds.has(r.id) && !pausedRuleIds.has(r.id))
                     .map((r) => ({ id: r.id, label: ruleLabel(r) }))}
@@ -3002,14 +2973,14 @@ export default function PanelApp() {
             return (
               <div className="rule-group" key="list">
                 <div className="rules-list">
-                  {rules.length === 0 && !pendingGroupName && <p className="empty">暂无连发规则</p>}
+                  {rules.length === 0 && <p className="empty">暂无连发规则</p>}
                   {rules.length > 0 && visible.length === 0 && groupNames.length === 0 && (
                     <p className="empty">没有{filter === 'hold' ? '长按' : '切换'}连发规则</p>
                   )}
 
                   {items}
 
-                  {/* 拖动有分组规则时显示"移出分组"区域 */}
+                  {/* 拖动有分组规则时显示"移出组"区域 */}
                   {draggingId && draggingRule?.group && (
                     <div
                       className={`ungrouped-escape-zone${dragOverInfo?.kind === 'ungrouped' ? ' drag-active' : ''}`}
@@ -3023,104 +2994,9 @@ export default function PanelApp() {
                         if (srcId) handleDropToUngrouped(srcId);
                       }}
                     >
-                      移出分组
+                      移出组
                     </div>
                   )}
-
-                  {/* 待命空分组（新建后等待拖入或改名） */}
-                  {pendingGroupName &&
-                    (() => {
-                      const isPendingEditing = editingGroupName?.current === pendingGroupName;
-                      const isPendingDragOver =
-                        dragOverInfo?.kind === 'group' && dragOverInfo.name === pendingGroupName;
-                      const pendingDrop = (e: ReactDragEvent<HTMLDivElement>) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const srcId = takeDragSource(e);
-                        if (srcId) handleDropToPending(srcId);
-                      };
-                      const pendingDragOver = (e: ReactDragEvent<HTMLDivElement>) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setDragOverInfo({ kind: 'group', name: pendingGroupName });
-                      };
-                      return (
-                        <div
-                          key="__pending__"
-                          className={`rule-group-container${isPendingDragOver ? ' drag-active' : ''}`}
-                          onDragOver={pendingDragOver}
-                          onDrop={pendingDrop}
-                        >
-                          <div className="rule-group-header">
-                            {isPendingEditing ? (
-                              <input
-                                className="group-name-edit"
-                                autoFocus
-                                value={editingGroupName.draft}
-                                onChange={(e) =>
-                                  setEditingGroupName({
-                                    current: pendingGroupName,
-                                    draft: e.target.value,
-                                  })
-                                }
-                                onBlur={() => {
-                                  const name =
-                                    (editingGroupName?.draft ?? '').trim() || pendingGroupName;
-                                  setPendingGroupName(name);
-                                  setEditingGroupName(null);
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter') {
-                                    const name =
-                                      (editingGroupName?.draft ?? '').trim() || pendingGroupName;
-                                    setPendingGroupName(name);
-                                    setEditingGroupName(null);
-                                  } else if (e.key === 'Escape') {
-                                    setPendingGroupName(null);
-                                    setEditingGroupName(null);
-                                  }
-                                }}
-                                onDragOver={(e) => e.preventDefault()}
-                                onDrop={(e) => e.preventDefault()}
-                              />
-                            ) : (
-                              <span className="group-name-text">{pendingGroupName}</span>
-                            )}
-                            {!isPendingEditing && (
-                              <button
-                                className="group-edit-btn"
-                                onClick={() =>
-                                  setEditingGroupName({
-                                    current: pendingGroupName,
-                                    draft: pendingGroupName,
-                                  })
-                                }
-                                title="重命名"
-                              >
-                                <EditIcon size={12} />
-                              </button>
-                            )}
-                            <button
-                              className="disband-btn"
-                              onClick={() => {
-                                setPendingGroupName(null);
-                                setEditingGroupName(null);
-                              }}
-                              title="取消"
-                            >
-                              取消
-                            </button>
-                          </div>
-                          <div className="group-body">
-                            <div
-                              className={`group-drop-zone${isPendingDragOver ? ' drag-active' : ''}`}
-                            >
-                              将规则拖入此分组
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
                 </div>
 
                 <div className="rules-bottom-actions" data-tour="add-buttons">
@@ -3147,9 +3023,9 @@ export default function PanelApp() {
                     variant="dashed"
                     tone="neutral"
                     data-tour="add-group"
-                    onClick={handleNewGroup}
+                    onClick={() => handleNewGroup()}
                   >
-                    + 新建分组
+                    + 新建规则组
                   </Button>
                 </div>
               </div>

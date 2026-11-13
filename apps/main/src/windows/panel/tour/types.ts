@@ -61,7 +61,7 @@ export interface TourHost {
   closeJx3: () => void;
   closeMenus: () => void;
   /**
-   * 建互斥组教程的示例组（全部停用）；已存在就什么也不做。键位从候选里挑没被占用的，
+   * 建规则组教程的示例组（全部停用）；已存在就什么也不做。键位从候选里挑没被占用的，
    * 全被占用时不建、由宿主提示，返回 false。
    */
   createSampleGroup: () => boolean;
