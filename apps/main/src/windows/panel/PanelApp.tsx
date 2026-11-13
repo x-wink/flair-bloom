@@ -3089,7 +3089,7 @@ export default function PanelApp() {
               data-tour="global"
               onClick={toggleGlobal}
             >
-              {globalEnabled ? '全局已启用' : '全局已禁用'}
+              {globalEnabled ? '结束运行' : '开始运行'}
             </Button>
           </div>
         </div>

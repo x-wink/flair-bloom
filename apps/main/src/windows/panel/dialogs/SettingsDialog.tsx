@@ -602,22 +602,6 @@ export default function SettingsDialog(props: Props) {
               </div>
             </SettingsSection>
 
-            <SettingsSection title="使用统计" dataTour="settings-general-insights">
-              <div className="settings-row">
-                <div className="settings-row-main">
-                  <span className="settings-row-title">帮助改进气质花</span>
-                  <span className="settings-row-desc">
-                    记录版本、启动与正常退出、累计运行时长及横竖面板布局偏好，用于改进产品和生成公开累计统计。统计随产品运行，不提供独立关闭入口。不采集按键、宏、配置名、输入输出内容或崩溃堆栈。
-                  </span>
-                </div>
-              </div>
-              <p className="settings-row-desc">
-                使用系统机器标识区分环境，读取失败时使用随机标识；稳定标识可以关联使用记录，并非匿名信息，当前不关联登录账号。原始事件保留
-                30 天、环境日明细保留 90
-                天；累计汇总和设备去重摘要长期保留，公开接口只返回汇总数字。统计异常不影响按键功能。
-              </p>
-            </SettingsSection>
-
             <SettingsSection title="输入模式">
               <CardList>
                 {INPUT_MODE_ORDER.filter(

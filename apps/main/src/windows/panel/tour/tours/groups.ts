@@ -100,7 +100,7 @@ export const groups: TourDef = {
       body: (host: TourHost) => {
         const [a] = sampleKeys(host.snapshot);
         return p(
-          '要做三件事：把示例组三条规则的开关都勾上；点亮右下角的总开关；',
+          '要做三件事：把示例组三条规则的开关都勾上；点右下角「开始运行」；',
           `再按一下 ${a}——组头会显示正在运行的按键。保持这个窗口在前面，连发的键会打进前台窗口。`,
         );
       },

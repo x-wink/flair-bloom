@@ -37,9 +37,9 @@ fn active_profile_path(app: &AppHandle) -> Option<String> {
 
 pub fn build_menu(app: &AppHandle, enabled: bool) -> tauri::Result<Menu<Wry>> {
     let toggle_label = if enabled {
-        "✓ 连发已启用"
+        "结束运行"
     } else {
-        "连发已禁用"
+        "开始运行"
     };
     let toggle = MenuItem::with_id(app, "toggle", toggle_label, true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;

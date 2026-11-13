@@ -62,14 +62,14 @@ export const gettingStarted: TourDef = {
     {
       id: 'global',
       target: 'global',
-      title: '打开总开关',
+      title: '开始运行',
       body: p(
-        '点右下角「全局已禁用」，让它变成「全局已启用」，面板出现明显描边和呼吸提示。',
+        '点右下角「开始运行」，按钮变为「结束运行」，面板出现明显描边和呼吸提示；再点即可结束运行。',
         '出厂配置也可以按 F1 切换全局开关，已有配置以按钮上显示的快捷键为准。',
         '按住刚才录的那个键就开始自动连发，运行中的规则卡会脉冲高亮，松手停。',
       ),
       done: (now) => now.globalEnabled,
-      actionHint: '等你点亮它…',
+      actionHint: '等你点「开始运行」…',
     },
     {
       id: 'finish',

@@ -76,17 +76,6 @@ export const settings: TourDef = {
       prepare: (host) => host.openSettings('general'),
     },
     {
-      id: 'insights',
-      target: 'settings-general-insights',
-      title: '了解使用统计',
-      body: p(
-        '随软件运行记录版本、环境标识、启动、正常退出、运行时长及横竖布局偏好，不提供独立关闭入口。',
-        '不采集按键、宏、配置名称、输入输出正文或崩溃堆栈。环境标识可以关联使用记录，当前不关联登录账号。',
-        '原始事件保留 30 天、环境日明细 90 天；累计汇总和设备去重摘要长期保留。公开页面只显示汇总数字，统计故障不影响按键功能。',
-      ),
-      prepare: (host) => host.openSettings('general'),
-    },
-    {
       id: 'finish',
       title: '热键跟着配置走',
       body: p(

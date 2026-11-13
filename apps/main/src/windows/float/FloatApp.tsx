@@ -352,8 +352,8 @@ export default function FloatApp() {
       <button
         type="button"
         className={`fb-float-global ${globalEnabled ? 'is-on' : 'is-off'}`}
-        title={globalEnabled ? '暂停全局连发' : '启动全局连发'}
-        aria-label={globalEnabled ? '暂停全局连发' : '启动全局连发'}
+        title={globalEnabled ? '结束运行' : '开始运行'}
+        aria-label={globalEnabled ? '结束运行' : '开始运行'}
         disabled={togglingGlobal || !!outputError}
         onClick={() => void toggleGlobal()}
       >

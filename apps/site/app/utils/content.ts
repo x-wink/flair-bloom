@@ -91,7 +91,7 @@ export const cautions: string[] = [
 export const faqs: TitledText[] = [
   {
     title: '剑三里没反应？',
-    text: '先确认右下角是「全局已启用」、规则已勾选；剑三必须用「游戏模式」，按提示授权后重启。',
+    text: '先确认右下角显示「结束运行」（表示已开始运行）、规则已勾选；剑三必须用「游戏模式」，按提示授权后重启。',
   },
   {
     title: '连太快、松手了还在按？',
