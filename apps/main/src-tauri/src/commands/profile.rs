@@ -245,7 +245,7 @@ pub fn take_profile_notice(state: State<ProfileNotice>) -> Option<qzh_profile::S
 }
 
 /// 激活一份已在 profiles 目录中的配置文件：读取（解密 / 迁移 / 钳位 / 校验）→ 净化 →
-/// 装载引擎 → 更新 `activeProfilePath`。托盘请求交给面板保存后再调用 [`load_profile`]。
+/// 装载引擎 → 更新活跃路径与窗口绑定。启动阶段也走此入口，在全局监听前恢复输出闸门。
 pub(crate) fn activate_profile_file(
     app: &AppHandle,
     engine: &crate::engine::BurstEngine,

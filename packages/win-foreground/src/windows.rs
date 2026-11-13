@@ -384,8 +384,9 @@ mod tests {
         // SAFETY: 系统共享图标不由调用者销毁，绘制资源在 render_icon 内成对释放。
         let icon = unsafe { render_icon(LoadIconW(null_mut(), IDI_APPLICATION)) }.unwrap();
         assert_eq!(icon.rgba.len(), 32 * 32 * 4);
-        assert!(icon.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
-        assert!(icon.rgba.chunks_exact(4).any(|pixel| pixel[3] < 255));
+        let (pixels, _) = icon.rgba.as_chunks::<4>();
+        assert!(pixels.iter().any(|pixel| pixel[3] > 0));
+        assert!(pixels.iter().any(|pixel| pixel[3] < 255));
     }
 
     #[test]

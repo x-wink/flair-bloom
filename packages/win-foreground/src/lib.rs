@@ -54,8 +54,10 @@ impl Watcher {
 #[cfg(any(windows, test))]
 fn icon_rgba(black: &[u8], white: &[u8]) -> Vec<u8> {
     black
-        .chunks_exact(4)
-        .zip(white.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(white.as_chunks::<4>().0)
         .flat_map(|(b, w)| {
             let alpha = 255
                 - (0..3)

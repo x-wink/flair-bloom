@@ -46,20 +46,8 @@ pub fn load_or_init_profile(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
     });
 
     match active_path {
-        Some(path) => match load_profile_from_path(&path, &profiles_dir) {
-            Ok(mut profile) => {
-                // 旧版本写下的、或他人分享的配置可能含当前版本不支持的按键。此处先净化，
-                // 结果存进 ProfileNotice，等前端挂载后取走弹窗提醒（此刻窗口还没建，
-                // 直接发事件会丢）。
-                crate::commands::profile::sanitize_and_record(app, &mut profile);
-                engine.set_hotkeys(profile.hotkeys);
-                engine.set_rules(profile.rules);
-                if let Some(file_name) = std::path::Path::new(&path).file_name() {
-                    crate::commands::profile::set_active_path(
-                        app,
-                        &profiles_dir.join(file_name).to_string_lossy(),
-                    );
-                }
+        Some(path) => match activate_profile_from_path(app, engine, &path, &profiles_dir) {
+            Ok(_) => {
                 info!("已加载配置: {}", path);
             }
             Err(e) => {
@@ -77,7 +65,9 @@ pub fn load_or_init_profile(app: &tauri::AppHandle, engine: &Arc<BurstEngine>) {
     }
 }
 
-fn load_profile_from_path(
+fn activate_profile_from_path(
+    app: &tauri::AppHandle,
+    engine: &BurstEngine,
     path: &str,
     profiles_dir: &std::path::Path,
 ) -> Result<qzh_profile::Profile, String> {
@@ -86,5 +76,6 @@ fn load_profile_from_path(
         .ok_or("无效文件路径")?
         .to_string_lossy();
     let safe_path = profiles_dir.join(file_name.as_ref());
-    qzh_profile::load_from_path(&safe_path).map_err(|e| e.to_string())
+    // 全局监听早于前端就绪，必须在启动期通过统一入口恢复输出闸门与绑定。
+    crate::commands::profile::activate_profile_file(app, engine, &safe_path)
 }
