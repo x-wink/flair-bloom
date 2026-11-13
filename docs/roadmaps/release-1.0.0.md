@@ -1,6 +1,6 @@
 # 气质花 1.0.0 与官网发布
 
-Status: active（本地检查通过，等待 main 门禁）
+Status: active（官网已发布，应用构建修复与公告归并完成，待门禁及 tag 处置）
 
 ## 范围与授权
 
@@ -19,13 +19,19 @@ GitHub Actions 的 CI、Coverage、Site 和 Release 均为 active，最新 Cover
 - [x] 独立审查两个基线以来的完整差异，修复后补审。
 - [x] 同步 1.0.0 版本、锁文件、最终公告与用户文档。
 - [x] 本地前端／官网类型与构建、纯函数测试、Rust 格式／Clippy／测试、资源及文档检查通过。
-- [ ] 仅推 main，记录该提交 CI、Coverage、Site 的成功结果。
+- [x] 首个候选仅推 main，CI、Coverage、Site 全部成功。
 - [ ] 推 `v1.0.0` 与 `site-v1.0.0`，两条发布链成功。
 - [ ] 草稿安装包、签名、更新清单与版本匹配，官网明暗图片和公开下载通过。
 - [ ] 公开 1.0.0 并验证 GitHub Latest、第一方与旧版更新清单。
 - [ ] 记录发布结果与边界并归档。
 
 ## 验证边界与交接
+
+首个候选源码为 `76c9834bcc7ade29d1a4bf45a3d923863b31d940`，main 门禁 [CI 43461800986](https://github.com/x-wink/flair-bloom/actions/runs/43461800986)、[Coverage 43461800777](https://github.com/x-wink/flair-bloom/actions/runs/43461800777)、[Site 43461800744](https://github.com/x-wink/flair-bloom/actions/runs/43461800744) 全绿后推两个 tag。
+
+官网 [site-v1.0.0 发布链 43462245921](https://github.com/x-wink/flair-bloom/actions/runs/43462245921) 成功，真实线上页面的 14 种明暗／视口组合、脉冲、减少动态效果与上下留白验收通过。应用 [首轮发布链 43462246555](https://github.com/x-wink/flair-bloom/actions/runs/43462246555) 在打包前因 DLL 资源缺失失败，尚未公开 Release。原因是 CI 新 Cargo 的目录布局与旧固定层级查找不兼容；追加修复识别两种布局，旧布局、新布局、缺失与复制保护共 9 项回归通过，独立补审无阻断项。
+
+用户追加要求按上一稳定版本归并公告，1.0.0 公告已收敛为 3 项新增、8 项改进、1 项升级说明，删除新版内部二次修复与样式迭代流水，独立补审通过。安装包内公告必须同步，因此待发布源码包含上述追加修改；已推 tag 保持原位，应用下一步需用户明确选择失败 tag 的处置。官网无需重新部署，相较已上线版本的官网构建输入没有变化。
 
 独立审查发现并关闭一项 P2：启动加载已有配置未恢复窗口绑定，现统一经 `activate_profile_file` 激活，绑定状态及引擎均先于监听就绪。补审确认路径约束与失败回退完整，无遗留发布阻断项。Rust 新工具链的定长像素分块检查已修复，官网工作流补齐新共享 Logo 样式的路径过滤。
 
