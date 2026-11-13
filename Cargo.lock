@@ -1282,6 +1282,7 @@ dependencies = [
  "uuid",
  "webview2-com",
  "win-driver",
+ "win-foreground",
  "win-input",
  "win-sysinfo",
  "windows",
@@ -5497,6 +5498,14 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "win-foreground"
+version = "0.10.0"
+dependencies = [
+ "serde",
  "windows-sys 0.59.0",
 ]
 

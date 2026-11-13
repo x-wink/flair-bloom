@@ -30,7 +30,7 @@ export default function SequenceEditor({ steps, policy, min, max, onReject, onCh
 
   return (
     <section
-      className="sequence-editor"
+      className={`sequence-editor${steps.length === 1 && !error ? ' is-single-step' : ''}`}
       aria-label="连发序列"
       data-tour="sequence-editor"
       onDragStart={(event) => event.stopPropagation()}

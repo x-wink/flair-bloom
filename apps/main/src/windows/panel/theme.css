@@ -72,7 +72,7 @@
 
   /* ── 边框 / 分隔 ──────────────────────────────────────── */
   --fb-border: #d6d6d6;
-  --fb-border-soft: #e8e8e8;
+  --fb-border-soft: var(--fb-border);
   --fb-divider: rgba(0, 0, 0, 0.06);
 
   /* ── 表面（背景层）──────────────────────────────────── */
@@ -81,6 +81,8 @@
   --fb-surface-muted: #f4f4f6;
   --fb-surface-translucent: rgba(255, 255, 255, 0.76);
   --fb-surface-glass: rgba(255, 255, 255, 0.5);
+  /* 与表面色混合，避免在实色按钮内叠成深色。 */
+  --fb-badge-bg: color-mix(in srgb, var(--fb-color-primary) 12%, var(--fb-surface));
 
   /* 标题栏控件 hover 底 / 自定义滚动条（亮态深调，暗色由 dark 块覆写为浅调） */
   --fb-app-control-hover: rgba(0, 0, 0, 0.08);
@@ -132,13 +134,15 @@
   --fb-space-12: 24px;
 
   /* ── 圆角 ────────────────────────────────────────────── */
-  --fb-radius-xs: 4px;
-  --fb-radius-sm: 5px;
-  --fb-radius-md: 6px;
-  --fb-radius-lg: 8px;
-  --fb-radius-xl: 10px;
-  --fb-radius-2xl: 12px;
-  --fb-radius-3xl: 14px;
+  --fb-radius-panel: 8px;
+  --fb-radius-kbd: 5px;
+  --fb-radius-xs: var(--fb-radius-panel);
+  --fb-radius-sm: var(--fb-radius-panel);
+  --fb-radius-md: var(--fb-radius-panel);
+  --fb-radius-lg: var(--fb-radius-panel);
+  --fb-radius-xl: var(--fb-radius-panel);
+  --fb-radius-2xl: var(--fb-radius-panel);
+  --fb-radius-3xl: var(--fb-radius-panel);
   --fb-radius-pill: 999px;
   --fb-radius-circle: 50%;
 
@@ -200,7 +204,6 @@
   --fb-on-primary: #fff;
 
   --fb-border: #3a3b42;
-  --fb-border-soft: #303137;
   --fb-divider: rgba(255, 255, 255, 0.08);
 
   --fb-surface: #202126;

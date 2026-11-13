@@ -1,5 +1,5 @@
 import { isSimpleRule, type OutputStep } from './outputSequence.ts';
-import { type CSSProperties, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useRef, useState } from 'react';
 import WireOverlay from './WireOverlay';
 import { buildWires, wiredKeys } from './hkbWires';
 import { keyToken as token } from './keyToken';
@@ -57,6 +57,7 @@ interface Props {
   intervalMin: number;
   intervalMax: number;
   onIntervalChange: (ms: number) => void;
+  windowBinding: ReactNode;
   /** 左键点键：在 无 → 切换 → 长按 → 无 之间轮换。 */
   onCycleKey: (key: KeyId) => void;
   onEditDetails: () => void;
@@ -88,6 +89,7 @@ export default function HorizontalLayout({
   intervalMin,
   intervalMax,
   onIntervalChange,
+  windowBinding,
   onCycleKey,
   onEditDetails,
   onSetEnabled,
@@ -424,14 +426,17 @@ export default function HorizontalLayout({
             ))}
           </div>
 
-          <div className="hbar-interval" data-tour="hbar-interval">
-            <span>统一间隔</span>
-            <IntervalInput
-              value={interval}
-              min={intervalMin}
-              max={intervalMax}
-              onChange={onIntervalChange}
-            />
+          <div className="hbar-controls">
+            <div className="hbar-interval" data-tour="hbar-interval">
+              <span>统一间隔</span>
+              <IntervalInput
+                value={interval}
+                min={intervalMin}
+                max={intervalMax}
+                onChange={onIntervalChange}
+              />
+            </div>
+            {windowBinding}
           </div>
         </div>
 

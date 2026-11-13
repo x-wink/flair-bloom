@@ -181,6 +181,7 @@ fn profile_summary_counts_rules_and_hotkeys() {
             updated_at: 2,
             app_version: "test".to_string(),
             signature: String::new(),
+            window_binding: None,
         },
         rules: vec![
             BurstRule {
@@ -292,6 +293,7 @@ fn meta(created_at: u64, signature: &str) -> ProfileMeta {
         updated_at: 0,
         app_version: String::new(),
         signature: signature.into(),
+        window_binding: None,
     }
 }
 
@@ -301,6 +303,22 @@ fn carry_over_keeps_existing_signature_when_frontend_omits_it() {
     carry_over_meta(&mut incoming, Some(meta(100, "小花")), 500);
     assert_eq!(incoming.created_at, 100);
     assert_eq!(incoming.signature, "小花");
+}
+
+#[test]
+fn auto_save_preserves_disk_binding_and_cannot_override_or_clear_it() {
+    let binding = qzh_profile::window_binding::WindowBinding {
+        exe: "game.exe".into(),
+        class: None,
+        title_contains: None,
+    };
+    let mut disk = meta(100, "");
+    disk.window_binding = Some(binding.clone());
+    let mut incoming = meta(0, "");
+    carry_over_meta(&mut incoming, Some(disk), 500);
+    assert_eq!(incoming.window_binding, Some(binding));
+    carry_over_meta(&mut incoming, Some(meta(100, "")), 600);
+    assert!(incoming.window_binding.is_none());
 }
 
 #[test]

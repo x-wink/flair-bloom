@@ -10,6 +10,7 @@ pub mod key_policy;
 pub mod profile;
 pub mod schema_migrate;
 pub mod storage;
+pub mod window_binding;
 
 pub use key_id::{KeyId, MouseButton};
 pub use key_policy::{
@@ -75,6 +76,7 @@ mod tests {
                 updated_at: 0,
                 app_version: "0".into(),
                 signature: String::new(),
+                window_binding: None,
             },
             rules: vec![],
             hotkeys: Hotkeys::default(),

@@ -15,6 +15,7 @@ use tracing::{info, warn};
 use super::engine::EngineState;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+static PROFILE_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 /// 默认配置名（同时是文件名 stem）。受保护：不能改名也不能删除，
 /// 用户对它的修改会触发自动 fork（见 [`fork_active_profile`]）。
@@ -142,11 +143,13 @@ fn carry_over_meta(meta: &mut ProfileMeta, old: Option<ProfileMeta>, now: u64) {
     if meta.created_at == 0 {
         meta.created_at = old.as_ref().map_or(now, |m| m.created_at);
     }
+    meta.window_binding = old.as_ref().and_then(|m| m.window_binding.clone());
     meta.signature = old.map(|m| m.signature).unwrap_or_default();
 }
 
 #[tauri::command]
 pub fn save_profile(app: AppHandle, name: String, mut profile: Profile) -> Result<String, String> {
+    let _write = PROFILE_WRITE.lock().unwrap_or_else(|e| e.into_inner());
     profile.validate().map_err(|e| e.to_string())?;
 
     let now = now_secs();
@@ -175,6 +178,7 @@ pub fn set_profile_signature(
     name: String,
     signature: String,
 ) -> Result<String, String> {
+    let _write = PROFILE_WRITE.lock().unwrap_or_else(|e| e.into_inner());
     if !license.grants(crypto::ENT_SIGNATURE) {
         return Err("没有自定义署名的权益".into());
     }
@@ -184,6 +188,30 @@ pub fn set_profile_signature(
     profile.meta.updated_at = now_secs();
     write_profile_file_to_path(&path, &profile)?;
     Ok(profile.meta.signature)
+}
+
+pub(crate) fn write_window_binding(
+    app: &AppHandle,
+    name: &str,
+    binding: Option<qzh_profile::window_binding::WindowBinding>,
+) -> Result<(), String> {
+    let _write = PROFILE_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    if name == DEFAULT_PROFILE_NAME {
+        return Err("请先另存默认配置".into());
+    }
+    let path = profile_path_for_name(&profiles_dir(app)?, name);
+    let store = app.store(crate::STORE_PATH).map_err(|e| e.to_string())?;
+    let active = store
+        .get(ACTIVE_PATH_KEY)
+        .and_then(|value| value.as_str().map(str::to_string));
+    if active.as_deref() != Some(path.to_string_lossy().as_ref()) {
+        return Err("当前配置已切换，请重新选择窗口".into());
+    }
+    let mut profile = read_profile_from_file(&path)?;
+    profile.meta.window_binding = binding;
+    profile.meta.updated_at = now_secs();
+    write_profile_file_to_path(&path, &profile)?;
+    Ok(())
 }
 
 /// 加载期净化的待提醒结果。启动加载先于窗口创建，事件会丢，故一律先存这里，
@@ -229,9 +257,15 @@ pub(crate) fn activate_profile_file(
     if sanitize_and_record(app, &mut profile) {
         let _ = app.emit("profile-sanitized", ());
     }
+    engine.set_foreground_open(false);
     engine.set_rules(profile.rules.clone());
     engine.set_hotkeys(profile.hotkeys.clone());
     set_active_path(app, &path.to_string_lossy());
+    if let Some(state) = app.try_state::<super::window_binding::WindowBindingState>() {
+        state.set_binding(app, profile.meta.window_binding.clone());
+    } else {
+        engine.set_foreground_open(true);
+    }
     Ok(profile)
 }
 
@@ -383,6 +417,7 @@ pub(crate) fn create_default_profile(
             updated_at: now,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
             signature: String::new(),
+            window_binding: None,
         },
         rules: factory_default_rules(),
         hotkeys: Hotkeys::for_new_profile(),
@@ -396,16 +431,8 @@ pub(crate) fn create_default_profile(
     std::fs::create_dir_all(&dir).map_err(|e| format!("无法创建配置目录: {e}"))?;
     let file_path = dir.join(format!("{DEFAULT_PROFILE_NAME}.qzh"));
 
-    let rules = profile.rules.clone();
-    let hotkeys = profile.hotkeys.clone();
-    let path = write_profile_file_to_path(&file_path, &profile)?;
-    engine.set_rules(rules);
-    engine.set_hotkeys(hotkeys);
-
-    if let Ok(store) = app.store(crate::STORE_PATH) {
-        store.set(ACTIVE_PATH_KEY, serde_json::json!(path));
-        let _ = store.save();
-    }
+    write_profile_file_to_path(&file_path, &profile)?;
+    let profile = activate_profile_file(app, engine, &file_path)?;
     crate::tray::refresh_menu(app);
 
     Ok(profile)

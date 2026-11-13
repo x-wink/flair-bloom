@@ -13,7 +13,7 @@ export const gettingStarted: TourDef = {
       body: p(
         '长按连发：按住那个键就一直连，松手就停。',
         '切换连发：按一下开始连，再按一下停。先从长按连发开始。',
-        '已有 .qzh 或其他助手配置可从「☰ → 导入配置」迁移，先扫描和预览，再由你确认。',
+        '已有 .qzh 或其他助手配置可从底栏「配置下拉 → 导入配置」迁移，先扫描和预览，再由你确认。',
       ),
       // 横版键鼠图没有筛选条，也没有规则卡，整组都讲不了
       prepare: async (host) => {
@@ -26,8 +26,11 @@ export const gettingStarted: TourDef = {
       id: 'add',
       target: 'add-hold',
       title: '添加第一条规则',
-      body: p('点这个按钮，下面会出现一张规则卡。'),
-      prepare: (host) => host.setFilter('all'),
+      body: p('从「我要新建」菜单选择「长按连发」，下面会出现一张规则卡。'),
+      prepare: (host) => {
+        host.setFilter('all');
+        host.openCreateMenu();
+      },
       done: (now, entered) => now.rules.length > entered.rules.length,
       actionHint: '等你点一下…',
     },

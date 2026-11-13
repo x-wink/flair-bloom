@@ -29,6 +29,16 @@ export function outputKeys(rule: Pick<SequenceRule, 'steps'>): KeyId[] {
   return [...new Map(rule.steps.map((step) => [keyToken(step.key), step.key])).values()];
 }
 
+export function ruleHotkeyDimming(rule: SequenceRule): { trigger: boolean; stop: boolean } {
+  const targets = new Set(rule.steps.map((step) => keyToken(step.key)));
+  const trigger = keyToken(rule.trigger_key);
+  const stop = keyToken(rule.stop_key ?? rule.trigger_key);
+  return {
+    trigger: targets.has(trigger),
+    stop: rule.mode === 'toggle' && (stop === trigger || targets.has(stop)),
+  };
+}
+
 export function validateSteps(steps: OutputStep[], min: number, max: number): string | undefined {
   if (steps.length === 0 || steps.length > MAX_OUTPUT_STEPS)
     return `队列需要 1～${MAX_OUTPUT_STEPS} 个步骤`;

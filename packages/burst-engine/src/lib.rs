@@ -7,6 +7,8 @@ pub use scheduler::RuleProgress;
 pub mod stress;
 
 #[cfg(test)]
+mod foreground_tests;
+#[cfg(test)]
 mod pipeline_tests;
 #[cfg(test)]
 mod preempt_tests;
@@ -165,6 +167,7 @@ struct RuntimeState {
     hold_stacks: HashMap<String, Vec<String>>,
     stop_generation: u64,
     pending_stops: usize,
+    foreground_open: bool,
 }
 
 impl RuntimeState {
@@ -238,6 +241,7 @@ impl BurstEngine {
                 hold_stacks: HashMap::new(),
                 stop_generation: 0,
                 pending_stops: 0,
+                foreground_open: true,
             })),
             physical_pressed: Arc::new(Mutex::new(HashSet::new())),
             simulated_keys,
@@ -326,6 +330,48 @@ impl BurstEngine {
         revive(self.rules.lock()).rules()
     }
 
+    /// 窗口范围只暂停输出，不修改总开关；保留切换规则的队列游标。
+    pub fn set_foreground_open(&self, open: bool) {
+        let mut runtime = revive(self.runtime.lock());
+        if runtime.foreground_open == open {
+            return;
+        }
+        runtime.foreground_open = open;
+        // 输入路由代际独立于调度代际，拒绝切窗前在途输入且不丢失已暂停的队列。
+        self.input_generation.fetch_add(1, Ordering::SeqCst);
+        let generation = runtime.stop_generation;
+        if !open {
+            self.scheduler.pause_all(generation);
+            let remove: Vec<_> = runtime
+                .active_rules
+                .iter()
+                .filter_map(|(id, active)| {
+                    (active.rule.mode == BurstMode::Hold || id.starts_with('\0'))
+                        .then_some(id.clone())
+                })
+                .collect();
+            for id in remove {
+                runtime.active_rules.remove(&id);
+                self.scheduler.stop_rule(id, generation);
+            }
+            runtime.hold_stacks.clear();
+            for (id, active) in &mut runtime.active_rules {
+                active.paused = false;
+                if !active.pending_start {
+                    self.scheduler.pause_rule(id.clone(), generation);
+                }
+            }
+        } else if self.global_enabled.load(Ordering::SeqCst) && runtime_can_start(&runtime) {
+            for (id, active) in &mut runtime.active_rules {
+                if std::mem::take(&mut active.pending_start) {
+                    self.scheduler.start_rule(active.rule.clone(), generation);
+                } else {
+                    self.scheduler.resume_rule(id.clone(), generation);
+                }
+            }
+        }
+    }
+
     /// 当前生效的全局热键。前端在写入被拒时用它回滚，避免界面与引擎分叉。
     pub fn get_hotkeys(&self) -> Hotkeys {
         revive(self.hotkeys.lock()).clone()
@@ -372,8 +418,9 @@ impl BurstEngine {
             self.stop_rule_internal(&failed.rule_id, true, None);
         }
         let mut states = RuleStates::default();
-        for (id, active) in &revive(self.runtime.lock()).active_rules {
-            if active.paused {
+        let runtime = revive(self.runtime.lock());
+        for (id, active) in &runtime.active_rules {
+            if active.paused || !runtime.foreground_open {
                 states.paused.push(id.clone());
             } else {
                 states.running.push(id.clone());
@@ -439,8 +486,32 @@ impl BurstEngine {
             };
         }
 
-        // 后端切换中或全局未启用：放行物理事件但不启动任何规则。切换中拦截规则启动，避免目标键
-        // down/up 跨新旧后端错配卡键；停止键与热键已在上方先行处理，不受此拦截影响。
+        // 等待目标窗口时仍允许停止已有切换规则，防止切回后恢复用户已经要求停止的输出。
+        if !revive(self.runtime.lock()).foreground_open {
+            let mut runtime = revive(self.runtime.lock());
+            let stopping: Vec<_> = runtime
+                .active_rules
+                .iter()
+                .filter_map(|(id, active)| {
+                    (active.rule.mode == BurstMode::Toggle
+                        && active.rule.stop_key.unwrap_or(active.rule.trigger_key) == key)
+                        .then_some((id.clone(), active.rule.steps[0].key))
+                })
+                .collect();
+            let handled = !stopping.is_empty();
+            for (id, target) in stopping {
+                runtime.active_rules.remove(&id);
+                self.scheduler.stop_rule(id, runtime.stop_generation);
+                if let Some(cb) = revive(self.on_toggle_changed.lock()).as_ref() {
+                    cb(target, false);
+                }
+            }
+            return KeyProcessResult {
+                accepted_physical: true,
+                handled,
+            };
+        }
+        // 换后端期间不启动规则，避免目标键的按下与释放跨不同通道。
         if self.switching_backend.load(Ordering::SeqCst)
             || !self.global_enabled.load(Ordering::SeqCst)
         {
@@ -746,7 +817,8 @@ impl BurstEngine {
 
     fn can_start_output(&self, runtime: &RuntimeState, generation: u64) -> bool {
         runtime_can_start(runtime)
-            && runtime.stop_generation == generation
+            && self.input_generation.load(Ordering::SeqCst) == generation
+            && runtime.foreground_open
             && self.global_enabled.load(Ordering::SeqCst)
             && !self.switching_backend.load(Ordering::SeqCst)
             && !self.recording.load(Ordering::SeqCst)
@@ -767,7 +839,9 @@ impl BurstEngine {
     ) -> bool {
         let mut resume = None;
         let mut runtime = revive(self.runtime.lock());
-        if generation.is_some_and(|generation| generation != runtime.stop_generation) {
+        if generation
+            .is_some_and(|generation| generation != self.input_generation.load(Ordering::SeqCst))
+        {
             return false;
         }
         if only_failed
@@ -849,7 +923,7 @@ impl BurstEngine {
             return Err("原有输出尚未确认停止，请稍后重试试播".into());
         }
         let mut runtime = revive(self.runtime.lock());
-        if !self.can_start_output(&runtime, runtime.stop_generation) {
+        if !self.can_start_output(&runtime, self.input_generation.load(Ordering::SeqCst)) {
             return Err("当前无法开始试播".into());
         }
         runtime.clear_activity();
@@ -931,8 +1005,7 @@ impl BurstEngine {
 
     fn advance_generation(&self, runtime: &mut RuntimeState) {
         runtime.stop_generation = runtime.stop_generation.saturating_add(1);
-        self.input_generation
-            .store(runtime.stop_generation, Ordering::SeqCst);
+        self.input_generation.fetch_add(1, Ordering::SeqCst);
     }
 
     #[cfg(test)]

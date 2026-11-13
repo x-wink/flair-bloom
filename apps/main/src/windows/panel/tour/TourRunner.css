@@ -161,7 +161,7 @@
 .tour-bubble__hint {
   margin-top: var(--fb-space-4);
   padding: var(--fb-space-2) var(--fb-space-4);
-  border-radius: var(--fb-radius-pill);
+  border-radius: var(--fb-radius-panel);
   background: var(--fb-color-primary-soft);
   color: var(--fb-color-primary-text);
   font-size: var(--fb-fs-sm);

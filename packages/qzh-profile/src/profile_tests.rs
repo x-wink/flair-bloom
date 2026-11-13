@@ -28,11 +28,31 @@ fn make_profile(rules: Vec<BurstRule>) -> Profile {
             updated_at: 0,
             app_version: "0".into(),
             signature: String::new(),
+            window_binding: None,
         },
         rules,
         hotkeys: Hotkeys::default(),
         advanced: Advanced::default(),
     }
+}
+
+#[test]
+fn window_binding_round_trips_and_old_profile_remains_unrestricted() {
+    let old = make_profile(vec![]);
+    let json = serde_json::to_value(&old).unwrap();
+    assert!(json["meta"].get("window_binding").is_none());
+    let loaded: Profile = serde_json::from_value(json).unwrap();
+    assert!(loaded.meta.window_binding.is_none());
+    let binding = crate::window_binding::WindowBinding {
+        exe: "game.exe".into(),
+        class: Some("Game".into()),
+        title_contains: None,
+    };
+    let mut shared = old;
+    shared.meta.window_binding = Some(binding.clone());
+    let loaded: Profile = serde_json::from_value(serde_json::to_value(shared).unwrap()).unwrap();
+    assert_eq!(loaded.meta.window_binding, Some(binding));
+    assert_eq!(loaded.schema_version, CURRENT_SCHEMA_VERSION);
 }
 
 fn rule(id: &str, mode: BurstMode, trigger: KeyId, target: KeyId, interval: u32) -> BurstRule {

@@ -92,6 +92,7 @@ interface Props {
   isDefaultProfile: boolean;
   /** 持有 `flair.signature` 权益；没有时界面完全不露署名入口。 */
   signatureEnabled: boolean;
+  windowBindingControl?: import('react').ReactNode;
   signature: string;
   onSignatureChange: (signature: string) => void;
   onClose: () => void;
@@ -932,6 +933,16 @@ export default function SettingsDialog(props: Props) {
               )}
             </SettingsSection>
 
+            {props.windowBindingControl && (
+              <SettingsSection
+                title={`当前配置 · ${props.profileName === 'defaults' ? '默认配置' : props.profileName} · 窗口绑定`}
+              >
+                <div data-tour="settings-window-binding">{props.windowBindingControl}</div>
+                <p className="settings-note">
+                  仅在目标程序或助手窗口处于前台时输出。切走暂停，切回继续；更换绑定会停止当前连发，长按规则需要重新按住。
+                </p>
+              </SettingsSection>
+            )}
             {props.signatureEnabled && (
               <SettingsSection title="水印署名">
                 {/* 切配置或保存后署名变了就重挂载，丢掉旧草稿 */}

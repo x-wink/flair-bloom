@@ -47,14 +47,16 @@ test('规则菜单新建组时只移动选中规则，并保留两条默认切�
   assert.deepEqual(original, before);
 });
 
-test('独立添加规则保留原有长按和切换默认值，并可指定同键规则', () => {
+test('独立添加长按默认 Q、切换默认 F，均为同键规则并支持指定按键', () => {
   const hold = newRule('hold');
   const toggle = newRule('toggle');
   assert.equal(hold.enabled, false);
   assert.equal(toggle.enabled, true);
   assert.deepEqual(hold.trigger_key, { kind: 'keyboard', code: 81 });
   assert.deepEqual(toggle.trigger_key, { kind: 'keyboard', code: 70 });
-  assert.deepEqual(toggle.steps[0].key, hold.steps[0].key);
+  assert.deepEqual(hold.steps[0].key, { kind: 'keyboard', code: 81 });
+  assert.deepEqual(toggle.steps[0].key, { kind: 'keyboard', code: 70 });
+  assert.equal(toggle.stop_key, null);
   const key = { kind: 'keyboard' as const, code: 49 };
   const single = newRule('toggle', key);
   assert.deepEqual(single.trigger_key, key);

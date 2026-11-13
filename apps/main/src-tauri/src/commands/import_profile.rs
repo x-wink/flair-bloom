@@ -581,6 +581,7 @@ fn convert_profile(p: &Path, source_profile_index: Option<usize>) -> Result<Prof
             updated_at: now,
             app_version: env!("CARGO_PKG_VERSION").to_string(),
             signature: String::new(),
+            window_binding: None,
         },
         rules,
         hotkeys,
@@ -697,6 +698,7 @@ mod tests {
                 updated_at: 2,
                 app_version: "0.7.1".into(),
                 signature: "测试署名".into(),
+                window_binding: None,
             },
             rules: vec![BurstRule {
                 id: "native-rule".into(),

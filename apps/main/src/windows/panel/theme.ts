@@ -26,7 +26,7 @@ export interface SectPreset {
 }
 
 export function themePresetLabel(preset: Pick<SectPreset, 'sect' | 'name'>): string {
-  return `${preset.sect} · ${preset.name}`;
+  return `${preset.name} · ${preset.sect}`;
 }
 
 /**
@@ -34,8 +34,7 @@ export function themePresetLabel(preset: Pick<SectPreset, 'sect' | 'name'>): str
  * 外加流派无相楼（取 JX3Box 的门派色）。
  * 实底上的文字按对比度取白或近黑（见 deriveThemeVariables），偏亮的绯粉、流金等用深字。
  *
- * `sect` 门派名仅作来源对照、不在 UI 显示——界面只展示色块与雅称（`name`），
- * 悬停显示 `name`。下表即门派 ↔ 配色对照：
+ * 标签统一按「颜色 · 门派」展示，让颜色雅称保持对齐。下表即门派 ↔ 配色对照：
  * 万花霞紫 / 七秀绯粉 / 少林缁黄 / 纯阳天青 / 天策赤焰 / 藏剑流金 / 五毒瘴紫 /
  * 唐门玄靛 / 明教圣火 / 丐帮醉褐 / 苍云铁衣 / 长歌空青 / 霸刀沧海 / 蓬莱缥碧 /
  * 凌雪阁墨血 / 衍天宗玄阴 / 北天药宗药绿 / 万灵山庄苍木 / 刀宗赤铜 / 段氏碧玉 / 无相楼丁香。

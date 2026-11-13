@@ -14,7 +14,8 @@ import { keyLabel, type KeyId } from '../panel/components/KeyCapture';
 import { useKeyRelay } from '../panel/useKeyRelay';
 import { useRuleStates } from '../panel/useRuleStates';
 import RunningFrame from '../panel/components/RunningFrame';
-import StatusLogo from '../panel/components/StatusLogo';
+import BindingLogos from '../panel/components/BindingLogos';
+import { useWindowBinding } from '../panel/useWindowBinding';
 import { useVisualEnhancement } from '../panel/useVisualEnhancement';
 import {
   applyThemeColor,
@@ -73,6 +74,7 @@ export default function FloatApp() {
   const [rules, setRules] = useState<FloatRule[]>([]);
   const floatRef = useRef<HTMLDivElement>(null);
   const { enabled: visualEnhancement } = useVisualEnhancement(settingsStore);
+  const windowBinding = useWindowBinding();
 
   // 浮窗聚焦时全局键盘钩子失效，与主面板共用键盘事件中继，避免热键被吞。
   useKeyRelay();
@@ -325,18 +327,21 @@ export default function FloatApp() {
       data-tauri-drag-region
     >
       {globalEnabled && <RunningFrame variant="float" flow={visualEnhancement} />}
-      <StatusLogo
-        className="fb-float-logo"
+      <BindingLogos
         src={iconUrl}
-        active={globalEnabled}
+        enabled={globalEnabled}
+        status={windowBinding}
         pulse={visualEnhancement}
-        dragRegion
       />
 
       <div className="fb-float-content" data-tauri-drag-region>
         {!hasAny ? (
           <span className="fb-float-empty" data-tauri-drag-region title={outputError}>
-            {outputError ? '输出异常，请重启' : '未连发'}
+            {outputError
+              ? '输出异常，请重启'
+              : globalEnabled && windowBinding?.binding && !windowBinding.open
+                ? '等待目标窗口'
+                : '未连发'}
           </span>
         ) : (
           <>

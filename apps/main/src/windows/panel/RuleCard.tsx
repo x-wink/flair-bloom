@@ -1,6 +1,6 @@
 import { useId, useRef, useState, type DragEventHandler } from 'react';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
-import { ChevronIcon } from './components/icons';
+import { ChevronIcon, TriangleIcon } from './components/icons';
 import IntervalInput from './components/IntervalInput';
 import KeyCapture, {
   type CaptureReject,
@@ -11,7 +11,7 @@ import KeyCapture, {
 } from './components/KeyCapture';
 import type { ConflictSeverity } from './conflicts';
 import SequenceEditor from './components/SequenceEditor';
-import type { OutputStep } from './outputSequence';
+import { isSimpleRule, ruleHotkeyDimming, type OutputStep } from './outputSequence';
 import type { RuleProgress } from './useRuleStates';
 
 type BurstMode = 'hold' | 'toggle';
@@ -39,6 +39,7 @@ interface Props {
   progress?: RuleProgress;
   isActive: boolean;
   isPaused: boolean;
+  pauseReason?: string;
   /** 教程判定的「最后一条可见规则」（`lastRule`），承载教程锚点 `rule-latest`。 */
   isLatest: boolean;
   showAdvanced: boolean;
@@ -74,6 +75,7 @@ export default function RuleCard({
   progress,
   isActive,
   isPaused,
+  pauseReason,
   isLatest,
   showAdvanced,
   isDragging,
@@ -99,6 +101,8 @@ export default function RuleCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const multiple = rule.steps.length > 1;
   const isToggle = rule.mode === 'toggle';
+  const dimming = ruleHotkeyDimming(rule);
+  const canMute = !isActive && !isPaused;
   // 长按键与连发键分开时把「按住哪个键」提到主行：插队要按住的就是它，不能藏在高级设置里。
   const holdSplit = !isToggle && (multiple || !keyEq(rule.trigger_key, rule.steps[0].key));
   const nextMode = other(rule.mode);
@@ -138,7 +142,7 @@ export default function RuleCard({
   return (
     <div
       className={cls}
-      title={isPaused ? '已暂停：同组长按插队中，松手后恢复' : undefined}
+      title={isPaused ? pauseReason || '已暂停：同组长按插队中，松手后恢复' : undefined}
       data-tour={isLatest ? 'rule-latest' : undefined}
       draggable
       {...drag}
@@ -181,11 +185,14 @@ export default function RuleCard({
           {holdSplit && (
             <>
               <div className="rule-field">
-                <label>长按键</label>
+                <label className={canMute && dimming.trigger ? 'is-muted' : undefined}>
+                  长按键
+                </label>
                 <KeyCapture
                   onReject={onKeyReject}
                   policy={policies.trigger}
                   value={rule.trigger_key}
+                  muted={canMute && dimming.trigger}
                   onChange={(vk) => vk && onPatch({ trigger_key: vk })}
                   conflict={conflict}
                 />
@@ -261,22 +268,32 @@ export default function RuleCard({
             <div className="rule-advanced-hotkeys">
               {isToggle && (
                 <div className="rule-field">
-                  <label>启动热键</label>
+                  <label className={canMute && dimming.trigger ? 'is-muted' : undefined}>
+                    启动热键
+                  </label>
                   <KeyCapture
                     onReject={onKeyReject}
                     policy={policies.trigger}
                     value={rule.trigger_key}
+                    muted={canMute && dimming.trigger}
                     onChange={(vk) => vk && onPatch({ trigger_key: vk })}
                     conflict={conflict}
                   />
                 </div>
               )}
               <div className="rule-field">
-                <label>{isToggle ? '停止热键' : '长按键'}</label>
+                <label
+                  className={
+                    canMute && (isToggle ? dimming.stop : dimming.trigger) ? 'is-muted' : undefined
+                  }
+                >
+                  {isToggle ? '停止热键' : '长按键'}
+                </label>
                 <KeyCapture
                   onReject={onKeyReject}
                   policy={policies.trigger}
                   value={isToggle ? (rule.stop_key ?? rule.trigger_key) : rule.trigger_key}
+                  muted={canMute && (isToggle ? dimming.stop : dimming.trigger)}
                   onChange={(vk) =>
                     vk && onPatch(isToggle ? { stop_key: vk } : { trigger_key: vk })
                   }
@@ -302,7 +319,11 @@ export default function RuleCard({
         aria-label="高级设置"
         aria-expanded={showAdvanced}
       >
-        <ChevronIcon size={10} className="chevron" />
+        {isSimpleRule(rule) ? (
+          <ChevronIcon size={10} className="chevron" />
+        ) : (
+          <TriangleIcon size={10} className="chevron" />
+        )}
         <span className="expand-label">{showAdvanced ? '收起高级设置' : '高级设置'}</span>
       </button>
       <ContextMenu

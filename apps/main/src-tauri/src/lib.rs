@@ -55,6 +55,10 @@ use commands::{
     sound::{delete_sound_file, import_sound_file, read_sound_file},
     status::get_app_status,
     window::set_panel_aspect,
+    window_binding::{
+        cancel_binding_pick, get_window_binding_status, list_bindable_windows, pick_binding_window,
+        set_profile_window_binding, WindowBindingState,
+    },
 };
 use engine::{start_listener, BurstEngine};
 
@@ -173,6 +177,11 @@ pub fn run() {
         .manage(Jx3State::default())
         .manage(UpdateLock(AtomicBool::new(false)))
         .invoke_handler(tauri::generate_handler![
+            get_window_binding_status,
+            cancel_binding_pick,
+            list_bindable_windows,
+            pick_binding_window,
+            set_profile_window_binding,
             set_global_enabled,
             get_global_enabled,
             set_global_hotkeys,
@@ -247,6 +256,7 @@ pub fn run() {
         .setup(move |app| {
             bootstrap::webview_scale::setup(app.handle());
             app.manage(LicenseState::load(app.handle()));
+            app.manage(WindowBindingState::start(app.handle()));
             insights::setup(app.handle());
 
             // hook 只入队，全局开关与规则通知在同一通道串行派发，避免语音乱序。
@@ -347,6 +357,9 @@ pub fn run() {
         .expect("error while building FlairBloom")
         .run(move |_app, event| {
             if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(state) = _app.try_state::<WindowBindingState>() {
+                    state.shutdown();
+                }
                 engine_for_exit.shutdown();
                 if let Some(insights) = _app.try_state::<insights::InsightsState>() {
                     insights.shutdown();

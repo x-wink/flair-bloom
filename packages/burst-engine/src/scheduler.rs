@@ -69,6 +69,9 @@ fn report_failure(failure: &Failure, progress: &ProgressMap, message: &str) {
 }
 
 enum SchedulerCommand {
+    PauseAll {
+        generation: u64,
+    },
     Start {
         rule: Arc<BurstRule>,
         generation: u64,
@@ -400,6 +403,7 @@ pub(crate) trait Scheduler: Send + Sync {
     fn shutdown_blocking(&self, generation: u64) -> bool;
     fn hp_degraded(&self) -> bool;
     fn pause_rule(&self, rule_id: String, generation: u64);
+    fn pause_all(&self, _generation: u64) {}
     fn resume_rule(&self, rule_id: String, generation: u64);
     fn play_once(&self, rule: Arc<BurstRule>, generation: u64);
     fn failure(&self) -> Option<String> {
@@ -411,6 +415,9 @@ pub(crate) trait Scheduler: Send + Sync {
 }
 
 impl Scheduler for SchedulerHandle {
+    fn pause_all(&self, generation: u64) {
+        self.send(SchedulerCommand::PauseAll { generation });
+    }
     fn failure(&self) -> Option<String> {
         self.failure
             .lock()
@@ -544,6 +551,19 @@ enum AcquireOutcome {
 impl SchedulerWorker {
     fn handle_command(&mut self, command: SchedulerCommand) -> bool {
         match command {
+            SchedulerCommand::PauseAll { generation } => {
+                if generation == self.current_generation {
+                    let ids: Vec<_> = self.rules.keys().cloned().collect();
+                    for id in ids {
+                        if id.starts_with('\0') {
+                            self.stop_rule(&id);
+                        } else {
+                            self.pause_rule(&id, Instant::now());
+                        }
+                    }
+                }
+                false
+            }
             SchedulerCommand::Start {
                 rule,
                 generation,
@@ -1347,6 +1367,40 @@ mod tests {
     #[test]
     fn hold_duration_for_one_ms_uses_tap_mode() {
         assert_eq!(hold_duration(1), Duration::ZERO);
+    }
+
+    #[test]
+    fn window_pause_releases_keys_preserves_cursor_and_discards_pending_wheel_taps() {
+        let (mut worker, ledger) = test_worker();
+        let normal = rule("normal", KeyId::Keyboard(69));
+        worker.insert_scheduled(Arc::from("normal"), normal.clone(), 0, false, 1);
+        worker.handle_command(SchedulerCommand::TapOnce {
+            rule: normal,
+            generation: 0,
+        });
+        let now = Instant::now();
+        worker.process_due(now);
+        worker.handle_command(SchedulerCommand::PauseAll { generation: 0 });
+        assert!(ledger.lock().unwrap().is_empty());
+        assert_eq!(worker.rules.len(), 1);
+        let paused = worker.rules.get("normal").unwrap().queue.paused_remaining();
+        assert!(paused.is_some());
+        worker.process_due(now + Duration::from_secs(10));
+        assert_eq!(
+            worker.rules.get("normal").unwrap().queue.paused_remaining(),
+            paused
+        );
+        worker.handle_command(SchedulerCommand::Resume {
+            rule_id: "normal".into(),
+            generation: 0,
+        });
+        assert!(worker
+            .rules
+            .get("normal")
+            .unwrap()
+            .queue
+            .paused_remaining()
+            .is_none());
     }
 
     #[test]

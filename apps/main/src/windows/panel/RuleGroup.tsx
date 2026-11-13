@@ -1,5 +1,6 @@
 import type { DragEvent, ReactNode } from 'react';
 import { ChevronIcon, EditIcon } from './components/icons';
+import GradientDropZone from './components/GradientDropZone';
 
 interface StatusItem {
   id: string;
@@ -17,7 +18,12 @@ interface Props {
   /** 正在重命名时的草稿；undefined 表示未在编辑。 */
   draft: string | undefined;
   dragActive: boolean;
-  /** 筛选状态下不接受拖入：被隐藏的成员看不见，拖进去的位置不可预期。 */
+  appendActive: boolean;
+  globalEnabled: boolean;
+  showDropZone: boolean;
+  onAppendDragOver: () => void;
+  onDragLeave: () => void;
+  /** 隐藏部分成员时不接受拖入，避免放置位置不可预期。 */
   acceptDrop: boolean;
   /** 组内在跑 / 暂停的规则；同组可能有两条同键位规则，故带 id 作 key。 */
   running: StatusItem[];
@@ -41,6 +47,11 @@ export default function RuleGroup({
   collapsed,
   draft,
   dragActive,
+  appendActive,
+  globalEnabled,
+  showDropZone,
+  onAppendDragOver,
+  onDragLeave,
   acceptDrop,
   running,
   paused,
@@ -76,84 +87,94 @@ export default function RuleGroup({
       className={`rule-group-container${dragActive && acceptDrop ? ' drag-active' : ''}`}
       data-tour={isLatest ? 'group-latest' : undefined}
       {...dropHandlers}
+      onDragLeave={(event) => {
+        const hovered = document.elementFromPoint(event.clientX, event.clientY);
+        if (!hovered || !event.currentTarget.contains(hovered)) onDragLeave();
+      }}
     >
-      <div
-        className={`rule-group-header${collapsed ? ' collapsed' : ''}`}
-        onClick={() => !editing && onToggleCollapse()}
-      >
-        {editing ? (
-          <input
-            className="group-name-edit"
-            autoFocus
-            value={draft}
-            onChange={(e) => onDraftChange(e.target.value)}
-            onBlur={onCommitRename}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') onCommitRename();
-              else if (e.key === 'Escape') onCancelRename();
-            }}
-            onClick={(e) => e.stopPropagation()}
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={(e) => e.preventDefault()}
-          />
-        ) : (
-          <div className={`group-collapse-indicator${collapsed ? ' collapsed' : ''}`}>
-            <ChevronIcon size={12} className="group-chevron" />
-            <span className="group-name-text">{name}</span>
-          </div>
-        )}
-        {!editing && <span className="group-rule-text">常用于多段宏自动切换</span>}
-        {!editing && (
+      <div className="rule-group-heading" data-tour={isLatest ? 'group-header' : undefined}>
+        <div
+          className={`rule-group-header${collapsed ? ' collapsed' : ''}`}
+          onClick={() => !editing && onToggleCollapse()}
+        >
+          {editing ? (
+            <input
+              className="group-name-edit"
+              autoFocus
+              value={draft}
+              onChange={(e) => onDraftChange(e.target.value)}
+              onBlur={onCommitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') onCommitRename();
+                else if (e.key === 'Escape') onCancelRename();
+              }}
+              onClick={(e) => e.stopPropagation()}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => e.preventDefault()}
+            />
+          ) : (
+            <div className={`group-collapse-indicator${collapsed ? ' collapsed' : ''}`}>
+              <ChevronIcon size={12} className="group-chevron" />
+              <span className="group-name-text">{name}</span>
+            </div>
+          )}
+          {globalEnabled && (
+            <div className="group-status" aria-live="polite">
+              {running.length === 0 && paused.length === 0 ? (
+                <span className="group-status-idle">未在运行</span>
+              ) : (
+                <>
+                  {running.map(({ id, label }) => (
+                    <span key={id} className="group-status-item is-running" title={`${label} 在跑`}>
+                      ● {label} 在跑
+                    </span>
+                  ))}
+                  {paused.map(({ id, label }) => (
+                    <span key={id} className="group-status-item is-paused" title={`${label} 暂停`}>
+                      ⏸ {label} 暂停
+                    </span>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+          {!editing && (
+            <button
+              className="group-edit-btn"
+              onClick={(e) => {
+                e.stopPropagation();
+                onStartRename();
+              }}
+              title="重命名"
+            >
+              <EditIcon size={12} />
+            </button>
+          )}
           <button
-            className="group-edit-btn"
+            className="disband-btn"
             onClick={(e) => {
               e.stopPropagation();
-              onStartRename();
+              onDisband();
             }}
-            title="重命名"
+            title="解散规则组（可选择同时删除组内规则）"
           >
-            <EditIcon size={12} />
+            解散
           </button>
-        )}
-        <button
-          className="disband-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            onDisband();
-          }}
-          title="解散规则组（可选择同时删除组内规则）"
-        >
-          解散
-        </button>
-      </div>
-      <div
-        className="group-status"
-        data-tour={isLatest ? 'group-header' : undefined}
-        aria-live="polite"
-      >
-        {running.length === 0 && paused.length === 0 ? (
-          <span className="group-status-idle">未在运行</span>
-        ) : (
-          <>
-            {running.map(({ id, label }) => (
-              <span key={id} className="group-status-item is-running">
-                ● {label} 在跑
-              </span>
-            ))}
-            {paused.map(({ id, label }) => (
-              <span key={id} className="group-status-item is-paused">
-                ⏸ {label} 暂停
-              </span>
-            ))}
-          </>
-        )}
+        </div>
       </div>
       {!collapsed && (
         <div className="group-body">
           {children}
           {hiddenCount > 0 && <div className="group-hidden-note">另有 {hiddenCount} 条已隐藏</div>}
-          {acceptDrop && (
-            <div className={`group-drop-zone${dragActive ? ' drag-active' : ''}`}>拖入规则</div>
+          {acceptDrop && showDropZone && (
+            <GradientDropZone
+              active={appendActive}
+              label={dragActive ? '松手放置' : '拖入规则'}
+              ariaLabel={`将规则放到「${name}」末尾`}
+              size="sm"
+              onDragOver={onAppendDragOver}
+              onDrop={onDrop}
+            />
           )}
         </div>
       )}

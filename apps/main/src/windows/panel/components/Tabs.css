@@ -123,8 +123,8 @@
 .fb-tab-badge {
   font-size: var(--fb-fs-xs);
   padding: 1px var(--fb-space-4);
-  border-radius: var(--fb-radius-pill);
-  background: rgba(var(--fb-color-primary-rgb), 0.12);
+  border-radius: var(--fb-radius-panel);
+  background: var(--fb-badge-bg);
   color: var(--fb-color-primary-text);
   font-weight: var(--fb-fw-medium);
 }

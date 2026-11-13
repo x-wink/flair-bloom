@@ -27,11 +27,20 @@ import {
 import HorizontalLayout from './HorizontalLayout';
 import RuleCard, { type CardDragHandlers } from './RuleCard';
 import RuleGroup from './RuleGroup';
+import GradientDropZone from './components/GradientDropZone';
+import { requestRuleDeletion } from './ruleDeletion';
 import Button from './components/Button';
 import CloseBehaviorForm, { type CloseBehavior } from './components/CloseBehaviorForm';
 import { useConfirm, useConfirmOpen } from './components/ConfirmDialog';
 import ContextMenu, { type ContextMenuItem } from './components/ContextMenu';
-import { ChevronIcon, CloseIcon, MenuIcon, MinimizeIcon, UpdateIcon } from './components/icons';
+import {
+  ChevronIcon,
+  CloseIcon,
+  MenuIcon,
+  MinimizeIcon,
+  TrashIcon,
+  UpdateIcon,
+} from './components/icons';
 import Kbd from './components/Kbd';
 
 import {
@@ -92,6 +101,11 @@ import SettingsDialog, {
 } from './dialogs/SettingsDialog';
 import RunningFrame from './components/RunningFrame';
 import StatusLogo from './components/StatusLogo';
+import WindowBindingControl from './components/WindowBindingControl';
+import WindowCaptureOverlay from './components/WindowCaptureOverlay';
+import { useWindowBinding } from './useWindowBinding';
+import { bindingDescription, type BindableWindow } from './windowBinding';
+import { matchesRuleFilter, type RuleFilter } from './ruleFilter';
 import { useVisualEnhancement } from './useVisualEnhancement';
 import {
   applyThemeColor,
@@ -238,7 +252,6 @@ const MIN_INTERVAL_MS = 10;
 const MAX_INTERVAL_MS = 10000;
 
 type BurstMode = 'hold' | 'toggle';
-type RuleFilter = 'all' | BurstMode;
 type InputMode = 'sendinput' | 'interception' | 'ddsimple' | 'hidstick';
 const LAYOUT_LABELS: Record<PanelLayout, string> = {
   vertical: '竖版·规则卡片',
@@ -367,9 +380,10 @@ function buildProfileMenu(args: {
   activeName: string;
   onSwitch: (path: string) => void;
   onCreate: () => void;
+  onImport: () => void;
   onManage: () => void;
 }): ContextMenuItem[] {
-  const { profiles, activeName, onSwitch, onCreate, onManage } = args;
+  const { profiles, activeName, onSwitch, onCreate, onImport, onManage } = args;
   const items: ContextMenuItem[] = profiles.map((p) => ({
     label: p.meta.name === DEFAULT_PROFILE_NAME ? '默认配置' : p.meta.name,
     subtitle: p.meta.name === DEFAULT_PROFILE_NAME ? '出厂预设，修改时自动新建' : undefined,
@@ -378,7 +392,8 @@ function buildProfileMenu(args: {
   }));
   if (items.length > 0) items.push({ type: 'divider' });
   items.push({ label: '新建配置…', onClick: onCreate });
-  items.push({ label: '管理配置…', subtitle: '重命名、删除、导入', onClick: onManage });
+  items.push({ label: '导入配置', onClick: onImport });
+  items.push({ label: '管理配置…', subtitle: '重命名、删除、导出', onClick: onManage });
   return items;
 }
 
@@ -393,6 +408,9 @@ function orderProfiles(profiles: ProfileEntry[]): ProfileEntry[] {
 }
 
 export default function PanelApp() {
+  const windowBinding = useWindowBinding();
+  const [createMenuOpen, setCreateMenuOpen] = useState(false);
+  const createBtnRef = useRef<HTMLButtonElement>(null);
   const [showAgreement, setShowAgreement] = useState(false);
   const [agreementChecked, setAgreementChecked] = useState(false);
   const importWelcome = useImportWelcome(settingsStore);
@@ -528,8 +546,9 @@ export default function PanelApp() {
   const draggingIdRef = useRef<string | undefined>(undefined);
   const [dragOverInfo, setDragOverInfo] = useState<
     | { kind: 'rule'; ruleId: string }
-    | { kind: 'group'; name: string }
+    | { kind: 'group' | 'group-end'; name: string }
     | { kind: 'ungrouped' }
+    | { kind: 'delete'; force: boolean }
     | undefined
   >(undefined);
   const [editingGroupName, setEditingGroupName] = useState<{
@@ -830,7 +849,7 @@ export default function PanelApp() {
       const scan = await confirm({
         title: '要导入已有的按键配置吗？',
         description:
-          '支持气质花 .qzh，以及丐帮高手、衍天高手、极简按键、小叽按键和大肥鱼按键配置。可以先扫描，再自行选择配置、查看预览，确认后才导入。以后也能从「☰ → 导入配置」打开。',
+          '支持气质花 .qzh，以及丐帮高手、衍天高手、极简按键、小叽按键和大肥鱼按键配置。可以先扫描，再自行选择配置、查看预览，确认后才导入。以后也能从底栏「配置下拉 → 导入配置」打开。',
         confirmText: '扫描配置',
         cancelText: '暂不导入',
       });
@@ -2153,6 +2172,30 @@ export default function PanelApp() {
   function cardDragHandlers(rule: BurstRule): CardDragHandlers {
     return {
       onDragStart: (e) => {
+        // 原卡会淡化；独立快照避免把原卡的透明度再叠到系统拖拽副本上。
+        const source = e.currentTarget;
+        const rect = source.getBoundingClientRect();
+        const image = source.cloneNode(true) as HTMLElement;
+        image.classList.remove('dragging', 'drag-target');
+        image.removeAttribute('data-tour');
+        image.querySelectorAll('[data-tour], [id]').forEach((node) => {
+          node.removeAttribute('data-tour');
+          node.removeAttribute('id');
+        });
+        image.setAttribute('aria-hidden', 'true');
+        Object.assign(image.style, {
+          position: 'fixed',
+          left: `${rect.left}px`,
+          top: `${rect.top}px`,
+          width: `${rect.width}px`,
+          height: `${rect.height}px`,
+          margin: '0',
+          opacity: '1',
+          pointerEvents: 'none',
+        });
+        source.parentElement?.appendChild(image);
+        e.dataTransfer.setDragImage(image, e.clientX - rect.left, e.clientY - rect.top);
+        setTimeout(() => image.remove(), 0);
         draggingIdRef.current = rule.id;
         e.dataTransfer.setData('text/plain', rule.id);
         e.dataTransfer.effectAllowed = 'move';
@@ -2171,7 +2214,8 @@ export default function PanelApp() {
         if (!srcId || srcId === rule.id) return;
         // 放到别组的卡片前等于移入那个组；筛选下组里有被隐藏的成员，不允许这样拖入。
         const dragged = rules.find((r) => r.id === srcId);
-        if (filter !== 'all' && rule.group && dragged?.group !== rule.group) return;
+        if (filter !== 'all' && filter !== 'groups' && rule.group && dragged?.group !== rule.group)
+          return;
         handleDropBeforeRule(srcId, rule.id);
       },
       onDragEnd: () => {
@@ -2196,14 +2240,19 @@ export default function PanelApp() {
       : `${keyLabel(rule.trigger_key)}→${keyLabel(rule.steps[0].key)}`;
   }
 
-  async function handleDelete(id: string) {
-    const ok = await confirm({
-      title: '删除规则',
-      description: '确认删除此规则？此操作不可撤销。',
-      confirmText: '删除',
-      tone: 'danger',
+  async function handleDelete(id: string, force = false) {
+    await requestRuleDeletion({
+      id,
+      force,
+      confirm: () =>
+        confirm({
+          title: '删除规则',
+          description: '确认删除此规则？此操作不可撤销。',
+          confirmText: '删除',
+          tone: 'danger',
+        }),
+      remove: removeRule,
     });
-    if (ok) removeRule(id);
   }
 
   async function switchToProfile(path: string) {
@@ -2335,6 +2384,17 @@ export default function PanelApp() {
     }
   }
 
+  async function handleWindowBindingChange(window: BindableWindow | undefined) {
+    await changeProfile(async () => {
+      await ensureWritableProfile();
+      await invoke('set_profile_window_binding', {
+        name: profileNameRef.current,
+        windowId: window?.id ?? null,
+      });
+      await refreshProfileList();
+    });
+  }
+
   async function handleDeleteProfileByName(name: string) {
     if (name === DEFAULT_PROFILE_NAME) {
       toast.warning('默认配置不可删除');
@@ -2430,6 +2490,7 @@ export default function PanelApp() {
   }
 
   function closeMenus() {
+    setCreateMenuOpen(false);
     setMenuOpen(false);
     setModePickerOpen(false);
     setProfileMenuOpen(false);
@@ -2446,6 +2507,7 @@ export default function PanelApp() {
       keyCaptureSeq,
       settingsOpen: showSettings,
       settingsTab,
+      windowBindingSupported: windowBinding?.supported,
       coincidentToggle: keyPolicies.coincident_toggle,
       runningRuleIds: [...activeRuleIds].filter((id) => !pausedRuleIds.has(id)).sort(),
       pausedRuleIds: [...pausedRuleIds].sort(),
@@ -2460,6 +2522,7 @@ export default function PanelApp() {
       keyCaptureSeq,
       showSettings,
       settingsTab,
+      windowBinding?.supported,
       keyPolicies.coincident_toggle,
       activeRuleIds,
       pausedRuleIds,
@@ -2479,6 +2542,7 @@ export default function PanelApp() {
       },
       closeJx3: () => setShowJx3(false),
       closeMenus,
+      openCreateMenu: () => setCreateMenuOpen(true),
       createSampleGroup,
       deleteSampleGroup,
     }),
@@ -2766,6 +2830,7 @@ export default function PanelApp() {
       style={{ ['--panel-bg' as string]: `url(${bgUrl})` }}
     >
       {globalEnabled && <RunningFrame key={layout} variant={layout} flow={visualEnhancement} />}
+      {windowBinding?.picking && <WindowCaptureOverlay />}
       <header className="panel-header" onMouseDown={handleHeaderMouseDown}>
         <StatusLogo
           className="header-icon"
@@ -2855,6 +2920,11 @@ export default function PanelApp() {
                     badge: `${enabled}/${inMode.length}`,
                   };
                 }),
+                {
+                  id: 'groups' as RuleFilter,
+                  label: '规则组',
+                  badge: `${ruleGroupNames(rules).length}`,
+                },
               ]}
               active={filter}
               grow
@@ -2874,6 +2944,15 @@ export default function PanelApp() {
             intervalMin={MIN_INTERVAL_MS}
             intervalMax={MAX_INTERVAL_MS}
             onIntervalChange={handleHSetInterval}
+            windowBinding={
+              <WindowBindingControl
+                status={windowBinding}
+                enabled={globalEnabled}
+                pulse={visualEnhancement}
+                onSelect={handleWindowBindingChange}
+                onError={toast.error}
+              />
+            }
             onCycleKey={handleHCycleKey}
             onEditDetails={() => void switchLayout('vertical')}
             onSetEnabled={handleHSetEnabled}
@@ -2887,7 +2966,7 @@ export default function PanelApp() {
 
         {layout === 'vertical' &&
           (() => {
-            const matches = (r: BurstRule) => filter === 'all' || r.mode === filter;
+            const matches = (r: BurstRule) => matchesRuleFilter(r, filter);
             const visible = rules.filter(matches);
             const latestId = lastRule(tourSnapshot)?.id;
             // 组容器按第一个成员出现的位置整体渲染，与拖拽排序（数组顺序）同一口径。
@@ -2895,7 +2974,7 @@ export default function PanelApp() {
             const latestGroup =
               sampleRules({ rules })?.a.group ?? groupNames[groupNames.length - 1];
             const draggingRule = draggingId ? rules.find((r) => r.id === draggingId) : undefined;
-            const canGroupDrop = filter === 'all';
+            const canGroupDrop = filter === 'all' || filter === 'groups';
 
             const renderCard = (rule: BurstRule) => (
               <RuleCard
@@ -2904,6 +2983,11 @@ export default function PanelApp() {
                 progress={ruleProgress[rule.id]}
                 isActive={activeRuleIds.has(rule.id)}
                 isPaused={pausedRuleIds.has(rule.id)}
+                pauseReason={
+                  windowBinding?.binding && !windowBinding.open
+                    ? bindingDescription(windowBinding, globalEnabled)
+                    : undefined
+                }
                 isLatest={rule.id === latestId}
                 showAdvanced={!!advancedOpen[rule.id]}
                 isDragging={draggingId === rule.id}
@@ -2940,8 +3024,27 @@ export default function PanelApp() {
                   isLatest={name === latestGroup}
                   collapsed={collapsedGroups.has(name)}
                   draft={editingGroupName?.current === name ? editingGroupName.draft : undefined}
-                  dragActive={dragOverInfo?.kind === 'group' && dragOverInfo.name === name}
+                  dragActive={
+                    ((dragOverInfo?.kind === 'group' || dragOverInfo?.kind === 'group-end') &&
+                      dragOverInfo.name === name) ||
+                    (dragOverInfo?.kind === 'rule' &&
+                      members.some((member) => member.id === dragOverInfo.ruleId))
+                  }
+                  appendActive={dragOverInfo?.kind === 'group-end' && dragOverInfo.name === name}
+                  onAppendDragOver={() => setDragOverInfo({ kind: 'group-end', name })}
+                  onDragLeave={() =>
+                    setDragOverInfo((current) =>
+                      ((current?.kind === 'group' || current?.kind === 'group-end') &&
+                        current.name === name) ||
+                      (current?.kind === 'rule' &&
+                        members.some((member) => member.id === current.ruleId))
+                        ? undefined
+                        : current,
+                    )
+                  }
                   acceptDrop={canGroupDrop}
+                  globalEnabled={globalEnabled}
+                  showDropZone={draggingId !== undefined}
                   running={members
                     .filter((r) => activeRuleIds.has(r.id) && !pausedRuleIds.has(r.id))
                     .map((r) => ({ id: r.id, label: ruleLabel(r) }))}
@@ -2986,9 +3089,15 @@ export default function PanelApp() {
               <div className="rule-group" key="list">
                 <div className="rules-list">
                   {rules.length === 0 && <p className="empty">暂无连发规则</p>}
-                  {rules.length > 0 && visible.length === 0 && groupNames.length === 0 && (
-                    <p className="empty">没有{filter === 'hold' ? '长按' : '切换'}连发规则</p>
-                  )}
+                  {rules.length > 0 &&
+                    visible.length === 0 &&
+                    (filter === 'groups' || groupNames.length === 0) && (
+                      <p className="empty">
+                        {filter === 'groups'
+                          ? '暂无规则组'
+                          : `没有${filter === 'hold' ? '长按' : '切换'}连发规则`}
+                      </p>
+                    )}
 
                   {items}
 
@@ -3013,32 +3122,27 @@ export default function PanelApp() {
 
                 <div className="rules-bottom-actions" data-tour="add-buttons">
                   <Button
-                    className="add-btn"
+                    ref={createBtnRef}
+                    className="add-btn create-rule-btn"
                     variant="dashed"
                     tone="primary"
-                    data-tour="add-hold"
-                    onClick={() => addRuleFromList('hold')}
+                    data-tour="add-menu"
+                    size="sm"
+                    aria-haspopup="menu"
+                    aria-expanded={createMenuOpen}
+                    prependIcon={<span aria-hidden="true">＋</span>}
+                    appendIcon={<ChevronIcon size={10} />}
+                    onClick={() => setCreateMenuOpen((value) => !value)}
                   >
-                    + 长按连发
+                    我要新建
                   </Button>
-                  <Button
-                    className="add-btn"
-                    variant="dashed"
-                    tone="primary"
-                    data-tour="add-toggle"
-                    onClick={() => addRuleFromList('toggle')}
-                  >
-                    + 切换连发
-                  </Button>
-                  <Button
-                    className="add-btn"
-                    variant="dashed"
-                    tone="neutral"
-                    data-tour="add-group"
-                    onClick={() => handleNewGroup()}
-                  >
-                    + 新建规则组
-                  </Button>
+                  <WindowBindingControl
+                    status={windowBinding}
+                    enabled={globalEnabled}
+                    pulse={visualEnhancement}
+                    onSelect={handleWindowBindingChange}
+                    onError={toast.error}
+                  />
                 </div>
               </div>
             );
@@ -3064,7 +3168,7 @@ export default function PanelApp() {
             ref={modeBtnRef}
             className="footer-mode"
             variant="outline"
-            tone={inputMode !== 'sendinput' ? 'primary' : 'neutral'}
+            tone="neutral"
             size="sm"
             loading={switchingMode}
             appendIcon={<ChevronIcon size={10} />}
@@ -3073,13 +3177,12 @@ export default function PanelApp() {
             title="点击选择输入模式"
           >
             {INPUT_MODE_LABELS[inputMode]}
-            {inputMode === 'interception' ? ' ★' : ''}
           </Button>
         </div>
         <div className="footer-controls">
           <Button
             className="footer-layout"
-            variant="outline"
+            variant="ghost"
             tone="neutral"
             size="sm"
             data-tour="layout-toggle"
@@ -3094,7 +3197,7 @@ export default function PanelApp() {
                 strokeWidth="1.2"
                 aria-hidden="true"
               >
-                {layout === 'horizontal' ? (
+                {layout === 'vertical' ? (
                   <>
                     <rect x="1.5" y="3" width="13" height="4" rx="1" />
                     <rect x="1.5" y="9" width="13" height="4" rx="1" />
@@ -3114,11 +3217,12 @@ export default function PanelApp() {
                 : `切换到${LAYOUT_LABELS[layout === 'vertical' ? 'horizontal' : 'vertical']}`
             }
           >
-            {layout === 'vertical' ? '竖版' : '横版'}
+            {layout === 'vertical' ? '横版' : '竖版'}
           </Button>
           <Button
             variant="solid"
-            tone={globalEnabled ? 'primary' : 'neutral'}
+            shape="pill"
+            tone="primary"
             size="sm"
             loading={togglingGlobal}
             kbd={(() => {
@@ -3135,6 +3239,72 @@ export default function PanelApp() {
         </div>
       </footer>
 
+      {draggingId && layout === 'vertical' && (
+        <GradientDropZone
+          active={dragOverInfo?.kind === 'delete'}
+          label={
+            dragOverInfo?.kind === 'delete'
+              ? dragOverInfo.force
+                ? '松手强制删除'
+                : '松手删除'
+              : '拖入规则'
+          }
+          ariaLabel="拖拽删除规则"
+          icon={<TrashIcon size={25} />}
+          hint={
+            <>
+              <Kbd>Ctrl</Kbd> 强删，跳过确认
+            </>
+          }
+          tone="danger"
+          onDragOver={(event) => {
+            if (!draggingIdRef.current) return;
+            const force = event.ctrlKey;
+            setDragOverInfo((current) =>
+              current?.kind === 'delete' && current.force === force
+                ? current
+                : { kind: 'delete', force },
+            );
+          }}
+          onDragLeave={() =>
+            setDragOverInfo((current) => (current?.kind === 'delete' ? undefined : current))
+          }
+          onDrop={(event) => {
+            if (!draggingIdRef.current) return;
+            const id = takeDragSource(event);
+            if (id && rulesRef.current.some((rule) => rule.id === id))
+              void handleDelete(id, event.ctrlKey);
+          }}
+        />
+      )}
+
+      <ContextMenu
+        open={createMenuOpen}
+        onClose={() => setCreateMenuOpen(false)}
+        target={createBtnRef}
+        location="bottom-left"
+        items={[
+          {
+            label: '长按连发',
+            subtitle: '按下开始·松开结束',
+            dataTour: 'add-hold',
+            onClick: () => addRuleFromList('hold'),
+          },
+          {
+            label: '切换连发',
+            subtitle: '按一次开始·再按结束',
+            dataTour: 'add-toggle',
+            onClick: () => addRuleFromList('toggle'),
+          },
+          {
+            label: '规则组',
+            subtitle: '开始时自动停止其他·智能互斥',
+            dataTour: 'add-group',
+            onClick: () => handleNewGroup(),
+          },
+        ]}
+      />
+
       <ContextMenu
         open={profileMenuOpen}
         onClose={() => setProfileMenuOpen(false)}
@@ -3145,6 +3315,10 @@ export default function PanelApp() {
           activeName: profileName,
           onSwitch: switchToProfile,
           onCreate: handleCreateProfile,
+          onImport: () => {
+            setProfileMenuOpen(false);
+            setShowImport(true);
+          },
           onManage: () => handleShowSettings('profiles'),
         })}
       />
@@ -3201,7 +3375,7 @@ export default function PanelApp() {
                     style={{
                       width: 12,
                       height: 12,
-                      borderRadius: 3,
+                      borderRadius: 'var(--fb-radius-panel)',
                       background: p.color,
                       boxShadow: 'inset 0 0 0 1px rgba(0, 0, 0, 0.15)',
                     }}
@@ -3224,13 +3398,6 @@ export default function PanelApp() {
             onClick: () => {
               setMenuOpen(false);
               setShowTourCatalog(true);
-            },
-          },
-          {
-            label: '导入配置',
-            onClick: () => {
-              setMenuOpen(false);
-              setShowImport(true);
             },
           },
           { label: '检查更新', onClick: handleCheckUpdate },
@@ -3315,6 +3482,17 @@ export default function PanelApp() {
           profileCount={profileList.length}
           isDefaultProfile={isDefaultProfile}
           signatureEnabled={grantsSignature(license)}
+          windowBindingControl={
+            windowBinding?.supported ? (
+              <WindowBindingControl
+                status={windowBinding}
+                enabled={globalEnabled}
+                pulse={visualEnhancement}
+                onSelect={handleWindowBindingChange}
+                onError={toast.error}
+              />
+            ) : undefined
+          }
           signature={activeSignature ?? ''}
           onSignatureChange={(s) => void handleSignatureChange(s)}
           onClose={() => setShowSettings(false)}

@@ -22,6 +22,8 @@
 
 ## JSON schema 与迁移（策略 B）
 
+`meta.window_binding` 是可选的配置级 `WindowBinding { exe, class?, title_contains? }`，缺失即不限制；不升 schema。反序列化时清理控制字符、限制长度并拒绝路径形态的 exe；exe 忽略 ASCII 大小写，类名与可选标题条件共同匹配，查询 exe 失败时才用类名兜底。自动保存从磁盘保留绑定，修改只走专用命令，并与署名、规则保存共用写锁，避免交错保存清空绑定。窗口句柄、PID、安装路径和图标不进 `.qzh`；图标与显示名在本机 `settings.json` 的 `windowBindingIcons` 中按 exe 缓存。
+
 出厂配置通过 `Hotkeys::for_new_profile()` 绑定 F1（VK `0x70`）为共用全局开关；`Hotkeys::default()` 仍为空绑定，反序列化、导入与复制配置保留原值。首轮升级由 `storage::migrate_default_hotkeys` 遍历当前管理目录，给未绑定全局开关且 F1 未用于其他热键或规则任意槽位的配置补上 F1；目录标记 `.default-hotkeys-v1` 完成后不再扫描。各文件 `advanced.default_hotkeys_version` 以 `#[serde(default)]` 读取，用于中断重试，避免用户清空后被补回；迁移后导入的文件不补绑。此默认值不改变 `.qzh` schema。
 
 解密后的 JSON 首字段 `schema_version` 驱动 `qzh-profile/src/schema_migrate.rs` 的迁移链（调用 `packages/migrate` 的 `run_migrations()` 泛型运行器）。读取：`version == CURRENT` 直接反序列化；`< CURRENT` 按序迁移到内存中的当前结构，保存时写当前 schema；`> CURRENT` 拒绝加载（`TooNew`）并提示升级应用。每个版本一个迁移函数，不允许跳版本。

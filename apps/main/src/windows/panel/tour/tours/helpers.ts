@@ -1,5 +1,6 @@
 import { Fragment, createElement, type ReactNode } from 'react';
 import type { TourRule, TourSnapshot } from '../types';
+import { matchesRuleFilter } from '../../ruleFilter';
 
 /**
  * 气泡正文分段。教程文件是 `.ts` 写不了 JSX，用 createElement 包一层，
@@ -22,8 +23,7 @@ export function lastRule(snapshot: TourSnapshot): TourRule | undefined {
   const { filter, collapsedGroups } = snapshot;
   const visible = snapshot.rules.filter(
     (rule) =>
-      (filter === 'all' || rule.mode === filter) &&
-      !(rule.group && collapsedGroups.includes(rule.group)),
+      matchesRuleFilter(rule, filter) && !(rule.group && collapsedGroups.includes(rule.group)),
   );
   return visible[visible.length - 1];
 }

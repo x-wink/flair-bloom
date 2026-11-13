@@ -345,6 +345,7 @@ interface Props {
   placeholder?: string;
   /** 冲突级别，用于着色提示。 */
   conflict?: 'error' | 'warning' | null;
+  muted?: boolean;
 }
 
 const MOUSE_BUTTON_MAP: Record<number, MouseButton> = {
@@ -363,6 +364,7 @@ export default function KeyCapture({
   onReject,
   placeholder,
   conflict,
+  muted = false,
 }: Props) {
   const [capturing, setCapturing] = useState(false);
 
@@ -457,7 +459,7 @@ export default function KeyCapture({
 
   return (
     <button
-      className={`key-capture${capturing ? ' capturing' : ''}${!value ? ' key-capture-empty' : ''}${conflict === 'error' ? ' key-capture-error' : conflict === 'warning' ? ' key-capture-warn' : ''}`}
+      className={`key-capture${muted ? ' is-muted' : ''}${capturing ? ' capturing' : ''}${!value ? ' key-capture-empty' : ''}${conflict === 'error' ? ' key-capture-error' : conflict === 'warning' ? ' key-capture-warn' : ''}`}
       title={nullable && value ? '左键重新绑定 · 右键清除' : undefined}
       // 右键清除绑定（非捕获状态）
       onContextMenu={(e) => {

@@ -6,6 +6,7 @@ members = [
     "packages/qzh-profile",
     "packages/resource-integrity",
     "packages/win-sysinfo",
+    "packages/win-foreground",
     "packages/win-input",
     "packages/burst-engine",
     "packages/win-driver",

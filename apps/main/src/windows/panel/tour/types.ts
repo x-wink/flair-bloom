@@ -9,7 +9,7 @@ import type { Location } from '../components/Overlay';
  * 教程内容有实质改动时 bump 它，老用户会再看一次。不按「有没有规则」判新老用户——
  * 新装配置自带两条未启用的出厂规则，那个口径对新用户永远为假。
  */
-export const TOUR_INTRO_VERSION = '2';
+export const TOUR_INTRO_VERSION = '3';
 
 /** 教程只关心规则的这几个字段；与 PanelApp 的 BurstRule 结构兼容，不反向依赖它。 */
 export interface TourRule {
@@ -28,7 +28,7 @@ export interface TourSnapshot {
   inputMode: 'sendinput' | 'interception' | 'ddsimple' | 'hidstick';
   layout: 'vertical' | 'horizontal';
   /** 竖版规则列表的筛选；只影响显示。 */
-  filter: 'all' | 'hold' | 'toggle';
+  filter: 'all' | 'hold' | 'toggle' | 'groups';
   /** 竖版里已折叠的组名（已排序）。折叠组内的规则卡不渲染，「最后一条可见规则」要跳过它们。 */
   collapsedGroups: string[];
   /**
@@ -37,6 +37,7 @@ export interface TourSnapshot {
    */
   keyCaptureSeq: number;
   settingsOpen: boolean;
+  windowBindingSupported?: boolean;
   settingsTab: 'general' | 'hotkeys' | 'sound' | 'profiles';
   /** 后端能力位：为 false（外设模式）时横版键鼠图不可用。 */
   coincidentToggle: boolean;
@@ -60,6 +61,7 @@ export interface TourHost {
   openJx3: () => void;
   closeJx3: () => void;
   closeMenus: () => void;
+  openCreateMenu: () => void;
   /**
    * 建规则组教程的示例组（全部停用）；已存在就什么也不做。键位从候选里挑没被占用的，
    * 全被占用时不建、由宿主提示，返回 false。

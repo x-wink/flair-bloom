@@ -43,3 +43,11 @@
   border-color: var(--fb-color-warning);
   color: var(--fb-color-warning-text);
 }
+
+.key-capture.is-muted:not(.capturing):not(.key-capture-error):not(.key-capture-warn) {
+  color: var(--fb-text-faint);
+}
+
+.key-capture.is-muted:not(.capturing):not(.key-capture-error):not(.key-capture-warn):not(:focus) {
+  border-color: transparent;
+}

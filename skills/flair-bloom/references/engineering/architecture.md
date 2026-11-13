@@ -122,6 +122,12 @@ X1/X2 在 DD 模式 / 鼠标设备缺失时按 once 旗标 warn 一次后自动�
 
 **总并发限速**：连发间隔结构下限 1ms（旧配置兼容），有效下限 `MIN_EFFECTIVE_INTERVAL_MS = 10ms`——全局 LL 钩子链 + RIT 对每个注入事件有固定「过路税」，管线可持续的总注入速率有上限。加载时 `Profile::clamp_intervals()` 把 <10ms 静默钳到 10ms（所有读取入口经 `load_from_path` / `read_profile_from_file` 这一处）。运行时 `process_due` 按「基础下限 × 当前活跃规则数」放大每条规则的有效下限，使总 tap 速率 ≈ 1000/基础下限、与规则数无关，避免多规则叠加超发导致停止后「收不住」。只拉长拍间间隔、不改 `hold` 点按时长。
 
+## 配置窗口绑定
+
+Windows 前台监听、窗口候选、点选和图标提取由 `packages/win-foreground` 提供，不依赖 Tauri；非 Windows 返回空能力。`SetWinEventHook(EVENT_SYSTEM_FOREGROUND)` 独立线程只投递通知，app 层的窗口绑定状态在工作线程读取当前窗口，先计算输出闸门再补图标与候选。没有绑定时不限制，有绑定时目标程序和助手自身前台允许输出；查询失败时保守暂停。候选与点选均过滤本进程所有窗口；捕获遮罩阻止面板操作，Esc 或点击遮罩通过共享取消标志结束原生任务，自身点击只用于取消。
+
+引擎的窗口闸门与总开关、插队暂停分开：切走暂停切换规则并保留游标与剩余等待，释放长按和一次性点按；切回恢复切换规则，长按须重新按住。路由代际与调度代际独立，切窗前已进入路由的输入不能在切回后迟到启动。规则停止键及全局停止仍生效，换规则、配置、后端或全局关闭会取消恢复资格。图标的前台状态与输出闸门、总开关各自独立。
+
 ## 全局热键
 
 `global_toggle` / `global_stop` / `panel_toggle` 不走 `tauri-plugin-global-shortcut`，与连发规则共用 `burst-engine` 低级 hook：热键检测优先于规则处理，且不受 `global_enabled` 当前状态限制，启动期立即生效。只允许绑定键盘实体键、三者互不重复——在绑定 UI 拦截（`KeyCapture` 按槽位允许集收键 + `SettingsDialog` 去重校验），避免同一键被某个热键抢先处理导致其余功能失效。热键可绑修饰键（左右 Shift / Ctrl / Alt / Win），连发规则不可。
@@ -130,12 +136,20 @@ AltGr 布局（德语 / 法语 / 波兰语等）把右 Alt 当 AltGr，键盘驱
 
 ## 前端结构要点
 
+- 组尾放置与面板拖拽删除共用 `components/GradientDropZone.tsx`，以绝对定位的渐变覆盖层呈现，不参与高度计算；组件统一阻止事件冒泡，避免组尾放下被父分组重复处理。删除入口共用 `ruleDeletion.ts` 的确认流程，拖拽放下时的 `ctrlKey` 显式决定是否跳过确认；菜单默认仍需确认。
+
 - 面板根组件 `PanelApp.tsx`：竖版规则列表 + 横版键鼠图（`HorizontalLayout.tsx`，键位表在 `keyboardLayout.ts`），布局各自定设计尺寸（竖版 405×720 即 9:16、横版 1072×603 即 16:9，`windowScale.ts` 的 `LAYOUT_BASE`），设计尺寸即最小尺寸。
+  `RuleGroup.tsx` 的运行状态只在组头副标题渲染，展开和折叠共用同一份状态；全局关闭时隐藏，教程组头锚点保持稳定。
 - 面板窗口等比缩放（前端 `useWindowScale.ts`，纯计算在 `windowScale.ts`，断言在 `scripts/window-scale.test.ts`；锁比例在 `commands/window.rs`）：窗口可拖边，设计尺寸即最小尺寸。宽高比在后端锁：`set_panel_aspect` 给面板窗口挂 subclass 处理 `WM_SIZING`，拖边的每一帧按设计比例改写系统拟定的窗口矩形。以 `WM_ENTERSIZEMOVE` 时的窗口中心为准向四周缩放：被拖的边到中心的距离是半个窗口，拖左右边以宽为准、拖上下边以高为准、拖角取较大者；摆好后越出拖动开始时那块屏幕的工作区就整体推回，中心让位于不出屏，否则放在角落的窗口几乎放不大。上限是那块屏幕工作区装得下的最大等比尺寸，最小尺寸每帧按窗口 DPI 现算。拖标题栏移动不受限。Tauri 没有封装宽高比，事后吸附又只能靠「静止若干毫秒」猜松手，手感别扭，所以放在 `WM_SIZING` 里；矩形换算是平台无关的纯函数 `resize_centered`，单测在 `window_tests.rs`。贴靠分屏、Win+←/→ 这类系统直接摆的尺寸不经 `WM_SIZING`，在 `WM_WINDOWPOSCHANGING` 里按比例收进系统给的矩形并居中（`fit_within`）；比例在舍入误差内（面板自己 `setSize` 的尺寸）或比设计尺寸还小（最小化）时原样放行。macOS 用系统自带的内容比例约束，不做中心缩放。最大化由前端模拟（`maximizable: false`）：比例锁着，系统最大化铺满工作区会变形，所以取工作区装得下的最大等比尺寸并居中（`maximizedRect`），期间 `setResizable(false)` 禁止拖边、resize 不写 `panelScale` 也不广播给浮窗。拖边拉到最大也算最大化：后端在拖过边的 `WM_EXITSIZEMOVE` 时发 `panel-resize-ended`，前端比对窗口宽度与最大化矩形，到了就转成最大化（`reachedMaximum`；工作区装不下比设计尺寸更大的窗口时最大化矩形就是最小尺寸，不算）——只在松手时判断，拖动中途禁止拖边会把正在进行的拖动掐断。不管怎么进的最大化，还原都回到 100% 并居中，不记最大化前的位置。最大化状态存 settings 的 `panelMaximized`，启动和切换布局时都保持。标题栏不用 `data-tauri-drag-region`，因为它的双击会走系统最大化，拖动也不会先还原。改由 `handleHeaderMouseDown` 处理：双击切换；最大化时拖出几像素才按鼠标在窗口里的相对位置缩回 100%（`restoreUnderCursor`），再 `startDragging`。前端在 resize 时按宽高比例里较小的值设 webview 缩放（`setZoom`），停下 400 ms 后把比例按布局存进 settings 的 `panelScale`；启动与切换布局时按该比例定尺寸并居中。用 webview 缩放而不用 CSS `zoom`，是因为前者等同浏览器缩放，`getBoundingClientRect` 与鼠标坐标都在同一套 CSS 像素里，走线与引导气泡的定位不用改。最小化时 Windows 报 0×0，不触发尺寸校正；系统文字大小热切换若改变无边框客户区，前端同时监听视口 resize，按设计比例与最小尺寸校正非零异常尺寸。比例上限按当前布局各自的设计尺寸算，竖版多半被高度顶住、横版多半被宽度顶住，两个比例分开存，所以不取两者的较小值。浮窗不能拖边（宽度随激活规则数自动变化，整块又是拖动区），跟随面板当前布局的比例：面板在比例停稳后广播 `panel-scale-changed`，浮窗启动时读 settings 的 `layout` 与 `panelScale` 取初值；浮窗设同样的 webview 缩放，窗口尺寸按内容 CSS 尺寸乘以比例；浮窗同时监听内容和视口变化，比对实际原生客户区后才调整窗口，避免文字大小热切换后残留底部裁切及重复 resize。
 - Windows 文字缩放隔离：`bootstrap/webview_scale.rs` 在面板和浮窗的 WebView2 控制器上关闭自动 RasterizationScale 检测，设置 RAW_PIXELS 边界及实际窗口 DPI 倍率，避免 Windows 辅助功能的文字大小被额外乘入固定画布。原生 ScaleFactorChanged 事件按所在屏幕更新倍率，因此跨屏 DPI 仍生效；前端的应用 ZoomFactor 和窗口尺寸计算保持独立。设置失败写日志，不改变用户系统设置。
 - 竖版是一个统一列表：按规则数组顺序渲染，分组在其第一个成员的位置整体渲染为 `RuleGroup`（组头语义句 + 运行 / 暂停状态区），单卡是 `RuleCard`（纯展示 + 回调，不碰 `invoke`）。筛选只影响显示、不持久化；会改变分组成员的写入都经 `pushGroupMove`，某组第一次同时含长按与切换时提示一次插队语义。
 - 横版悬停走线：`hkbWires.ts` 是纯函数（边集合、曼哈顿 + 45° 切角路由、出线侧选择），`WireOverlay.tsx` 只量键帽位置画 SVG；几何断言在 `scripts/hkb-wires.test.ts`（`pnpm test:ui`）。路由以悬停键为中心：跨行走朝向对方那一侧，同行在上 / 下里穷举取交叉最少的（同样少时出线在上、入线在下）；同侧同向按跨度嵌套——同行的远者在外层，跨行的远者在内层，因为跨行末段要穿过所有通道。不从左右侧边直连相邻键：键距仅 5px 看不清，形态也不统一。同侧出线点排不下时压缩间距，平行段贴近到 3.5px 内也计作冲突，促使穷举把多出的线分到另一侧。横版一屏展示完整、容器 `overflow: hidden` 不滚动，走线坐标直接相对容器量取，悬停只在窗口缩放时收起。
 - 设计 Token 在 `theme.css`，主题预设色板与亮 / 暗 / 跟随系统在 `theme.ts`（写 `data-theme` 到根元素）。所有组件通过变量取色取尺寸。
+  主面板的原生 `button`、`input`、`select` 和 `textarea` 统一继承正文的系统 UI 字体，避免键帽、菜单及表单控件混入浏览器默认 Arial；字号与字重仍由组件控制。
+  通用圆角统一取 `--fb-radius-panel`（8px），尺寸圆角别名均指向它，保证主面板、浮窗及常规组件一致；键帽使用 `--fb-radius-kbd`（5px），滑动开关轨道与显式胶囊按钮使用 `--fb-radius-pill`，圆形使用 `--fb-radius-circle`，拼接控件的内侧保留直角。
+  中性描边按钮、窗口捕获、输入组件、卡片与弹层共用 `--fb-border`，`--fb-border-soft` 也指向它，随明暗主题切换；文字与实色按钮仍走各自的颜色 Token。
+  底栏配置、模式下拉与窗口捕获使用表单输入的 `--fb-surface-soft` 底色；下拉通过 `--fb-btn-outline-bg` 设置常态底色，保留按钮原有悬停和按下反馈。
+  `Kbd` 与 Tab 数量标记共用 `--fb-badge-bg` 和主色文字；底色将 12% 主色与表面色混合，避免在实色按钮上失去浅底。
 - 对比度按 @xwink/ui 规范：文字在所有会落到的底色上过 WCAG AA 4.5:1。底色包括三种 surface 和叠满主色淡染的面板底（暗色再加卡片半透明层），淡染浓度统一走 `--fb-app-tint-*`，上限是 `theme.ts` 的 `APP_TINT_MAX`；超过这个值，最弱的 faint 档灰字就会掉线。`theme.ts` 的 `deriveThemeVariables` 按主色与生效明暗推导以下几项，再内联注入：实底前景 `--fb-on-primary`（在白与近黑里按对比度取高的，绯粉、流金等亮色用深字）、hover / active（沿 OKLCH 明度往离开前景的方向走）、主色当文字用的 `--fb-color-primary-text`（亮色档加深、暗色档提亮到过线）。所以主色当文字一律用 `--fb-color-primary-text`，语义色当文字用 `--fb-color-{success,danger,warning}-text`，不直接拿基色。颜色算法在 `contrast.ts`，与 `@xwink/ui/brand` 同源；没有直接依赖那个包，是因为发版工作流不带私有源凭据，且 Node 测试不剥离 node_modules 里的 TS。产品页 `apps/site` 直接用包里的 `brandVariables`，与应用的前景规则一致。
 - `components/Overlay.tsx` 提供锚定定位（12 方位 + 视口钳位）与遮罩；Toast / ConfirmDialog / ContextMenu 都建在它上面。层级 Token：`--fb-z-overlay-*` 供弹窗，`--fb-z-tour-*` 供新手引导（要叠在设置弹窗上）。
 - 主面板与浮窗共用 `components/RunningFrame.tsx`，在现有启用描边上叠加单个 Canvas 的连续渐变流光。`ResizeObserver` 按 CSS 尺寸计算圆角内边框，横版／竖版／浮窗自动采用大／中／小尺寸；两道流光相隔半圈，固定每秒一圈。`requestAnimationFrame` 逐帧绘制单层实心渐细倾斜带，头部直接使用所在面板的文字色，避免叠加深色内芯形成空洞；不经 React 或逐帧读取样式，像素比最高为 2。切布局或尺寸变化重建画布与时钟。主题变量 `--fb-frame-*` 推导明暗配色，主题变化时更新画笔；隐藏窗口或减少动态效果时停止绘制。不改变原生窗口尺寸和拖边范围。

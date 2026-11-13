@@ -32,7 +32,7 @@
   position: relative;
   height: 4px;
   overflow: hidden;
-  border-radius: var(--fb-radius-pill);
+  border-radius: var(--fb-radius-panel);
   background: rgba(var(--fb-updater-text-rgb), 0.12);
 }
 

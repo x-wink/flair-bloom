@@ -3,14 +3,15 @@
   align-items: center;
   gap: 0.3em;
   padding: 1px 0.35em;
-  border: 1px solid currentColor;
-  border-radius: var(--fb-radius-sm, 3px);
+  border: 1px solid transparent;
+  border-radius: var(--fb-radius-kbd, 3px);
+  background: var(--fb-badge-bg);
+  color: var(--fb-color-primary-text);
   font-family: monospace;
   font-size: 0.75em;
   font-style: normal;
   font-weight: var(--fb-fw-medium);
   line-height: 1.6;
-  opacity: 0.5;
   user-select: none;
   flex: none;
 }

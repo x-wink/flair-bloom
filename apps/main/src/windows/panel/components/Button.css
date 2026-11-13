@@ -95,6 +95,13 @@
   --fb-btn-text-active: var(--fb-text-strong);
 }
 
+.fb-btn--neutral.fb-btn--outline,
+.fb-btn--neutral.fb-btn--dashed {
+  --fb-btn-color: var(--fb-border);
+  --fb-btn-color-hover: var(--fb-border);
+  --fb-btn-color-active: var(--fb-border);
+}
+
 .fb-btn--danger {
   --fb-btn-color: var(--fb-color-danger);
   --fb-btn-color-hover: var(--fb-color-danger-hover);
@@ -137,7 +144,7 @@
 }
 
 .fb-btn--outline {
-  background: transparent;
+  background: var(--fb-btn-outline-bg, transparent);
   color: var(--fb-btn-text);
   border-color: var(--fb-btn-color);
 }

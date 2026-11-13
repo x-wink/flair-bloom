@@ -122,7 +122,7 @@ scripts/                        # bump-version、extract-changelog、check-skill
 - **commit-msg**（Conventional Commits）：`type(scope): description`，type 为 `feat | fix | docs | style | refactor | test | chore | ci | build | perf | revert`，描述中文，不加署名 trailer。
 - **pre-commit**（`.githooks/pre-commit`）：暂存 `.rs` → `cargo fmt --check` + `cargo clippy -D warnings`；暂存 `.ts/.tsx` → `oxlint` + `oxfmt --check`；暂存 `.md`、`skills/`、`scripts/check-skills.ts` 或 `tour/` 下文件 → `pnpm skills:check`。
 - **Workspace lints**：根 `Cargo.toml` 的 `[workspace.lints.clippy]` 是统一 lint 源（含 `uninlined_format_args = "warn"`）。新增 crate 必须加 `[lints] workspace = true`。
-- **覆盖率门槛**：`packages/{qzh-format, qzh-profile, crypto, migrate}` 整体行覆盖 ≥ 85%、函数 ≥ 80%、region ≥ 85%，`.github/workflows/coverage.yml` 在这四个 crate 改动时强制；新增共享 crate 须同步加入 workflow 与 `package.json` 的 `coverage` 脚本。`apps/main/src-tauri` 与 `win-*` / `burst-engine` 因含大量 `#[cfg(windows)]` 代码不在阈值监控范围。`ci.yml` 的 Rust 门禁只在 workspace 成员改动时触发；前端目前无 CI 作业，靠 pre-commit。
+- **覆盖率门槛**：`packages/{qzh-format, qzh-profile, crypto, migrate, win-foreground}` 整体行覆盖 ≥ 85%、函数 ≥ 80%、region ≥ 85%；`win-foreground` 在 Linux 覆盖可移植逻辑，原生图标另有 Windows 单测。新增共享 crate 须同步加入 workflow 与 `package.json` 的 `coverage` 脚本。`apps/main/src-tauri`、其他 `win-*` 与 `burst-engine` 因含大量平台代码不在阈值监控范围。`ci.yml` 的 Rust 门禁只在 workspace 成员改动时触发；前端目前无 CI 作业，靠 pre-commit。
 - **真机验证用测试配置**：在开发者本机走教程实操、加规则、录键、切驱动模式、清空规则这类有状态的验证，先「新建配置」（名字带 test）并切过去，所有写动作只落在里面；测完切回原配置、删掉测试配置。原因：激活配置是开发者自己在用的，验证顺手改掉的规则与热键不会有人记得恢复。
 - 通用协作约定（语言、提交与推送策略、注释风格、危险动作授权）以全局 `~/.claude/CLAUDE.md` 为准。
 

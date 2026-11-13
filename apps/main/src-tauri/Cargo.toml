@@ -30,6 +30,7 @@ qzh-format = { path = "../../../packages/qzh-format" }
 qzh-profile = { path = "../../../packages/qzh-profile" }
 resource-integrity = { path = "../../../packages/resource-integrity" }
 win-sysinfo = { path = "../../../packages/win-sysinfo" }
+win-foreground = { path = "../../../packages/win-foreground" }
 win-input = { path = "../../../packages/win-input" }
 burst-engine = { path = "../../../packages/burst-engine" }
 win-driver = { path = "../../../packages/win-driver" }

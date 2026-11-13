@@ -66,14 +66,18 @@ export const groups: TourDef = {
           Fragment,
           null,
           p(
-            '平时点「新建规则组」，会自动加入按键为 1、2 的两条切换规则，都先停用着，设置好后再启用；也可以把已有规则拖进去。',
+            '平时从「我要新建」菜单选择「规则组」，会自动加入按键为 1、2 的两条切换规则，都先停用着，设置好后再启用；也可以把已有规则拖进去。',
             '这次直接建一个现成的「示例规则组」：两条切换、一条长按，都先停用着，键位会避开你已经在用的键。',
           ),
-          button('建示例组', () => host.createSampleGroup()),
+          button('建示例组', () => {
+            host.closeMenus();
+            host.createSampleGroup();
+          }),
         ),
       prepare: (host) => {
         host.setFilter('all');
-        return sampleRules(host.snapshot) ? 'skip' : undefined;
+        if (sampleRules(host.snapshot)) return 'skip';
+        host.openCreateMenu();
       },
       done: (now) => !!sampleRules(now),
       actionHint: '等你点「建示例组」…',
@@ -85,8 +89,8 @@ export const groups: TourDef = {
       body: p(
         '规则拖进拖出就是进组出组，卡片右上角 ⋯ 里也能移入组。',
         '解散时，组内规则全部停用会默认勾选「同时删除组内规则」，按钮显示「清空并解散」；只要有规则启用就默认保留，也可自行勾选或取消勾选。',
-        '组头显示名称和用途，下面显示当前运行与暂停的规则；同组只运行一条，切换替换，长按插队。',
-        '箭头朝右表示折叠，朝下表示展开；没有规则运行时居中显示「未在运行」，折叠后仍保留状态和底部留白。',
+        '组头显示名称，副标题在全局开启时显示当前运行与暂停的规则，没有规则运行则显示「未在运行」。同组只运行一条，切换替换，长按插队。',
+        '箭头朝右表示折叠，朝下表示展开；运行状态统一显示在组头副标题，折叠后仍可见，全局关闭时隐藏。组底放置区仅在拖拽时以渐变覆盖层出现，不增加分组高度。',
       ),
       prepare: (host) => {
         host.setFilter('all');

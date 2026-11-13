@@ -1,0 +1,50 @@
+div.gradient-drop-zone {
+  --drop-zone-rgb: var(--fb-color-primary-rgb);
+  --drop-zone-active-text: var(--fb-color-primary-text);
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--fb-space-3);
+  min-height: 110px;
+  box-sizing: border-box;
+  padding: 30px var(--fb-space-6) 20px;
+  color: var(--fb-text-regular);
+  font-size: var(--fb-fs-sm);
+  background: linear-gradient(to top, var(--fb-surface) 0%, var(--fb-surface) 50%, transparent);
+}
+
+div.gradient-drop-zone--sm {
+  min-height: 48px;
+  gap: var(--fb-space-2);
+  padding: 16px var(--fb-space-3) var(--fb-space-3);
+  font-size: var(--fb-fs-xs);
+}
+
+div.gradient-drop-zone--danger {
+  --drop-zone-rgb: var(--fb-color-danger-rgb);
+  --drop-zone-active-text: var(--fb-color-danger-text);
+}
+
+div.gradient-drop-zone.is-over {
+  color: var(--drop-zone-active-text);
+  background:
+    linear-gradient(to top, rgba(var(--drop-zone-rgb), 0.14), transparent),
+    linear-gradient(to top, var(--fb-surface) 0%, var(--fb-surface) 50%, transparent);
+}
+
+.gradient-drop-zone * {
+  pointer-events: none;
+}
+
+.gradient-drop-zone-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--fb-space-2);
+  color: var(--fb-text-weak);
+  font-size: var(--fb-fs-xs);
+}

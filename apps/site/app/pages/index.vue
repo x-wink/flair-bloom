@@ -280,7 +280,7 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
                       </li>
                       <li v-if="item.icon === 'palette'" class="relative ps-4 before:absolute before:start-0 before:top-2 before:size-1.5 before:rounded-full before:bg-(--ui-primary)/60">
                         当前外观是<span class="text-(--ui-fg)"
-                          >{{ currentBrand?.sect }} · {{ currentBrand?.name
+                          >{{ currentBrand?.name }} · {{ currentBrand?.sect
                           }}{{ mounted && isDark ? '（黑化版）' : '' }}</span
                         >。
                       </li>
@@ -322,7 +322,7 @@ const glowCycle = `${((highlights.length + 1) * GLOW_STAGGER).toFixed(1)}s`;
                           "
                           :style="{ background: preset.color }"
                           :title="themePresetLabel(preset)"
-                          :aria-label="`换成${preset.sect}${preset.name}`"
+                          :aria-label="`换成${themePresetLabel(preset)}`"
                           :aria-pressed="preset.color === brandColor"
                           @click="selectBrand(preset.color)"
                         />

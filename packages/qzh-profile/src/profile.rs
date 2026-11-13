@@ -65,6 +65,22 @@ pub struct ProfileMeta {
     /// 反序列化即经 [`sanitize_signature`] 净化，导入、列表、保存等所有读路径都不用各自再记得调。
     #[serde(default, deserialize_with = "deserialize_signature")]
     pub signature: String,
+    /// 绑定与署名一样独立于规则自动保存；缺失即不限制窗口。
+    #[serde(
+        default,
+        deserialize_with = "deserialize_window_binding",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub window_binding: Option<crate::window_binding::WindowBinding>,
+}
+
+fn deserialize_window_binding<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<crate::window_binding::WindowBinding>, D::Error> {
+    Ok(
+        Option::<crate::window_binding::WindowBinding>::deserialize(deserializer)?
+            .and_then(|binding| binding.sanitized()),
+    )
 }
 
 /// 署名的最大字符数（按 Unicode 标量计，不按字节）。竖版面板宽度下 16 个汉字刚好一行。

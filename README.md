@@ -91,7 +91,7 @@
 
 想做、还没做的，按这里的顺序不一定：
 
-- 窗口绑定与自动切换配置：按前台游戏切换对应配置，只在绑定窗口处于前台时生效，切走自动暂停（[路线图](docs/roadmaps/window-binding.md)）。
+- 按前台游戏自动切换对应配置，复用已实现的[窗口绑定](docs/roadmaps/archive/window-binding.md)识别与监听能力。
 - 组合键触发与连发，例如按 `Ctrl+F` 连发 `Shift+1`（[评估草案](docs/roadmaps/key-chords.md)）。
 - 外设模式支持同键切换连发和横版键鼠图（[后续入口](docs/roadmaps/archive/hid-stick.md)）。
 - 配置文件被外部改动后自动重新加载。

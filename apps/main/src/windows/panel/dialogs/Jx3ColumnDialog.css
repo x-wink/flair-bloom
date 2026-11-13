@@ -15,7 +15,7 @@
 
 .jx3-pickers {
   --jx3-control-h: 32px;
-  --jx3-control-r: 8px;
+  --jx3-control-r: var(--fb-radius-panel);
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -25,8 +25,7 @@
 
 /*
  * 门派下拉与心法分段并排，按 @xwink/ui 的控件规范对齐：同一个控件高与圆角、同一种描边与底色。
- * 分段器照它的工具组配方（tool-group.ts）：容器内边距 2px 等于项间隔，外框圆角 = 项圆角 + 2px，
- * 内外同心；选中与悬停是当前文字色的灰底，不用主色——主色留给主按钮。
+ * 容器内边距与项间隔保持 2px；选中与悬停用当前文字色的灰底，让主色留给主按钮。
  */
 .jx3-school {
   display: inline-flex;
@@ -53,7 +52,7 @@
   height: var(--jx3-control-h);
   padding: 2px;
   border: 1px solid var(--fb-border-soft);
-  border-radius: calc(var(--jx3-control-r) + 2px);
+  border-radius: var(--jx3-control-r);
   background: var(--fb-surface-soft);
 }
 
@@ -185,7 +184,7 @@
 .jx3-section__count {
   min-width: 18px;
   padding: 0 var(--fb-space-2);
-  border-radius: 9px;
+  border-radius: var(--fb-radius-panel);
   background: var(--fb-surface-soft);
   font-size: var(--fb-fs-xs);
   font-weight: normal;
@@ -295,7 +294,7 @@
   height: 24px;
   padding: 0 8px;
   border: 1px solid var(--fb-border-soft);
-  border-radius: 6px;
+  border-radius: var(--fb-radius-panel);
   background: var(--fb-surface);
   color: var(--fb-text-regular);
   font: inherit;

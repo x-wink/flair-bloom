@@ -22,7 +22,7 @@
   font-size: var(--fb-fs-xs);
   font-weight: var(--fb-fw-semibold);
   padding: var(--fb-space-1) var(--fb-space-4);
-  border-radius: var(--fb-radius-pill);
+  border-radius: var(--fb-radius-panel);
   margin-bottom: var(--fb-space-4);
 }
 

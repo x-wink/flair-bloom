@@ -16,6 +16,7 @@ export type ContextMenuItem =
   | {
       type?: 'item';
       label: string;
+      dataTour?: string;
       subtitle?: string;
       onClick?: () => void;
       danger?: boolean;
@@ -147,6 +148,7 @@ export default function ContextMenu({
                 }}
                 type="button"
                 role="menuitem"
+                data-tour={item.dataTour}
                 className={cls}
                 disabled={item.disabled}
                 aria-haspopup={hasChildren ? 'menu' : undefined}
