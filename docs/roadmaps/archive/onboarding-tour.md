@@ -135,7 +135,6 @@ skills/flair-bloom/
 docs/
   roadmaps/
     onboarding-tour.md    本文件（完成后移到 archive/）
-    pet-mode.md           Status: draft，原 ROADMAP「桌宠模式设计」改写
     license.md            Status: draft，原「许可证系统」+「亲友专属功能」改写
     archive/
   ASSETS.md  TESTING.md  WINDOWS_VERIFY.md  RELEASE_ROLLBACK.md  …   不动
@@ -210,7 +209,7 @@ scripts/check-skills.ts   tours/index.ts 的 id ⇔ manual/*.md 一一对应；S
 - **D12：README 首屏保留，「玩法」改索引** — 保留头部宣发、三步上手、玩游戏必看、常见问题与风险声明；「多玩点花样」整段改为指向 `references/manual/*.md` 的索引表。理由：GitHub 首屏信息量不降，重复面只留在必须一眼看到的部分。
 - **D13：教程六组** — `getting-started` / `game-mode` / `rules` / `layouts` / `profiles` / `settings`。
 - **D14：产品页 `apps/site/app/utils/content.ts` 文案副本本轮不动** — 记入第 8 节。理由：独立 pnpm 项目与发版链，跨仓引用 Markdown 要加构建层。
-- **D15：`docs/ROADMAP.md`（981 行）降级，今后规划一律按 project-planning 标准维护** — 拆法：现状事实（架构说明 / 目录结构 / 进程模型 / 发布基础设施 / 事件通信 / 数据路径 / 参数约束 / 卸载策略 / 配置文件格式 / 许可证 / 用户协议 / 功能分层 / 技术选型 / 架构设计准则）并入 skill `references/engineering/*`，与 CLAUDE.md 同主题段落合并去重；迭代计划里未完成的 `[ ]` 项与「待定」、以及只是设想的方向，一起进 README 末尾「接下来」一节，每条一行、用户视角措辞、不分「已定」与「设想」；值得留但未批准的详细设计（桌宠模式设计、许可证系统、亲友专属功能）改写为 `docs/roadmaps/<name>.md` 并标 `Status: draft`，开工时转 active；已完成的 `[x]` 项与「当前阶段」叙述删除（git 历史与 CHANGELOG 已记录）；不建 `docs/TODO.md` / `docs/IDEAS.md`。每个改动的规划落 `docs/roadmaps/<change>.md`（Status / 决策 / 问题清单 / 任务卡 / 工期表），完成后归档到 `docs/roadmaps/archive/`。理由：一份 981 行的战略文档既装现状又装计划又装设想，三类内容更新节奏不同，混在一起既不是事实源也不可执行；「只描述现状」的文档约定要求已完成项不再叙述；计划列表放 README 是开源产品惯例，但设计细节不属于面向玩家的说明书，故用 draft 路线图承接。
+- **D15：`docs/ROADMAP.md`（981 行）降级，今后规划一律按 project-planning 标准维护** — 拆法：现状事实（架构说明 / 目录结构 / 进程模型 / 发布基础设施 / 事件通信 / 数据路径 / 参数约束 / 卸载策略 / 配置文件格式 / 许可证 / 用户协议 / 功能分层 / 技术选型 / 架构设计准则）并入 skill `references/engineering/*`，与 CLAUDE.md 同主题段落合并去重；迭代计划里未完成的 `[ ]` 项与「待定」、以及只是设想的方向，一起进 README 末尾「接下来」一节，每条一行、用户视角措辞、不分「已定」与「设想」；值得留但未批准的详细设计（许可证系统、亲友专属功能）改写为 `docs/roadmaps/<name>.md` 并标 `Status: draft`，开工时转 active；已完成的 `[x]` 项与「当前阶段」叙述删除（git 历史与 CHANGELOG 已记录）；不建 `docs/TODO.md` / `docs/IDEAS.md`。每个改动的规划落 `docs/roadmaps/<change>.md`（Status / 决策 / 问题清单 / 任务卡 / 工期表），完成后归档到 `docs/roadmaps/archive/`。理由：一份 981 行的战略文档既装现状又装计划又装设想，三类内容更新节奏不同，混在一起既不是事实源也不可执行；「只描述现状」的文档约定要求已完成项不再叙述；计划列表放 README 是开源产品惯例，但设计细节不属于面向玩家的说明书，故用 draft 路线图承接。
 - **D16：本任务收尾后回灌 wink-skills，`requirement-roadmap` 重构为 `project-planning`（已完成，见 T6），`invoice` 并入为按需加载的独立章节** — 三层规范：项目文档单一来源（仓内 skill）、README「接下来」计划列表、每改动一份路线图 + `draft / active / completed / archived` 生命周期与归档；吞并 `legacy-onboarding` 的「规划迭代」一步（后者只留勘察 / 协作规范 / 现状评估，规划指向新技能），同步改 wink-skills README 技能表、`invoice` / `session-orchestration` 的引用与 `~/.claude/skills` 软链，并在 `PROJECTS.md` 补 flair-bloom 台账。理由：规范已在 xwink-console 与本仓两个项目复现，够得上固化；不改 legacy-onboarding 则下一个老项目接入时会再造一份战略 ROADMAP；invoice 本就以路线图工时表为唯一数据源，并入后契约在同一技能内、不再跨技能维护。⚖️ 两处代价：规划与开票语义相距远，同一 description 承载两组触发短语可能降低任一方命中率，靠各写一句明确短语缓解；个人收款信息进入通用技能，靠章节级 🔒 标记与「只在开票时读取」隔离。
 - **D17：多会话分工** — 指挥会话 flair-bloom-02（Fable）亲自做 T1 引导引擎、T4 文档收口与 T6 回灌；执行会话 flair-bloom-d5（Opus）做 T4-a 仓库基建（软链修复、校验脚本、pre-commit）与 T2 只读预研，T1 提交后接 T2 → T3 → T5。两边同时在工作区写但路径不相交（指挥方：`apps/main/src/windows/panel/tour/`、`Overlay.tsx`、`theme.css`、`skills/`、`CLAUDE.md`、`README.md`、`docs/`；执行方：其余 `apps/main/`、`scripts/`、`.githooks/`、`package.json`、`.claude/skills/`），各自只用 pathspec 提交自己的路径。理由：T1 定接口与视觉判断点、T4 的合并去重、T6 的技能措辞都需要指挥方持有的全部上下文；T2/T3 是接口既定后的照样板实现，适合执行方；路径不相交让两边并行而不违背「后来者只读」的本意。这与 session-orchestration「指挥会话不亲自改代码」有出入，作为 T6 回灌该技能的实证：判断密集且量小的代码由指挥方做，前提是路径与执行方不相交。
 - **D18：首启教程等「应用就绪」再启动；教程进行中任何确认框弹出即暂停** — 就绪 = 配置已加载 + 协议已同意 + 启动期两条异步链（`reconcileStartupInputMode` 的管理员恢复确认、`showProfileNotice` 的净化提示）都已结束，没弹的立即算结束，不用定时猜；`ConfirmProvider` 暴露「有确认框打开」的布尔并入 `paused`。不采用「任何 Overlay 打开就暂停」：设置弹窗是教程要打开的目标，那样 settings / profiles 两组会把自己藏起来。理由：用户截图实证首启气泡压在「以管理员模式恢复游戏模式」上（I12）。 自动更新：就绪门另含 `updateNotice === null && !applyingUpdate`（`update-ready` 弹窗先于教程到达时不启动），`update-available` 与 `update-downloading` 不阻塞；「重启并更新」中断教程不处理，introShown 未置位，新版首启会再进。
@@ -286,7 +285,7 @@ scripts/check-skills.ts   tours/index.ts 的 id ⇔ manual/*.md 一一对应；S
   - 新建 `skills/flair-bloom/SKILL.md`（frontmatter `name: flair-bloom`，「按任务读取」索引 + 事实边界）；`references/manual/<六个教程 id>.md`（每篇：这组教程解决什么、步骤大纲、常见坑，与 `tour/tours/<id>.ts` 一一对应）；`references/engineering/{architecture,key-policy,profile-format,updater,release,development}.md`（正文从 CLAUDE.md「关键架构决策」「输入约束」「发版流程」「协作规范」与目录结构迁入，逐条不丢）。
   - `CLAUDE.md` 改为索引：项目一句话 + 常用命令 + 「按任务读取」表（任务 → reference）+ 本仓特有硬约束一览（发版授权、schema 护栏）。
   - `README.md` 按 D12 收口；「玩法」段改成索引表指向 `references/manual/*`。
-  - 按 D15 拆分 `docs/ROADMAP.md`：现状进 skill engineering references，未做项与设想进 README「接下来」，桌宠 / 许可证设计改写为 `docs/roadmaps/{pet-mode,license}.md`（`Status: draft`），删除原文件；CLAUDE.md 发版流程里「核对 docs/ROADMAP.md」改为核对 skill 与 README；`docs/roadmaps/` 建 `archive/`。
+  - 按 D15 拆分 `docs/ROADMAP.md`：现状进 skill engineering references，未做项与设想进 README「接下来」，许可证设计改写为 `docs/roadmaps/license.md`（`Status: draft`），删除原文件；CLAUDE.md 发版流程里「核对 docs/ROADMAP.md」改为核对 skill 与 README；`docs/roadmaps/` 建 `archive/`。
   - `scripts/check-skills.ts` + `package.json` `skills:check`：校验 `tour/tours/index.ts` 的 id 集合 == `references/manual/*.md` 文件集合；SKILL.md / CLAUDE.md / README.md 里的相对链接都存在。`.githooks/pre-commit` 在暂存 `.md` 或 `tour/` 文件时运行。
   - 按 D11 修复 `.claude/skills` 三条软链。
 - **Acceptance:** `pnpm skills:check` 绿；CLAUDE.md 不超过 80 行；`docs/ROADMAP.md` 不存在且 `git grep ROADMAP.md` 无残留引用；ROADMAP 中每个 `[ ]` 项都能在 README「接下来」找到；`git grep` 任一架构关键词（如 `coincident_toggle`、`SIM_MARKER`）在 CLAUDE.md 与 skill 里只出现在一处正文。
@@ -361,4 +360,3 @@ T1 ─> T2 ─> T3 ─> T4(manual) ─> T5 ─> T6
 - 产品页 `apps/site/app/utils/content.ts` 的文案副本接到 skill（D14）。
 - CI 增加前端门禁作业（`pnpm lint` / `format:check` / `tsc` / `skills:check`）：当前 `ci.yml` 只有 Rust，前端全靠 pre-commit；值得单独一卡。
 - 浮窗（`panel-float.html`）内的引导：浮窗是另一个 WebView，教程只在面板窗口讲「怎么去浮窗」，不进浮窗。
-- 桌宠相关教程：v0.4 桌宠落地后再加一组。

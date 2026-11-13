@@ -96,7 +96,6 @@
 - 外设模式支持同键切换连发和横版键鼠图（[后续入口](docs/roadmaps/archive/hid-stick.md)）。
 - 配置文件被外部改动后自动重新加载。
 - 官网补实拍截图和站内反馈入口。
-- 桌宠随连发和键鼠／手柄输入做动画反馈（[设计稿](docs/roadmaps/pet-mode.md)）。
 - 界面迁到 Vue 与 xwink 组件库（[路线图](docs/roadmaps/vue-migration.md)）。
 - 按键队列与录制的 Windows 四通道真机验收：实现与自动化已完成，组合键独立评估（[实施记录](docs/roadmaps/archive/output-sequences.md)）。
 - 随机抖动。
