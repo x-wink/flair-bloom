@@ -42,6 +42,7 @@ use std::{
 #[cfg(windows)]
 use tracing::error;
 use tracing::info;
+use win_input::KeyboardInputSource;
 use win_input::{clear_pending_injections, clear_relay_injections};
 #[cfg(windows)]
 use win_input::{try_consume_injection, SIM_MARKER};
@@ -129,6 +130,11 @@ pub enum EngineLifecycle {
 pub struct KeyProcessResult {
     pub accepted_physical: bool,
     pub handled: bool,
+}
+
+pub enum KeyboardReception {
+    SlotProbe,
+    Engine(KeyProcessResult),
 }
 
 /// 规则的运行 / 暂停分区。`running` 正在向调度器连发；`paused` 仍算开启（按着的长按、
@@ -453,6 +459,35 @@ impl BurstEngine {
     /// 供中继调用方决定是否 preventDefault。
     pub fn on_key_press(&self, key: KeyId) -> bool {
         self.on_key_press_event(key).handled
+    }
+
+    pub fn receive_keyboard(
+        &self,
+        key: KeyId,
+        is_up: bool,
+        source: KeyboardInputSource,
+    ) -> KeyboardReception {
+        #[cfg(windows)]
+        if win_input::observe_slot_key(key, source, is_up) {
+            return KeyboardReception::SlotProbe;
+        }
+        let injected = match source {
+            KeyboardInputSource::Native(marker) => {
+                marker == win_input::SIM_MARKER || win_input::try_consume_injection(key, is_up)
+            }
+            KeyboardInputSource::WebView(_) => win_input::try_consume_relay_injection(key, is_up),
+        };
+        let result = if injected {
+            KeyProcessResult {
+                accepted_physical: false,
+                handled: false,
+            }
+        } else if is_up {
+            self.on_key_release_event(key)
+        } else {
+            self.on_key_press_event(key)
+        };
+        KeyboardReception::Engine(result)
     }
 
     pub fn on_key_release(&self, key: KeyId) {
@@ -1119,30 +1154,16 @@ unsafe extern "system" fn keyboard_hook_proc(ncode: i32, wparam: WPARAM, lparam:
         // SAFETY: 上文 # Safety 契约保证 ncode>=0 时 lparam 是有效的
         // KBDLLHOOKSTRUCT 指针,借用 kb 不存活到回调返回之后
         let kb = &*(lparam as *const KBDLLHOOKSTRUCT);
-        // SendInput / Interception：通过 dwExtraInfo 精确过滤自身注入；
-        // DD-HID：dwExtraInfo 由驱动端置位，无法控制，转用 PENDING_INJECTIONS 队列匹配
-        let is_sim_marker = kb.dwExtraInfo == SIM_MARKER;
-        if !is_sim_marker {
-            let key = KeyId::Keyboard(kb.vkCode);
-            let is_up = matches!(wparam as u32, WM_KEYUP | WM_SYSKEYUP);
-            let is_down_or_up = matches!(
-                wparam as u32,
-                WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP
-            );
-            // 仅对 down/up 主事件调用消费，避免无关 wparam 误吃记录
-            if is_down_or_up && try_consume_injection(key, is_up) {
-                // SAFETY: WH_KEYBOARD_LL 文档允许传入 null hhk,Windows 会沿钩链向后传递
-                return CallNextHookEx(std::ptr::null_mut(), ncode, wparam, lparam);
-            }
-
-            let engine = engine_from_hook();
-            if let Some(engine) = engine {
-                match wparam as u32 {
-                    WM_KEYDOWN | WM_SYSKEYDOWN => {
-                        engine.on_key_press(key);
-                    }
-                    WM_KEYUP | WM_SYSKEYUP => engine.on_key_release(key),
-                    _ => {}
+        let message = wparam as u32;
+        if matches!(message, WM_KEYDOWN | WM_SYSKEYDOWN | WM_KEYUP | WM_SYSKEYUP) {
+            if let Some(engine) = engine_from_hook() {
+                let outcome = engine.receive_keyboard(
+                    KeyId::Keyboard(kb.vkCode),
+                    matches!(message, WM_KEYUP | WM_SYSKEYUP),
+                    KeyboardInputSource::Native(kb.dwExtraInfo),
+                );
+                if matches!(outcome, KeyboardReception::SlotProbe) {
+                    return 1;
                 }
             }
         }

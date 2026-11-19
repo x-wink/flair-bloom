@@ -183,7 +183,7 @@ AltGr 布局（德语 / 法语 / 波兰语等）把右 Alt 当 AltGr，键盘驱
 - `std::panic::set_hook` 写独立崩溃日志并弹 rfd 原生对话框（独立线程展示、进程级去重）：panic 可能发生在 LL hook 等敏感线程，原地阻塞会拖垮系统输入；正文直接展示崩溃日志完整路径，不单设「复制路径」按钮。
 - 关于 / 诊断入口可打开日志、数据、安装、驱动目录（`open_app_dir` 白名单）。日志不含硬件 ID、用户名。
 - 关于按需调用 `get_app_status` 与 `get_display_environment`，打开、刷新及复制时重采集；显示器 DPI、系统文字大小、快速启动配置、窗口物理客户区、WebView 实际 ZoomFactor / RasterizationScale 分别记录，页面视口和 DPR 由当前前端补充。控制器属性通过主线程回调读取，工作线程限时等待，错误随报告保留。系统版本按 Windows 客户端构建号纠正注册表遗留的 Windows 10 名称。
-- 统一只读脚本 `scripts/diagnose-environment.ps1` 输出 `flair-environment-*.txt`，包含显示环境、DD-HID 文件 / 服务 / PnP、安全策略与相关日志；仅写报告，不提权、不加载或修复驱动。旧脚本名转发到同一入口。应用内 `export_diagnostic_bundle` 合并前端环境、逐槽以及网吧键鼠送达、设备栈、系统事件和 WER，按本地自然日归集 UTC 轮转的应用日志，生成桌面 ZIP。游戏模式启用时验证轻量对照并使用首个 F24 按下与抬起均送达的键盘槽。驱动变更提示明确要求 Windows“重启”，快速启动配置值不能证明上次启动方式。
+- 统一只读脚本 `scripts/diagnose-environment.ps1` 输出 `flair-environment-*.txt`，包含显示环境、DD-HID 文件 / 服务 / PnP、安全策略与相关日志；仅写报告，不提权、不加载或修复驱动。旧脚本名转发到同一入口。应用内 `export_diagnostic_bundle` 合并前端环境、逐槽以及网吧键鼠送达、设备栈、系统事件和 WER，按本地自然日归集 UTC 轮转的应用日志，生成桌面 ZIP。游戏模式启用时逐槽写入 F24，选用首个写入成功、且统一键盘入口收到按下和抬起的槽。原生回送按标记匹配，WebView 中继按当前测试时段匹配。全部未验证时兜底选取最后一个枚举到的键盘槽并记录选择依据。导出时另测轻量对照并遍历全部键盘槽。驱动变更提示明确要求 Windows“重启”，快速启动配置值不能证明上次启动方式。
 
 ## 容错策略
 

@@ -103,3 +103,12 @@ fn sendinput_roundtrips_through_ll_hook_with_marker() {
     assert_eq!(got[0], (0x87, false), "首个应为 F24 按下");
     assert_eq!(got[1], (0x87, true), "次个应为 F24 抬起");
 }
+#[test]
+#[ignore = "需要交互式 Windows 桌面和可用的 Interception 驱动，会发送 F24"]
+fn verify_local_slot_delivery() {
+    let engine = std::sync::Arc::new(crate::BurstEngine::new());
+    crate::start_listener(engine.clone());
+    let result = win_input::interception::probe_keyboard_slots().expect("无法打开 Interception");
+    engine.shutdown();
+    assert!(result.selected().is_some(), "没有送达的键盘槽：{result:?}");
+}

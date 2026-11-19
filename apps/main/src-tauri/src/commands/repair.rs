@@ -587,8 +587,16 @@ fn diagnose_interception(app: &AppHandle) -> Vec<DiagnosticItem> {
             win_input::current_mode().as_str(),
             crate::commands::status::collect_configured_input_mode(app),
             health.detail,
-            win_input::interception::selected_keyboard_slot()
-                .map_or_else(|| "未启用".into(), |slot| slot.to_string()),
+            win_input::interception::keyboard_slot_status().map_or_else(
+                || "未启用".into(),
+                |(slot, verified)| {
+                    if verified {
+                        format!("{slot}（已验证送达）")
+                    } else {
+                        format!("{slot}（兜底选用，未验证送达）")
+                    }
+                }
+            ),
             slot_detail
         ),
         recommended_action: None,

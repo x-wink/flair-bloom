@@ -19,7 +19,7 @@ export const gameMode: TourDef = {
       id: 'install',
       target: 'input-mode',
       title: '首次安装',
-      body: ['首次使用需安装', '安装完成需重启'],
+      body: ['首次使用需安装', '安装完成需重启', '启用时自动选槽'],
     },
     {
       id: 'run',

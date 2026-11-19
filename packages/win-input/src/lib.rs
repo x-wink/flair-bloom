@@ -15,6 +15,15 @@ pub mod hidstick;
 pub mod interception;
 #[cfg(windows)]
 mod slot_probe;
+#[cfg(windows)]
+pub use slot_probe::observe_slot_key;
+
+#[derive(Clone, Copy, Debug)]
+pub enum KeyboardInputSource {
+    Native(usize),
+    /// 真实 DOM 按键的发生时间（Unix 毫秒）；失焦时补发的释放没有时间戳。
+    WebView(Option<u64>),
+}
 
 #[cfg(windows)]
 use ddsimple::DdSimpleBackend;
@@ -412,7 +421,7 @@ pub fn init_backend(mode: InputMode) {
                 info!("输入后端已切换为 Interception 驱动模式");
             } else {
                 current.store(MODE_SENDINPUT, std::sync::atomic::Ordering::SeqCst);
-                warn!("Interception 键盘未验证送达，降级为 SendInput 模式");
+                warn!("Interception 通道无法打开或没有键盘槽，降级为 SendInput 模式");
             }
         }
         InputMode::DdSimple => {

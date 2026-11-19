@@ -12,6 +12,7 @@ use windows_sys::Win32::UI::Input::KeyboardAndMouse::{MapVirtualKeyW, MAPVK_VK_T
 pub struct InterceptionBackend {
     ctx: InterceptionContext,
     keyboard_device: InterceptionDevice,
+    keyboard_verified: bool,
     mouse_device: Option<InterceptionDevice>,
 }
 
@@ -29,12 +30,20 @@ impl InterceptionBackend {
         }
         let slots = hardware_ids_in(ctx);
         let probe = crate::slot_probe::check(ctx, &slots, false);
-        let Some(keyboard_device) = probe.selected() else {
+        let Some((keyboard_device, keyboard_verified)) = select_keyboard(&slots, probe.selected())
+        else {
             // SAFETY: ctx 由本次 create 返回，未转交给后端。
             unsafe { interception_destroy_context(ctx) };
-            error!(?probe, "Interception 没有验证到可送达的键盘槽");
+            error!("Interception 没有可枚举的键盘槽");
             return None;
         };
+        if !keyboard_verified {
+            warn!(
+                keyboard_device,
+                ?probe,
+                "键盘槽均未验证送达，兜底选用最后一个候选槽"
+            );
+        }
         let mouse_device = first_device(&slots, 11..=20);
         if mouse_device.is_none() {
             warn!("Interception: 没有能读取硬件 ID 的鼠标设备");
@@ -46,6 +55,7 @@ impl InterceptionBackend {
         Some(Self {
             ctx,
             keyboard_device,
+            keyboard_verified,
             mouse_device,
         })
     }
@@ -71,7 +81,7 @@ impl InterceptionBackend {
             state,
             information: SIM_MARKER as c_uint,
         };
-        // SAFETY: ctx/keyboard_device 已验证；stroke 在调用期间在栈上
+        // SAFETY: ctx 有效，keyboard_device 来自该 context 的键盘槽枚举，stroke 在调用期间存活。
         unsafe {
             interception_send(
                 self.ctx,
@@ -223,10 +233,25 @@ pub fn probe_keyboard_slots() -> Option<crate::slot_probe::SlotProbe> {
     Some(result)
 }
 
+fn select_keyboard(slots: &[(i32, String)], verified: Option<i32>) -> Option<(i32, bool)> {
+    verified.map(|slot| (slot, true)).or_else(|| {
+        slots
+            .iter()
+            .rev()
+            .find(|(slot, _)| (1..=10).contains(slot))
+            .map(|(slot, _)| (*slot, false))
+    })
+}
+
 pub fn selected_keyboard_slot() -> Option<i32> {
+    keyboard_slot_status().map(|(slot, _)| slot)
+}
+
+/// 当前设备号与选中时是否验证到完整回送。
+pub fn keyboard_slot_status() -> Option<(i32, bool)> {
     crate::revive(crate::INTERCEPTION_BACKEND.get()?.lock())
         .as_ref()
-        .map(|b| b.keyboard_device)
+        .map(|b| (b.keyboard_device, b.keyboard_verified))
 }
 
 fn hardware_ids_in(ctx: InterceptionContext) -> Vec<(i32, String)> {
@@ -261,6 +286,15 @@ pub fn is_driver_installed() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn all_failed_uses_last_present_keyboard_but_never_a_mouse_or_missing_slot() {
+        let slots = [2, 4, 7, 12].map(|n| (n, "相同 ID".to_string()));
+        assert_eq!(select_keyboard(&slots, Some(4)), Some((4, true)));
+        assert_eq!(select_keyboard(&slots, None), Some((7, false)));
+        assert_eq!(select_keyboard(&slots[3..], None), None);
+        assert_eq!(select_keyboard(&[], None), None);
+    }
 
     #[test]
     fn device_selection_skips_empty_slots_and_separates_device_classes() {

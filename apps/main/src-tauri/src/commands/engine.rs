@@ -9,7 +9,7 @@ use serde::Serialize;
 use std::sync::{atomic::Ordering, Arc};
 #[allow(unused_imports)]
 use tauri::{AppHandle, Manager, State};
-use win_input::try_consume_relay_injection;
+use win_input::KeyboardInputSource;
 
 pub struct EngineState(pub Arc<BurstEngine>);
 
@@ -276,22 +276,25 @@ pub fn get_rule_states(state: State<EngineState>) -> RuleStatesDto {
 /// 注意：WebView 默认行为必须由前端在 DOM 事件内同步 preventDefault；
 /// 这里的 handled 只表示引擎是否处理了按键，不能用于事后取消 F3 等浏览器快捷键。
 #[tauri::command]
-pub fn relay_key_event(state: State<EngineState>, key: KeyId, is_up: bool) -> RelayKeyResult {
-    if try_consume_relay_injection(key, is_up) {
-        return RelayKeyResult {
-            accepted_physical: false,
-            handled: false,
-        };
-    }
-
-    let result = if is_up {
-        state.0.on_key_release_event(key)
-    } else {
-        state.0.on_key_press_event(key)
-    };
-    RelayKeyResult {
-        accepted_physical: result.accepted_physical,
-        handled: result.handled,
+pub fn relay_key_event(
+    state: State<EngineState>,
+    key: KeyId,
+    is_up: bool,
+    occurred_at: Option<u64>,
+) -> RelayKeyResult {
+    match state
+        .0
+        .receive_keyboard(key, is_up, KeyboardInputSource::WebView(occurred_at))
+    {
+        // 中继需要这个确认才能继续转发真实的抬起；探测键不会进入热键或录制。
+        burst_engine::KeyboardReception::SlotProbe => RelayKeyResult {
+            accepted_physical: true,
+            handled: true,
+        },
+        burst_engine::KeyboardReception::Engine(result) => RelayKeyResult {
+            accepted_physical: result.accepted_physical,
+            handled: result.handled,
+        },
     }
 }
 
@@ -352,7 +355,7 @@ pub fn set_input_mode(
         crate::commands::status::emit_status_changed(&app);
         if win_input::current_mode() != input_mode {
             return Err(match input_mode {
-                InputMode::Interception => "没有验证到可送达的键盘槽，已回退到轻量模式。可在诊断修复中导出逐槽送达结果。".into(),
+                InputMode::Interception => "游戏模式驱动通道无法打开或没有可选键盘槽，已回退到轻量模式。可在诊断修复中导出报告。".into(),
                 InputMode::DdSimple => "DD 驱动通道未就绪，已回退轻量模式。请退出其他使用 DD 的程序后重试；如仍失败，请正常退出本应用后重开，并在诊断修复中检查驱动残留。".into(),
                 _ => "输入通道初始化失败，已回退轻量模式；请刷新诊断并检查设备连接或重启 Windows。".into(),
             });

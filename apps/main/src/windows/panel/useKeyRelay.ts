@@ -8,6 +8,10 @@ interface RelayKeyResult {
   handled: boolean;
 }
 
+function keyboardEventTime(event: KeyboardEvent): number | undefined {
+  return event.isTrusted ? Math.floor(performance.timeOrigin + event.timeStamp) : undefined;
+}
+
 function isEditableKeyboardTarget(target: EventTarget | null): boolean {
   if (!(target instanceof Element)) return false;
   return Boolean(
@@ -23,7 +27,7 @@ function isEditableKeyboardTarget(target: EventTarget | null): boolean {
 export function useKeyRelay(): void {
   const relayedKeyDownsRef = useRef<Map<string, KeyId>>(new Map());
   const relayDownInFlightRef = useRef<Set<string>>(new Set());
-  const relayedKeyReleasedEarlyRef = useRef<Set<string>>(new Set());
+  const relayedKeyReleasedEarlyRef = useRef<Map<string, number | undefined>>(new Map());
 
   useEffect(() => {
     const releaseRelayedDowns = () => {
@@ -44,12 +48,17 @@ export function useKeyRelay(): void {
         if (!e.repeat) {
           const token = keyToken(key);
           relayDownInFlightRef.current.add(token);
-          invoke<RelayKeyResult>('relay_key_event', { key, isUp: false })
+          const occurredAt = keyboardEventTime(e);
+          invoke<RelayKeyResult>('relay_key_event', { key, isUp: false, occurredAt })
             .then((result) => {
               relayDownInFlightRef.current.delete(token);
               if (result.accepted_physical) {
-                if (relayedKeyReleasedEarlyRef.current.delete(token)) {
-                  invoke('relay_key_event', { key, isUp: true }).catch(() => {});
+                if (relayedKeyReleasedEarlyRef.current.has(token)) {
+                  const releasedAt = relayedKeyReleasedEarlyRef.current.get(token);
+                  relayedKeyReleasedEarlyRef.current.delete(token);
+                  invoke('relay_key_event', { key, isUp: true, occurredAt: releasedAt }).catch(
+                    () => {},
+                  );
                 } else {
                   relayedKeyDownsRef.current.set(token, key);
                 }
@@ -68,13 +77,14 @@ export function useKeyRelay(): void {
       if (vk !== undefined) {
         const key = keyboardKey(vk);
         const token = keyToken(key);
+        const occurredAt = keyboardEventTime(e);
         if (!relayedKeyDownsRef.current.delete(token)) {
           if (relayDownInFlightRef.current.has(token)) {
-            relayedKeyReleasedEarlyRef.current.add(token);
+            relayedKeyReleasedEarlyRef.current.set(token, occurredAt);
           }
           return;
         }
-        invoke('relay_key_event', { key, isUp: true }).catch(() => {});
+        invoke('relay_key_event', { key, isUp: true, occurredAt }).catch(() => {});
       }
     };
     const visibilityHandler = () => {

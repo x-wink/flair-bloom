@@ -499,7 +499,7 @@ function DiagnosticProgress({ step }: { step: string }) {
           event.shiftKey
         )
           event.preventDefault();
-        event.stopPropagation();
+        if (event.key !== 'F24' && event.code !== 'F24') event.stopPropagation();
       }}
     >
       <input

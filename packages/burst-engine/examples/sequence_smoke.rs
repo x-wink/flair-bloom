@@ -37,6 +37,13 @@ mod windows {
             // SAFETY: Windows 在 code>=0 时提供有效的 KBDLLHOOKSTRUCT。
             let event = unsafe { &*(lparam as *const KBDLLHOOKSTRUCT) };
             let up = matches!(wparam as u32, WM_KEYUP | WM_SYSKEYUP);
+            if win_input::observe_slot_key(
+                KeyId::Keyboard(event.vkCode),
+                win_input::KeyboardInputSource::Native(event.dwExtraInfo),
+                up,
+            ) {
+                return 1;
+            }
             if [69, 82].contains(&event.vkCode)
                 && (event.dwExtraInfo == win_input::SIM_MARKER
                     || win_input::try_consume_injection(KeyId::Keyboard(event.vkCode), up))
@@ -105,13 +112,13 @@ mod windows {
             std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("../../apps/main/src-tauri/resources"),
         );
+        let _receiver = Receiver::start();
         win_input::init_backend(mode);
         assert_eq!(
             win_input::current_mode(),
             mode,
             "目标后端不可用，不能以回退冒充通过"
         );
-        let _receiver = Receiver::start();
         let engine = BurstEngine::new();
         let steps = [(69, 100), (69, 150), (82, 200)];
         engine.set_rules(vec![BurstRule {
