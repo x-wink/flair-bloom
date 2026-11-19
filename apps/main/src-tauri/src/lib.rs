@@ -27,7 +27,7 @@ use commands::{
         needs_agreement, open_link, set_autostart, set_run_as_admin, should_auto_enable_on_start,
         show_main_panel,
     },
-    ddhid_diagnostic::export_dd_hid_diagnostic_report,
+    ddhid_diagnostic::export_diagnostic_bundle,
     display_environment::get_display_environment,
     driver::{
         install_driver, is_dd_hid_driver_installed, is_driver_installed, is_elevated,
@@ -244,7 +244,7 @@ pub fn run() {
             repair_interception_residue,
             repair_corrupted_profiles,
             repair_clean_logs,
-            export_dd_hid_diagnostic_report,
+            export_diagnostic_bundle,
             scan_import_configs,
             preview_import,
             import_external_config,

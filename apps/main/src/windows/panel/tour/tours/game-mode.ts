@@ -25,7 +25,7 @@ export const gameMode: TourDef = {
       id: 'run',
       target: 'global',
       title: '开始使用',
-      body: ['重启后再开始运行', '无效时更换输入模式'],
+      body: ['重启后再开始运行', '无输出时打开诊断修复', '导出诊断报告'],
     },
   ],
 };

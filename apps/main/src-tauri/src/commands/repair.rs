@@ -546,7 +546,15 @@ fn diagnose_interception(app: &AppHandle) -> Vec<DiagnosticItem> {
     let mut out = Vec::new();
     let health = crate::commands::status::collect_interception_health();
     let warning = health.warning;
-    let api_ok = win_input::interception::is_driver_installed();
+    let slots = win_input::interception::device_hardware_ids();
+    let api_ok = slots.is_some();
+    let slot_detail = slots
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|(id, hw)| format!("{id}: {hw}"))
+        .collect::<Vec<_>>()
+        .join("\n");
     // 仅当服务键 ImagePath 指向 Interception 的 keyboard.sys / mouse.sys 才视为残留，
     // 避免把同名第三方服务误判
     let kbd = registry::is_interception_service("keyboard", "keyboard.sys");
@@ -575,10 +583,13 @@ fn diagnose_interception(app: &AppHandle) -> Vec<DiagnosticItem> {
             ItemStatus::Missing
         },
         detail: format!(
-            "当前模式：{}；保存的模式：{}\n{}",
+            "当前模式：{}；保存的模式：{}\n{}\n当前键盘槽：{}\n{}",
             win_input::current_mode().as_str(),
             crate::commands::status::collect_configured_input_mode(app),
-            health.detail
+            health.detail,
+            win_input::interception::selected_keyboard_slot()
+                .map_or_else(|| "未启用".into(), |slot| slot.to_string()),
+            slot_detail
         ),
         recommended_action: None,
     });

@@ -219,6 +219,20 @@
   user-select: text;
 }
 
+.diagnostic-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.repair-section summary {
+  cursor: pointer;
+}
+
 .repair-item-action {
   margin-top: var(--fb-space-3);
 }

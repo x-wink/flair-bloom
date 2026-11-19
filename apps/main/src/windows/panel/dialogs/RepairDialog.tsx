@@ -1,9 +1,13 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { WINDOWS_RESTART_HINT } from '../../../constants';
+import { APP_NAME, WINDOWS_RESTART_HINT } from '../../../constants';
 import Button from '../components/Button';
+import InputTaskOverlay from '../components/InputTaskOverlay';
+import { observeDiagnosticInput, type DiagnosticNotice } from '../diagnosticInput';
 import { useConfirm } from '../components/ConfirmDialog';
 import DialogShell from './DialogShell';
+import SystemEnvironment, { type EnvironmentProps } from './SystemEnvironment';
+import { collectLiveEnvironment, type LiveEnvironment } from '../environment';
 import './RepairDialog.css';
 
 type Severity = 'info' | 'warn' | 'error';
@@ -54,7 +58,8 @@ interface DisplayIssue {
 
 type DriverStatus = 'installed' | 'pending_reboot' | 'not_installed';
 
-interface Props {
+interface Props extends EnvironmentProps {
+  onExporting: (busy: boolean) => void;
   elevated: boolean;
   autostartEnabled: boolean;
   inputMode: string;
@@ -113,6 +118,10 @@ function DriverFlag({ status }: { status: DriverStatus }) {
 }
 
 export default function RepairDialog({
+  info,
+  appearance,
+  onOpenDir,
+  onExporting,
   elevated,
   autostartEnabled,
   inputMode,
@@ -125,6 +134,8 @@ export default function RepairDialog({
   onUninstallDdHid,
 }: Props) {
   const confirm = useConfirm();
+  const [environment, setEnvironment] = useState<LiveEnvironment | null>(null);
+  const [progress, setProgress] = useState('');
   const [report, setReport] = useState<RepairReport | null>(null);
   const [scanning, setScanning] = useState(false);
   const [running, setRunning] = useState<RepairCommand | null>(null);
@@ -148,7 +159,11 @@ export default function RepairDialog({
   const scan = useCallback(async () => {
     setScanning(true);
     try {
-      const r = await invoke<RepairReport>('diagnose_environment');
+      const [r, live] = await Promise.all([
+        invoke<RepairReport>('diagnose_environment'),
+        collectLiveEnvironment(),
+      ]);
+      setEnvironment(live);
       setReport(r);
     } catch (e) {
       onToastRef.current('error', `诊断失败：${e}`);
@@ -199,15 +214,43 @@ export default function RepairDialog({
   const exportDiagnosticReport = useCallback(async () => {
     if (exportingReport) return;
     setExportingReport(true);
+    onExporting(true);
+    setProgress('正在采集系统环境');
+    const observation = observeDiagnosticInput();
     try {
-      const path = await invoke<string>('export_dd_hid_diagnostic_report');
-      onToastRef.current('success', `诊断报告已导出：${path}`);
+      const current = await collectLiveEnvironment();
+      setEnvironment(current);
+      const progress = new Channel<DiagnosticNotice>();
+      progress.onmessage = (notice) => {
+        if (typeof notice === 'string') setProgress(notice);
+        else
+          void observation
+            .report(notice)
+            .catch((e) => onToastRef.current('warn', '面板送达计数写入失败：' + e));
+      };
+      const path = await invoke<string>('export_diagnostic_bundle', {
+        environment: {
+          report_version: 3,
+          ...info,
+          ...current.status,
+          app: { name: APP_NAME, version: info.appVersion },
+          captured_at: current.captured_at,
+          appearance,
+          display: current.display,
+          frontend: current.frontend,
+          collection_errors: current.errors,
+        },
+        progress,
+      });
+      onToastRef.current('success', `诊断包已保存到桌面：${path}`);
     } catch (e) {
       onToastRef.current('error', `导出诊断报告失败：${e}`);
     } finally {
+      observation.stop();
       setExportingReport(false);
+      onExporting(false);
     }
-  }, [exportingReport]);
+  }, [exportingReport, appearance, info, onExporting]);
 
   // 手动以管理员身份重启：保留当前输入模式，新提权实例会接管。失败时才复位 loading，
   // 成功路径下本进程很快退出，无需复位。
@@ -241,6 +284,7 @@ export default function RepairDialog({
         tone="neutral"
         onClick={() => void exportDiagnosticReport()}
         loading={exportingReport}
+        disabled={scanning || running !== null || relaunching}
       >
         导出诊断报告
       </Button>
@@ -260,6 +304,7 @@ export default function RepairDialog({
       footer={footerNode}
       footerAlign="spread"
     >
+      {exportingReport && <DiagnosticProgress step={progress} />}
       <div className="repair-body">
         <section className="repair-section repair-section--status">
           <h3 className="repair-section-title">运行状态</h3>
@@ -418,8 +463,63 @@ export default function RepairDialog({
             )}
           </>
         )}
+        <details className="repair-section">
+          <summary>输入设备与键盘槽</summary>
+          <p className="repair-item-detail">
+            {report?.items.find((item) => item.id === 'interception.runtime')?.detail ??
+              '尚未取得设备信息'}
+          </p>
+        </details>
+        <details className="repair-section">
+          <summary>系统环境与目录</summary>
+          <SystemEnvironment
+            info={info}
+            appearance={appearance}
+            onOpenDir={onOpenDir}
+            environment={environment}
+          />
+        </details>
       </div>
     </DialogShell>
+  );
+}
+
+function DiagnosticProgress({ step }: { step: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  return (
+    <InputTaskOverlay
+      dialogRef={ref}
+      headingId="export-title"
+      onKeyDown={(event) => {
+        if (
+          event.code !== 'Digit1' ||
+          event.ctrlKey ||
+          event.altKey ||
+          event.metaKey ||
+          event.shiftKey
+        )
+          event.preventDefault();
+        event.stopPropagation();
+      }}
+    >
+      <input
+        data-diagnostic-input
+        data-task-focus
+        className="diagnostic-input"
+        aria-label="诊断按键接收区"
+        autoComplete="off"
+        onInput={(e) => {
+          e.currentTarget.value = '';
+        }}
+      />
+      <div className="recording-heading">
+        <h2 id="export-title">正在导出诊断包</h2>
+      </div>
+      <p className="recording-notice">请暂时不要操作电脑，等待诊断完成。</p>
+      <p className="recording-notice" role="status" aria-live="polite">
+        {step}
+      </p>
+    </InputTaskOverlay>
   );
 }
 

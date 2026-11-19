@@ -26,7 +26,7 @@ export const settings: TourDef = {
       id: 'theme',
       target: 'settings-general-theme',
       title: '选择外观',
-      body: ['这里选择主题色', '也能切换明暗模式'],
+      body: ['这里选择主题色', '也能切换明暗模式', '去诊断修复查系统环境'],
       prepare: (host) => host.openSettings('general'),
     },
   ],

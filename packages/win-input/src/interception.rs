@@ -28,10 +28,11 @@ impl InterceptionBackend {
             return None;
         }
         let slots = hardware_ids_in(ctx);
-        let Some(keyboard_device) = first_device(&slots, 1..=10) else {
+        let probe = crate::slot_probe::check(ctx, &slots, false);
+        let Some(keyboard_device) = probe.selected() else {
             // SAFETY: ctx 由本次 create 返回，未转交给后端。
             unsafe { interception_destroy_context(ctx) };
-            error!("Interception: 没有能读取硬件 ID 的键盘设备");
+            error!(?probe, "Interception 没有验证到可送达的键盘槽");
             return None;
         };
         let mouse_device = first_device(&slots, 11..=20);
@@ -198,6 +199,34 @@ pub fn device_hardware_ids() -> Option<Vec<(i32, String)>> {
     // SAFETY: ctx 由上面 create 成功返回，此后不再使用。
     unsafe { interception_destroy_context(ctx) };
     Some(out)
+}
+
+pub fn probe_keyboard_slots() -> Option<crate::slot_probe::SlotProbe> {
+    let guard = crate::revive(
+        crate::INTERCEPTION_BACKEND
+            .get_or_init(|| std::sync::Mutex::new(None))
+            .lock(),
+    );
+    if let Some(backend) = guard.as_ref() {
+        return Some(crate::slot_probe::check(
+            backend.ctx,
+            &hardware_ids_in(backend.ctx),
+            true,
+        ));
+    }
+    let ctx = unsafe { interception_create_context() };
+    if ctx.is_null() {
+        return None;
+    }
+    let result = crate::slot_probe::check(ctx, &hardware_ids_in(ctx), true);
+    unsafe { interception_destroy_context(ctx) };
+    Some(result)
+}
+
+pub fn selected_keyboard_slot() -> Option<i32> {
+    crate::revive(crate::INTERCEPTION_BACKEND.get()?.lock())
+        .as_ref()
+        .map(|b| b.keyboard_device)
 }
 
 fn hardware_ids_in(ctx: InterceptionContext) -> Vec<(i32, String)> {

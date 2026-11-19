@@ -13,6 +13,8 @@ pub mod ddsimple;
 pub mod hidstick;
 #[cfg(windows)]
 pub mod interception;
+#[cfg(windows)]
+mod slot_probe;
 
 #[cfg(windows)]
 use ddsimple::DdSimpleBackend;
@@ -270,7 +272,6 @@ impl InputMode {
 #[cfg(windows)]
 static INTERCEPTION_BACKEND: OnceLock<Mutex<Option<InterceptionBackend>>> = OnceLock::new();
 #[cfg(windows)]
-#[cfg(windows)]
 static DD_SIMPLE_BACKEND: OnceLock<Mutex<Option<DdSimpleBackend>>> = OnceLock::new();
 #[cfg(windows)]
 static HIDSTICK_BACKEND: OnceLock<Mutex<Option<HidStickBackend>>> = OnceLock::new();
@@ -411,7 +412,7 @@ pub fn init_backend(mode: InputMode) {
                 info!("输入后端已切换为 Interception 驱动模式");
             } else {
                 current.store(MODE_SENDINPUT, std::sync::atomic::Ordering::SeqCst);
-                warn!("Interception 驱动未安装，降级为 SendInput 模式");
+                warn!("Interception 键盘未验证送达，降级为 SendInput 模式");
             }
         }
         InputMode::DdSimple => {

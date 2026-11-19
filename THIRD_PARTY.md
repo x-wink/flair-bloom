@@ -1,5 +1,9 @@
 ﻿# 第三方组件声明
 
+## 诊断包
+
+- 桌面 ZIP 使用 zip 4.6（MIT），采集目录与写入中的临时文件由 tempfile 3（MIT OR Apache-2.0）管理。[zip](https://github.com/zip-rs/zip2) · [tempfile](https://github.com/Stebalien/tempfile)
+
 ## Tauri MSI 安装模板
 
 - 来源：[Tauri CLI 2.11.2 的 main.wxs](https://github.com/tauri-apps/tauri/blob/tauri-cli-v2.11.2/crates/tauri-bundler/src/bundle/windows/msi/main.wxs)，MIT OR Apache-2.0。

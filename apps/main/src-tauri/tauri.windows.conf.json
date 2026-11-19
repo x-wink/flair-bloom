@@ -5,6 +5,8 @@
       "icons/icon.ico",
       "resources/install-interception.exe",
       "resources/interception.dll",
+      "resources/input-diagnostics.exe",
+      "resources/diagnose-environment.ps1",
       "resources/dd63330.dll",
       "resources/ddhid-driver/ddc.exe",
       "resources/ddhid-driver/ddhid63340.sys",

@@ -84,7 +84,7 @@ apps/main/src-tauri/src/        # Tauri 后端（Rust）
     log.rs / profile.rs         # 日志 / 配置文件 CRUD
     repair.rs                   # diagnose_environment + repair_* 命令
     resource_integrity.rs       # 打包资源完整性
-    ddhid_diagnostic.rs         # 统一驱动与显示环境诊断报告（保留旧 IPC 名）
+    ddhid_diagnostic.rs         # 校验安装目录中的诊断工具与脚本，汇总环境、送达、系统错误和当天日志为桌面 ZIP
     display_environment.rs     # 按需采集实时 DPI / 文字大小 / 窗口 / WebView 控制器状态
     sound.rs                    # 自选提示音导入 / 读取 / 删除
     status.rs                   # get_app_status + emit_status_changed

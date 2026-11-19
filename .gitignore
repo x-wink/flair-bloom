@@ -20,6 +20,8 @@ src-tauri/target/
 
 # build.rs 从 interception-sys 的 OUT_DIR 复制过来的产物，不入库
 apps/main/src-tauri/resources/interception.dll
+apps/main/src-tauri/resources/input-diagnostics.exe
+apps/main/src-tauri/resources/diagnose-environment.ps1
 
 # Env & secrets
 .env

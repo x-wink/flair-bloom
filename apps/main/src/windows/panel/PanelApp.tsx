@@ -78,7 +78,7 @@ import { DEFAULT_INTERVAL_MS, newRule } from './ruleDefaults';
 import { createToggleFeedbackHandler, type ToggleFeedback } from './toggleFeedback';
 import { useWindowScale } from './useWindowScale';
 import { PANEL_LAYOUT_KEY as LAYOUT_KEY, type PanelLayout } from './windowScale';
-import AboutDialog, { type AboutDialogInfo } from './dialogs/AboutDialog';
+import AboutDialog from './dialogs/AboutDialog';
 import LicenseDialog from './dialogs/LicenseDialog';
 import AgreementDialog from './dialogs/AgreementDialog';
 import ImportDialog from './dialogs/ImportDialog';
@@ -425,6 +425,7 @@ export default function PanelApp() {
   const [noticeSettled, setNoticeSettled] = useState(false);
   const [startupModeSettled, setStartupModeSettled] = useState(false);
   const [showRepair, setShowRepair] = useState(false);
+  const [exportingDiagnosis, setExportingDiagnosis] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [appVersion, setAppVersion] = useState('');
   // 更新的三种状态互不重叠：available=查到但没下，ready=下好待装，notice=弹窗当前展示的内容
@@ -3523,32 +3524,9 @@ export default function PanelApp() {
 
       <Overlay open={showAbout} onClose={() => setShowAbout(false)}>
         <AboutDialog
-          appearance={{ layout, scale: windowScale, maximized }}
-          info={
-            {
-              appVersion,
-              platform: sysInfo.platform,
-              os_family: sysInfo.os_family,
-              os_version: sysInfo.os_version,
-              webview_version: sysInfo.webview_version,
-              arch: sysInfo.arch,
-              locale: sysInfo.locale,
-              install_path: sysInfo.install_path,
-              log_dir: sysInfo.log_dir,
-              app_data_dir: sysInfo.app_data_dir,
-              resources_ok: sysInfo.resources_ok,
-              missing_resources: sysInfo.missing_resources,
-              scheduler_hp_degraded: sysInfo.scheduler_hp_degraded,
-            } satisfies AboutDialogInfo
-          }
+          appVersion={appVersion}
           onClose={() => setShowAbout(false)}
           onWriteMail={() => void writeMail()}
-          onOpenDir={(kind) => {
-            invoke('open_app_dir', { kind }).catch((err) => {
-              toast.warning(`打开目录失败：${err}`);
-            });
-          }}
-          onCopied={() => toast.success('已复制环境信息')}
           onGroupCopied={() => toast.success('已复制群号，在 QQ 中搜索加群')}
           onOpenWebsite={() => openExternalLink(PRODUCT_WEBSITE)}
           onWebsiteCopied={() => toast.success('已复制官网链接')}
@@ -3556,8 +3534,20 @@ export default function PanelApp() {
         />
       </Overlay>
 
-      <Overlay open={showRepair} onClose={() => setShowRepair(false)}>
+      <Overlay
+        open={showRepair}
+        onClose={() => setShowRepair(false)}
+        closeOnBackdrop={!exportingDiagnosis}
+      >
         <RepairDialog
+          onExporting={setExportingDiagnosis}
+          info={{ ...sysInfo, appVersion }}
+          appearance={{ layout, scale: windowScale, maximized }}
+          onOpenDir={(kind) => {
+            invoke('open_app_dir', { kind }).catch((err) => {
+              toast.warning(`打开目录失败：${err}`);
+            });
+          }}
           elevated={elevated}
           autostartEnabled={sysInfo.autostart_enabled}
           inputMode={inputMode}

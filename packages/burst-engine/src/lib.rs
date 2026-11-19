@@ -197,6 +197,7 @@ pub struct BurstEngine {
     /// 故用户在切换窗口内按下的全局停止热键得以保留。由 [`BurstEngine::begin_backend_switch`] /
     /// [`BurstEngine::end_backend_switch`] 维护。
     switching_backend: AtomicBool,
+    diagnostic_input: AtomicBool,
     /// 全局开关状态被热键改变时调用（由 app 层注册，用于同步托盘与前端）。
     on_global_changed: GlobalChangedCb,
     /// 面板显隐热键触发时调用。
@@ -250,6 +251,7 @@ impl BurstEngine {
             dedicated_stop: AtomicU64::new(0),
             input_generation: AtomicU64::new(0),
             switching_backend: AtomicBool::new(false),
+            diagnostic_input: AtomicBool::new(false),
             on_global_changed: Arc::new(Mutex::new(None)),
             on_panel_toggle: Arc::new(Mutex::new(None)),
             on_toggle_changed: Arc::new(Mutex::new(None)),
@@ -286,7 +288,9 @@ impl BurstEngine {
     /// 标志置位后物理触发不再启动规则，故切换窗口内不会产生 down/up 跨后端错配。必须与
     /// [`BurstEngine::end_backend_switch`] 成对调用（中间执行 `init_backend`）。
     pub fn begin_backend_switch(&self) -> Result<(), String> {
-        self.switching_backend.store(true, Ordering::SeqCst);
+        if self.switching_backend.swap(true, Ordering::SeqCst) {
+            return Err("输入通道正在检测或切换".into());
+        }
         if !self.stop_runtime_activity(true) {
             self.switching_backend.store(false, Ordering::SeqCst);
             return Err(
@@ -294,6 +298,20 @@ impl BurstEngine {
             );
         }
         Ok(())
+    }
+
+    pub fn with_input_diagnosis<T>(&self, check: impl FnOnce() -> T) -> Result<T, String> {
+        struct Resume<'a>(&'a BurstEngine);
+        impl Drop for Resume<'_> {
+            fn drop(&mut self) {
+                self.0.diagnostic_input.store(false, Ordering::SeqCst);
+                self.0.end_backend_switch();
+            }
+        }
+        self.begin_backend_switch()?;
+        let _resume = Resume(self);
+        self.diagnostic_input.store(true, Ordering::SeqCst);
+        Ok(check())
     }
 
     /// 结束后端切换：清除「切换中」标志，恢复物理触发→规则启动。全局开关状态未被本过程改动，
@@ -442,6 +460,21 @@ impl BurstEngine {
     }
 
     pub fn on_key_press_event(&self, key: KeyId) -> KeyProcessResult {
+        if self.diagnostic_input.load(Ordering::Relaxed)
+            && matches!(
+                key,
+                KeyId::Keyboard(0x31 | 0x87)
+                    | KeyId::Mouse(
+                        qzh_profile::key_id::MouseButton::WheelUp
+                            | qzh_profile::key_id::MouseButton::WheelDown
+                    )
+            )
+        {
+            return KeyProcessResult {
+                accepted_physical: false,
+                handled: false,
+            };
+        }
         let generation = self.input_generation.load(Ordering::SeqCst);
         let is_new_physical = revive(self.physical_pressed.lock()).insert(key);
 
@@ -1638,6 +1671,28 @@ mod tests {
 
         engine.on_key_press(trigger);
         assert_eq!(engine.get_active_ids(), vec!["h".to_string()]);
+    }
+
+    #[test]
+    fn diagnostic_samples_cannot_toggle_hotkeys_or_start_another_switch() {
+        let engine = BurstEngine::new();
+        let one = KeyId::Keyboard(0x31);
+        engine.set_hotkeys(Hotkeys {
+            global_toggle: Some(one),
+            ..Default::default()
+        });
+        engine.set_global_enabled(false, false);
+        engine
+            .with_input_diagnosis(|| {
+                assert!(engine.begin_backend_switch().is_err());
+                assert!(!engine.on_key_press_event(one).accepted_physical);
+                engine.on_key_release(one);
+                assert!(!engine.global_enabled.load(Ordering::SeqCst));
+            })
+            .unwrap();
+        engine.on_key_press(one);
+        assert!(engine.global_enabled.load(Ordering::SeqCst));
+        engine.on_key_release(one);
     }
 
     #[test]

@@ -702,25 +702,28 @@ Add-EventMatches -LogName "System" -Pattern "ddhid|63340|ddc\.exe" -MaxEvents 50
 Add-EventMatches -LogName "Microsoft-Windows-CodeIntegrity/Operational" -Pattern "ddhid|63340|ddc\.exe|flair-bloom|flairbloom" -MaxEvents 500
 Add-EventMatches -LogName "Microsoft-Windows-Windows Defender/Operational" -Pattern "ddhid|63340|ddc\.exe|flair-bloom|flairbloom" -MaxEvents 500
 
-Add-Section "FlairBloom app logs"
-Add-Line ("app_log_dir: {0}" -f $appLogDir)
-if (-not (Test-Path -LiteralPath $appLogDir)) {
-    Add-Line "app_log_dir_exists: false"
-} else {
-    Add-Line "app_log_dir_exists: true"
-    Add-CommandOutput "Latest app log files" {
-        Get-ChildItem -LiteralPath $appLogDir -Force |
-            Sort-Object LastWriteTime -Descending |
-            Select-Object -First 8 Mode, LastWriteTime, Length, Name |
-            Format-Table -AutoSize
-    }
-    Add-CommandOutput "App log driver/display/error lines" {
-        $files = @(Get-ChildItem -LiteralPath $appLogDir -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 5)
-        foreach ($file in $files) {
-            "-- $($file.FullName)"
-            Select-String -LiteralPath $file.FullName -Pattern "DD-HID", "ddhid", "ddc.exe", "Interception", "就绪", "driver", "驱动", "error", "failed", "失败", "WebView", "DPI", "缩放", "window", "ScaleFactor" -SimpleMatch -ErrorAction SilentlyContinue |
-                Select-Object -Last 80 |
-                ForEach-Object { "{0}:{1}: {2}" -f $_.Path, $_.LineNumber, $_.Line }
+# 应用导出会按本地日期从轮转文件提取日志，独立运行脚本才需要附带近期摘录。
+if (-not $EvidenceOnly) {
+    Add-Section "FlairBloom app logs"
+    Add-Line ("app_log_dir: {0}" -f $appLogDir)
+    if (-not (Test-Path -LiteralPath $appLogDir)) {
+        Add-Line "app_log_dir_exists: false"
+    } else {
+        Add-Line "app_log_dir_exists: true"
+        Add-CommandOutput "Latest app log files" {
+            Get-ChildItem -LiteralPath $appLogDir -Force |
+                Sort-Object LastWriteTime -Descending |
+                Select-Object -First 8 Mode, LastWriteTime, Length, Name |
+                Format-Table -AutoSize
+        }
+        Add-CommandOutput "App log driver/display/error lines" {
+            $files = @(Get-ChildItem -LiteralPath $appLogDir -File -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 5)
+            foreach ($file in $files) {
+                "-- $($file.FullName)"
+                Select-String -LiteralPath $file.FullName -Pattern "DD-HID", "ddhid", "ddc.exe", "Interception", "就绪", "driver", "驱动", "error", "failed", "失败", "WebView", "DPI", "缩放", "window", "ScaleFactor" -SimpleMatch -ErrorAction SilentlyContinue |
+                    Select-Object -Last 80 |
+                    ForEach-Object { "{0}:{1}: {2}" -f $_.Path, $_.LineNumber, $_.Line }
+            }
         }
     }
 }
@@ -749,6 +752,22 @@ if (-not $EvidenceOnly) {
         Add-Line "hint: ddhid63340.sys exists but service key is missing. This is an inconsistent install state; reboot and clean/reinstall via PnP."
     } else {
         Add-Line "hint: DDHID is not installed at file+service level. If install fails, SetupAPI snippets and CodeIntegrity/Defender events are the key evidence."
+    }
+}
+
+Add-CommandOutput "键盘与鼠标实例、设备栈及容器" {
+    $online = @(Get-PnpDevice -PresentOnly -Class Keyboard,Mouse -ErrorAction Stop | ForEach-Object InstanceId)
+    $keys = @('DEVPKEY_Device_HardwareIds','DEVPKEY_Device_ContainerId','DEVPKEY_Device_Parent',
+        'DEVPKEY_Device_LastArrivalDate','DEVPKEY_Device_LastRemovalDate','DEVPKEY_Device_UpperFilters','DEVPKEY_Device_LowerFilters')
+    foreach ($dev in Get-PnpDevice -Class Keyboard,Mouse -ErrorAction Stop) {
+        $present = $online -contains $dev.InstanceId
+        "在线=$present；实例=$($dev.InstanceId)；状态=$($dev.Status)"
+        Get-PnpDeviceProperty -InstanceId $dev.InstanceId -KeyName $keys -ErrorAction SilentlyContinue |
+            ForEach-Object { '  {0} = {1}' -f $_.KeyName, ($_.Data -join ', ') }
+        if ($present) {
+            & "$env:SystemRoot\System32\pnputil.exe" /enum-devices /instanceid $dev.InstanceId /stack /services
+            if ($LASTEXITCODE -ne 0) { "设备栈查询退出码 $LASTEXITCODE" }
+        }
     }
 }
 

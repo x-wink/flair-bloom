@@ -307,7 +307,7 @@ pub fn get_input_mode() -> String {
     }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_input_mode(
     app: AppHandle,
     state: State<EngineState>,
@@ -352,6 +352,7 @@ pub fn set_input_mode(
         crate::commands::status::emit_status_changed(&app);
         if win_input::current_mode() != input_mode {
             return Err(match input_mode {
+                InputMode::Interception => "没有验证到可送达的键盘槽，已回退到轻量模式。可在诊断修复中导出逐槽送达结果。".into(),
                 InputMode::DdSimple => "DD 驱动通道未就绪，已回退轻量模式。请退出其他使用 DD 的程序后重试；如仍失败，请正常退出本应用后重开，并在诊断修复中检查驱动残留。".into(),
                 _ => "输入通道初始化失败，已回退轻量模式；请刷新诊断并检查设备连接或重启 Windows。".into(),
             });
